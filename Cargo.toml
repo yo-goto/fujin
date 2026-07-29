@@ -1,0 +1,13 @@
+[package]
+name = "agent-spaces"
+version = "0.1.0"
+edition = "2021"
+description = "Zellij plugin for herding multiple agent workspaces (panes/tabs/sessions)"
+
+[dependencies]
+zellij-tile = "0.44.3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

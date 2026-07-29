@@ -1,0 +1,5 @@
+layout {
+    pane {
+        plugin location="file:target/wasm32-wasip1/debug/agent-spaces.wasm"
+    }
+}
