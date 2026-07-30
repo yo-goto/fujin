@@ -1,0 +1,23 @@
+// agent-spaces 用グローバルキーバインド（config.kdl の keybinds ブロックに追記する）
+//
+// MessagePlugin は URL 指定なので全インスタンスに届く（決定6）。
+// MessagePluginId は使わない — タブ数ぶんのインスタンスが同じキーを
+// 奪い合って衝突するため。
+//
+// 例: shared_except "locked" ブロック内に以下を追加
+//
+// bind "Alt Up" {
+//     MessagePlugin "file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm" {
+//         name "agent_spaces_up"
+//     }
+// }
+// bind "Alt Down" {
+//     MessagePlugin "file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm" {
+//         name "agent_spaces_down"
+//     }
+// }
+// bind "Alt Enter" {
+//     MessagePlugin "file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm" {
+//         name "agent_spaces_go"
+//     }
+// }

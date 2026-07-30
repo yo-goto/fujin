@@ -1,5 +1,10 @@
+// 開発用レイアウト: サイドバー + 作業ペイン
+// zellij -l zellij.kdl で起動（このディレクトリから）
 layout {
-    pane {
-        plugin location="file:target/wasm32-wasip1/debug/agent-spaces.wasm"
+    pane split_direction="vertical" {
+        pane size=32 borderless=true {
+            plugin location="file:target/wasm32-wasip1/debug/agent-spaces.wasm"
+        }
+        pane
     }
 }
