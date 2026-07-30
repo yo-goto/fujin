@@ -17,6 +17,14 @@ const STATUS_PIPE: &str = "agent_spaces_status";
 const NAV_UP_PIPE: &str = "agent_spaces_up";
 const NAV_DOWN_PIPE: &str = "agent_spaces_down";
 const NAV_GO_PIPE: &str = "agent_spaces_go";
+// ワイヤプロトコル: navモードへの入場（zellijのモードキーと同じ使い勝手）
+const NAV_MODE_PIPE: &str = "agent_spaces_mode";
+// ワイヤプロトコル: インスタンス間の状態同期（決定13）
+const SYNC_STATE_PIPE: &str = "agent_spaces_sync_state";
+// ワイヤプロトコル: 既読クリアの他インスタンスへの伝播（決定13）
+const READ_CLEAR_PIPE: &str = "agent_spaces_read";
+// ワイヤプロトコル: 選択位置の他インスタンスへの伝播（決定13）
+const SELECTION_PIPE: &str = "agent_spaces_selection";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum AgentState {
@@ -36,6 +44,27 @@ impl AgentState {
             AgentState::Blocked => "◆",
             AgentState::Done => "●",
             AgentState::Error => "✕",
+        }
+    }
+
+    // インスタンス間同期のワイヤ表現（決定13）
+    fn as_str(&self) -> &'static str {
+        match self {
+            AgentState::Idle => "idle",
+            AgentState::Working => "working",
+            AgentState::Blocked => "blocked",
+            AgentState::Done => "done",
+            AgentState::Error => "error",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s {
+            "working" => AgentState::Working,
+            "blocked" => AgentState::Blocked,
+            "done" => AgentState::Done,
+            "error" => AgentState::Error,
+            _ => AgentState::Idle,
         }
     }
 
@@ -115,6 +144,12 @@ struct State {
     show_cwd: bool,
     // ペインID -> cwd（フックのペイロード由来）
     pane_cwds: BTreeMap<u32, String>,
+    // navモード中か。全キーを横取りしているインスタンスだけが true になる
+    nav_mode: bool,
+    // 自分のwasm URL。PaneManifest 経由で実行時に判明する（同期の宛先に使う）
+    own_plugin_url: Option<String>,
+    // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
+    known_siblings: std::collections::BTreeSet<u32>,
 }
 
 register_plugin!(State);
@@ -126,10 +161,19 @@ impl ZellijPlugin for State {
             .map(|v| v == "true")
             .unwrap_or(false);
         self.own_plugin_id = Some(get_plugin_ids().plugin_id);
+        // selectable はペイン側の属性で、リロードしても前回の false が残る。
+        // 権限を追加した新版をリロードすると「承認プロンプトは出ているのに
+        // そのペインにフォーカスできない」デッドロックになるため、毎回戻す。
+        // 承認済みなら PermissionRequestResult が即返り、すぐ false に戻る。
+        set_selectable(true);
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::ReadCliPipes,
+            // navモードでキーを横取りするため（決定12）
+            PermissionType::InterceptInput,
+            // 他インスタンスとの状態同期のため（決定13）
+            PermissionType::MessageAndLaunchOtherPlugins,
         ]);
         subscribe(&[
             EventType::TabUpdate,
@@ -137,10 +181,13 @@ impl ZellijPlugin for State {
             EventType::ModeUpdate,
             EventType::PermissionRequestResult,
             EventType::Visible,
+            EventType::InterceptedKeyPress,
+            // プラグイン終了・リロード時に横取りを解除する保険
+            EventType::BeforeClose,
         ]);
         // 注意: set_selectable(false) はここでは呼ばない。
         // 呼ぶと権限承認プロンプトにフォーカスできず承認不能になる。
-        // PermissionRequestResult 受信後に呼ぶ。
+        // PermissionRequestResult 受信後に呼ぶ（上の set_selectable(true) と対）。
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -150,6 +197,11 @@ impl ZellijPlugin for State {
                 if self.permissions_granted {
                     // フォーカス巡回にサイドバーが混ざらないようにする（決定6）
                     set_selectable(false);
+                    // 既定のペイン名はwasmのフルURL（`(.) - file:/…/agent-spaces.wasm`）
+                    // で長すぎるので、プラグイン名だけにする
+                    if let Some(id) = self.own_plugin_id {
+                        rename_plugin_pane(id, "agent-spaces");
+                    }
                 }
                 true
             }
@@ -172,7 +224,25 @@ impl ZellijPlugin for State {
                 self.panes = Some(manifest);
                 self.rebuild_selectable();
                 self.prune_stale_agents();
+                // 自分のURLは PaneManifest で初めて分かる。新しい兄弟
+                // インスタンスを見つけたら状態を配る（決定13）
+                self.learn_own_plugin_url();
+                self.push_state_to_new_siblings();
                 true
+            }
+            Event::BeforeClose => {
+                // 横取りしたままプラグインが消えるとキー入力が戻らなくなる
+                if self.nav_mode {
+                    self.exit_nav_mode();
+                }
+                false
+            }
+            Event::InterceptedKeyPress(key) => {
+                // 横取りを要求したインスタンスにしか届かないが、念のため
+                if !self.nav_mode {
+                    return false;
+                }
+                self.handle_nav_key(key)
             }
             _ => false,
         }
@@ -181,7 +251,14 @@ impl ZellijPlugin for State {
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         let is_ours = matches!(
             pipe_message.name.as_str(),
-            STATUS_PIPE | NAV_UP_PIPE | NAV_DOWN_PIPE | NAV_GO_PIPE
+            STATUS_PIPE
+                | NAV_UP_PIPE
+                | NAV_DOWN_PIPE
+                | NAV_GO_PIPE
+                | NAV_MODE_PIPE
+                | SYNC_STATE_PIPE
+                | READ_CLEAR_PIPE
+                | SELECTION_PIPE
         );
         // CLIパイプは即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
         // フックのレイテンシに直結する（実測でroute.rsのタイムアウトを確認済み）
@@ -214,9 +291,65 @@ impl ZellijPlugin for State {
             NAV_GO_PIPE => {
                 // 副作用はアクティブタブのインスタンスのみ実行（多重発行の防止）
                 if self.is_active_instance() {
-                    if let Some((_, pane_id, _)) = self.selectable.get(self.selected) {
-                        focus_pane_with_id(PaneId::Terminal(*pane_id), false, false);
+                    self.focus_selected();
+                }
+                false
+            }
+            SELECTION_PIPE => {
+                // 選択はインデックスではなく**ペインIDで**運ぶ。
+                // インデックスは各インスタンスの selectable に依存し、
+                // 一覧が古いインスタンスでは別の行を指してしまうため。
+                let target: Option<u32> = pipe_message
+                    .payload
+                    .as_deref()
+                    .and_then(|p| p.trim().parse().ok());
+                if let Some(target) = target {
+                    if let Some(index) =
+                        self.selectable.iter().position(|(_, id, _)| *id == target)
+                    {
+                        let changed = self.selected != index;
+                        self.selected = index;
+                        return changed;
                     }
+                }
+                false
+            }
+            READ_CLEAR_PIPE => {
+                // 可視インスタンスが観測した既読クリアを取り込む
+                let mut changed = false;
+                if let Some(raw) = pipe_message.payload.as_deref() {
+                    for pane_id in raw.split(',').filter_map(|s| s.trim().parse::<u32>().ok()) {
+                        if let Some(agent) = self.agents.get_mut(&pane_id) {
+                            if matches!(
+                                agent.state,
+                                AgentState::Done | AgentState::Blocked | AgentState::Error
+                            ) {
+                                agent.state = AgentState::Idle;
+                                agent.detail = None;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+                changed
+            }
+            SYNC_STATE_PIPE => {
+                // 空のときだけ取り込む。既に自前の状態を持っているなら、
+                // 古いダンプで上書きしてしまわないよう無視する
+                if self.agents.is_empty() {
+                    if let Some(raw) = pipe_message.payload.as_deref() {
+                        self.apply_state_dump(raw);
+                        return true;
+                    }
+                }
+                false
+            }
+            NAV_MODE_PIPE => {
+                // キーの横取りは1インスタンスだけが行う。全インスタンスが
+                // intercept_key_presses() を呼ぶと誰が受け取るか不定になるため。
+                if self.is_active_instance() && !self.nav_mode {
+                    self.enter_nav_mode();
+                    return true;
                 }
                 false
             }
@@ -236,8 +369,18 @@ impl ZellijPlugin for State {
             return;
         }
         let mut y = 0;
-        // ヘッダ: セッション名
-        if let Some(name) = &self.session_name {
+        // ヘッダ: セッション名（navモード中はモード名に置き換える）
+        if self.nav_mode {
+            let header = truncate("-- NAV --  j/k ↵ esc", cols);
+            print_text_with_coordinates(
+                Text::new(&header).color_range(3, ..header.chars().count()),
+                0,
+                y,
+                None,
+                None,
+            );
+            y += 1;
+        } else if let Some(name) = &self.session_name {
             let header = truncate(name, cols);
             print_text_with_coordinates(
                 Text::new(&header).color_range(2, ..header.chars().count()),
@@ -274,9 +417,14 @@ impl ZellijPlugin for State {
                 if y >= rows {
                     break;
                 }
+                let is_selected = flat_index == self.selected;
                 let agent = self.agents.get(pane_id);
                 let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
-                let mut label = format!("  {} {}", icon, pane_title);
+                // 選択行は左端にバーを立てる。テーマの選択色が沈む配色でも
+                // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
+                // アイコンの color_range 2..3 をずらさない）
+                let prefix = if is_selected { "▌ " } else { "  " };
+                let mut label = format!("{}{} {}", prefix, icon, pane_title);
                 if let Some(a) = agent {
                     if a.subagents > 0 {
                         label.push_str(&format!(" +{}", a.subagents));
@@ -290,14 +438,21 @@ impl ZellijPlugin for State {
                         label.push_str(&format!("  {}", cwd));
                     }
                 }
-                let label = truncate(&label, cols);
+                let mut label = truncate(&label, cols);
+                if is_selected {
+                    // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
+                    // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない
+                    let pad = cols.saturating_sub(label.chars().count());
+                    label.push_str(&" ".repeat(pad));
+                }
                 let mut text = Text::new(&label);
                 if let Some(a) = agent {
                     // アイコン部分（先頭2..3文字目）に状態色
                     text = text.color_range(a.state.color(), 2..3);
                 }
-                if flat_index == self.selected {
-                    text = text.selected();
+                if is_selected {
+                    // opaque を付けないと背景が透けて選択色が沈む
+                    text = text.selected().opaque().color_range(2, 0..1);
                 }
                 print_text_with_coordinates(text, 0, y, None, None);
                 y += 1;
@@ -328,6 +483,224 @@ impl State {
             .get(&active_tab.position)
             .map(|panes| panes.iter().any(|p| p.is_plugin && p.id == own_id))
             .unwrap_or(false)
+    }
+
+    // --- インスタンス間の状態同期（決定13） ---
+    //
+    // pipe は起動中の全インスタンスに届くが、**後から起動したインスタンスは
+    // それ以前のイベントを見ていない**。タブを後から作ると、そのサイドバーだけ
+    // アイコンが出ない/古いという食い違いになる。
+    // そこで**既存インスタンスが新入りを見つけて押し付ける**。
+    //
+    // 逆（新入りが要求を投げる）にしてはいけない。宛先をURLで指定する
+    // `MessageToPlugin::with_plugin_url` は、起動中のインスタンスに配送されず
+    // **新しいプラグインを起動しようとする**（cwd/config まで一致を要求する
+    // ため、レイアウト由来のインスタンスにマッチしない）。実測でも
+    // `wasm_bridge.rs:1897 Failed to load plugin` が出て、実セッションなら
+    // タブを作るたびに迷子のサイドバーペインが増えるところだった。
+    // 宛先をプラグインIDで直接指定すれば起動は起こらない。
+
+    // 自分のwasm URLを PaneManifest から知る（get_plugin_ids() には無い）
+    fn learn_own_plugin_url(&mut self) {
+        if self.own_plugin_url.is_some() {
+            return;
+        }
+        let (Some(own_id), Some(manifest)) = (self.own_plugin_id, &self.panes) else {
+            return;
+        };
+        self.own_plugin_url = manifest
+            .panes
+            .values()
+            .flatten()
+            .find(|p| p.is_plugin && p.id == own_id)
+            .and_then(|p| p.plugin_url.clone());
+    }
+
+    // 新しく現れた兄弟インスタンス（同じURLのプラグインペイン）に状態を配る。
+    // 状態を持っているインスタンスは全員が送るが、受け手は空のときしか
+    // 取り込まないので重複しても害はない。リーダー選出は不要。
+    fn push_state_to_new_siblings(&mut self) {
+        let (Some(own_id), Some(own_url), Some(manifest)) = (
+            self.own_plugin_id,
+            self.own_plugin_url.as_deref(),
+            self.panes.as_ref(),
+        ) else {
+            return;
+        };
+        let siblings: Vec<u32> = manifest
+            .panes
+            .values()
+            .flatten()
+            .filter(|p| {
+                p.is_plugin && p.id != own_id && p.plugin_url.as_deref() == Some(own_url)
+            })
+            .map(|p| p.id)
+            .collect();
+        let newcomers: Vec<u32> = siblings
+            .iter()
+            .copied()
+            .filter(|id| !self.known_siblings.contains(id))
+            .collect();
+        self.known_siblings = siblings.into_iter().collect();
+        if self.agents.is_empty() {
+            return;
+        }
+        let dump = self.state_dump();
+        for id in newcomers {
+            pipe_message_to_plugin(
+                MessageToPlugin::new(SYNC_STATE_PIPE)
+                    .with_destination_plugin_id(id)
+                    .with_payload(dump.clone()),
+            );
+        }
+    }
+
+    // 1ペイン1行のTSV。区切りにタブと改行を使うのは、パス（cwd）にも
+    // エージェント名にも現れないため
+    fn state_dump(&self) -> String {
+        let mut out = String::new();
+        for (pane_id, info) in &self.agents {
+            let cwd = self.pane_cwds.get(pane_id).map(|s| s.as_str()).unwrap_or("");
+            out.push_str(&format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\n",
+                pane_id,
+                info.state.as_str(),
+                info.subagents,
+                info.open_tasks,
+                info.agent,
+                cwd
+            ));
+        }
+        out
+    }
+
+    fn apply_state_dump(&mut self, raw: &str) {
+        for line in raw.lines() {
+            let mut fields = line.split('\t');
+            let (Some(pane_id), Some(state), Some(subagents), Some(open_tasks), Some(agent)) = (
+                fields.next(),
+                fields.next(),
+                fields.next(),
+                fields.next(),
+                fields.next(),
+            ) else {
+                continue;
+            };
+            let Ok(pane_id) = pane_id.parse::<u32>() else {
+                continue;
+            };
+            self.agents.insert(
+                pane_id,
+                AgentInfo {
+                    state: AgentState::from_str(state),
+                    agent: agent.to_string(),
+                    subagents: subagents.parse().unwrap_or(0),
+                    open_tasks: open_tasks.parse().unwrap_or(0),
+                    detail: None,
+                },
+            );
+            if let Some(cwd) = fields.next().filter(|c| !c.is_empty()) {
+                self.pane_cwds.insert(pane_id, cwd.to_string());
+            }
+        }
+        // 既に閉じたペインの状態が混ざらないようにする
+        self.prune_stale_agents();
+        // 起動ごとに高々1回。食い違いを追うときの手がかりになるので残す
+        eprintln!("agent-spaces: synced {} agents from peer", self.agents.len());
+    }
+
+    // --- navモード（決定12） ---
+    //
+    // zellij のモード（Ctrl+p でpaneモード…）と同じ操作感を、ビルトインモードを
+    // 潰さずに実現する。config.kdl には入場キー1つだけを書き、モード内のキーは
+    // プラグイン側で解釈する。
+
+    fn enter_nav_mode(&mut self) {
+        self.nav_mode = true;
+        // 選択位置は入場のたびに実フォーカスから引き直す。
+        // これによりインスタンス間で選択がずれていても自己修復する。
+        self.sync_selection_to_focus();
+        self.broadcast_selection();
+        intercept_key_presses();
+    }
+
+    fn exit_nav_mode(&mut self) {
+        self.nav_mode = false;
+        clear_key_presses_intercepts();
+    }
+
+    // モード中のキー解釈。戻り値は再描画するか。
+    fn handle_nav_key(&mut self, key: KeyWithModifier) -> bool {
+        // Shift は素通し（`G` が Shift付きで来る端末があるため）。
+        // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す。
+        if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
+            self.exit_nav_mode();
+            return true;
+        }
+        match key.bare_key {
+            BareKey::Down | BareKey::Tab | BareKey::Char('j') => {
+                if self.selected + 1 < self.selectable.len() {
+                    self.selected += 1;
+                }
+            }
+            BareKey::Up | BareKey::Char('k') => {
+                self.selected = self.selected.saturating_sub(1);
+            }
+            BareKey::Char('g') => self.selected = 0,
+            BareKey::Char('G') => {
+                self.selected = self.selectable.len().saturating_sub(1);
+            }
+            // 1-9 で n 番目へ直行
+            BareKey::Char(c @ '1'..='9') => {
+                let index = c as usize - '1' as usize;
+                if index < self.selectable.len() {
+                    self.selected = index;
+                    self.exit_nav_mode();
+                    self.focus_selected();
+                }
+            }
+            BareKey::Enter | BareKey::Char(' ') | BareKey::Char('l') => {
+                // フォーカス移動でタブが変わりうるので、先に横取りを解除する
+                self.exit_nav_mode();
+                self.focus_selected();
+            }
+            // Esc / q は明示的な離脱。それ以外の未定義キーでも抜ける:
+            // 万一プラグインが応答不能になってもキー入力が取り残されないため。
+            _ => self.exit_nav_mode(),
+        }
+        // 横取り中の移動は自分にしか起きないので、都度配る
+        self.broadcast_selection();
+        true
+    }
+
+    fn focus_selected(&self) {
+        if let Some((_, pane_id, _)) = self.selectable.get(self.selected) {
+            focus_pane_with_id(PaneId::Terminal(*pane_id), false, false);
+        }
+    }
+
+    // 選択位置を「いまフォーカスされているペイン」に合わせる
+    fn sync_selection_to_focus(&mut self) {
+        let Some(manifest) = &self.panes else {
+            return;
+        };
+        let Some(active_tab) = self.tabs.iter().find(|t| t.active) else {
+            return;
+        };
+        let Some(panes) = manifest.panes.get(&active_tab.position) else {
+            return;
+        };
+        let focused = panes.iter().find(|p| {
+            !p.is_plugin
+                && !p.is_suppressed
+                && p.is_focused
+                && p.is_floating == active_tab.are_floating_panes_visible
+        });
+        if let Some(pane) = focused {
+            if let Some(index) = self.selectable.iter().position(|(_, id, _)| *id == pane.id) {
+                self.selected = index;
+            }
+        }
     }
 
     // 選択対象（ターミナルペイン）のフラットリストをタブ順で再構築
@@ -399,6 +772,7 @@ impl State {
         let Some(panes) = manifest.panes.get(&active_tab.position) else {
             return;
         };
+        let mut cleared = Vec::new();
         for pane in panes {
             if pane.is_plugin || pane.is_suppressed || !pane.is_focused {
                 continue;
@@ -414,8 +788,47 @@ impl State {
                 ) {
                     agent.state = AgentState::Idle;
                     agent.detail = None;
+                    cleared.push(pane.id);
                 }
             }
+        }
+        // バックグラウンドのタブのインスタンスには PaneUpdate が届かない
+        // （実測: サイドバー3つのセッションでクリアを実行したのは1つだけ）。
+        // 状態はイベント駆動なので、見逃した変化は永久にずれたままになる。
+        // 観測できた可視インスタンスから他へ伝える。
+        self.broadcast_read_clears(&cleared);
+    }
+
+    // 選択位置を兄弟へ配る。navモード中の移動は横取り中の1インスタンスにしか
+    // 起きないため、これがないとタブごとに違う行が光る。
+    fn broadcast_selection(&self) {
+        let Some((_, pane_id, _)) = self.selectable.get(self.selected) else {
+            return;
+        };
+        for sibling in &self.known_siblings {
+            pipe_message_to_plugin(
+                MessageToPlugin::new(SELECTION_PIPE)
+                    .with_destination_plugin_id(*sibling)
+                    .with_payload(pane_id.to_string()),
+            );
+        }
+    }
+
+    fn broadcast_read_clears(&self, pane_ids: &[u32]) {
+        if pane_ids.is_empty() {
+            return;
+        }
+        let payload = pane_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        for sibling in &self.known_siblings {
+            pipe_message_to_plugin(
+                MessageToPlugin::new(READ_CLEAR_PIPE)
+                    .with_destination_plugin_id(*sibling)
+                    .with_payload(payload.clone()),
+            );
         }
     }
 

@@ -4,20 +4,47 @@
 // MessagePluginId は使わない — タブ数ぶんのインスタンスが同じキーを
 // 奪い合って衝突するため。
 //
-// 例: shared_except "locked" ブロック内に以下を追加
+// 以下の <URL> は自分の環境のwasmパスに置き換える。開発中は debug ビルド:
+//   file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm
 //
-// bind "Alt Up" {
-//     MessagePlugin "file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm" {
-//         name "agent_spaces_up"
+// ============================================================
+// 推奨: navモード方式（決定12）
+// ============================================================
+// zellij本体の Ctrl+p → pane モードと同じ操作感。config.kdl に書くのは
+// 「入場キー1つ」だけで、モード内のキー（j/k/Enter/Esc…）はプラグインが
+// 自前で解釈する。ビルトインモードを1つ潰す必要がない。
+//
+// モード内のキー（プラグイン側に実装、config.kdl には書かない）:
+//   j / ↓ / Tab   次のペイン
+//   k / ↑         前のペイン
+//   g / G         先頭 / 末尾
+//   1-9           n番目へ直行してモードを抜ける
+//   Enter / l / Space  選択中のペインへジャンプしてモードを抜ける
+//   Esc / q       モードを抜ける
+//   （その他のキーも抜ける — キー入力が取り残されないための安全弁）
+//
+// keybinds {
+//     shared_except "locked" {
+//         bind "Ctrl y" {
+//             MessagePlugin "<URL>" {
+//                 name "agent_spaces_mode"
+//             }
+//         }
 //     }
 // }
-// bind "Alt Down" {
-//     MessagePlugin "file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm" {
-//         name "agent_spaces_down"
-//     }
-// }
-// bind "Alt Enter" {
-//     MessagePlugin "file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm" {
-//         name "agent_spaces_go"
+//
+// Ctrl+y は zellij のデフォルトと衝突しない空きキー。使用中なら Ctrl+e など任意に。
+// （既定で埋まっているのは p/t/n/h/s/o/q/g）
+//
+// ============================================================
+// 代替: モードなしの直接キー
+// ============================================================
+// モードに入らず1打鍵で動かしたい場合。navモードと併用してもよい。
+//
+// keybinds {
+//     shared_except "locked" {
+//         bind "Alt Up"    { MessagePlugin "<URL>" { name "agent_spaces_up"; }; }
+//         bind "Alt Down"  { MessagePlugin "<URL>" { name "agent_spaces_down"; }; }
+//         bind "Alt Enter" { MessagePlugin "<URL>" { name "agent_spaces_go"; }; }
 //     }
 // }

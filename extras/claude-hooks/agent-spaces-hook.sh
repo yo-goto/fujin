@@ -12,13 +12,17 @@
 # zellij ペイン外（例: 素のターミナル）では何もしない
 [ -n "$ZELLIJ_PANE_ID" ] || exit 0
 
+# 注意: `key: (.foo // empty)` と書いてはいけない。jq のオブジェクト構築で
+# 値が empty になると、そのキーどころか**オブジェクト全体が消える**。
+# `.message` を持たないイベント（Notification 以外すべて）で payload が空になり、
+# 状態がまったく届かなくなる。null を入れておいて後段で落とす。
 payload=$(jq -c '{
   pane_id: (env.ZELLIJ_PANE_ID | tonumber),
   agent: "claude",
   event: .hook_event_name,
-  cwd: (.cwd // empty),
-  detail: (.message // empty)
-}' 2>/dev/null) || exit 0
+  cwd: .cwd,
+  detail: .message
+} | with_entries(select(.value != null))' 2>/dev/null) || exit 0
 
 [ -n "$payload" ] || exit 0
 
