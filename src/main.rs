@@ -617,9 +617,11 @@ impl State {
 
     fn enter_nav_mode(&mut self) {
         self.nav_mode = true;
-        // 選択位置は入場のたびに実フォーカスから引き直す。
-        // これによりインスタンス間で選択がずれていても自己修復する。
-        self.sync_selection_to_focus();
+        // 選択位置は前回のまま引き継ぐ。以前は入場のたびに実フォーカスから
+        // 引き直していたが、それはインスタンス間で選択がずれることへの
+        // 対症療法で、決定13で選択位置そのものを配るようにしたので不要になった。
+        // 引き直しは「作業中のペイン＝多くは自分がいる行」へ毎回選択を戻すため、
+        // 前回どこまで見ていたかが失われる。
         self.broadcast_selection();
         intercept_key_presses();
     }
@@ -676,30 +678,6 @@ impl State {
     fn focus_selected(&self) {
         if let Some((_, pane_id, _)) = self.selectable.get(self.selected) {
             focus_pane_with_id(PaneId::Terminal(*pane_id), false, false);
-        }
-    }
-
-    // 選択位置を「いまフォーカスされているペイン」に合わせる
-    fn sync_selection_to_focus(&mut self) {
-        let Some(manifest) = &self.panes else {
-            return;
-        };
-        let Some(active_tab) = self.tabs.iter().find(|t| t.active) else {
-            return;
-        };
-        let Some(panes) = manifest.panes.get(&active_tab.position) else {
-            return;
-        };
-        let focused = panes.iter().find(|p| {
-            !p.is_plugin
-                && !p.is_suppressed
-                && p.is_focused
-                && p.is_floating == active_tab.are_floating_panes_visible
-        });
-        if let Some(pane) = focused {
-            if let Some(index) = self.selectable.iter().position(|(_, id, _)| *id == pane.id) {
-                self.selected = index;
-            }
         }
     }
 
