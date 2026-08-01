@@ -3,10 +3,14 @@
 // タブ > ペインの縦並び表示、エージェント状態の可視化、グローバルキーでのジャンプ。
 // 設計決定は docs/04-design-decisions.md を参照。
 //
-// アーキテクチャ上の前提:
+// アーキテクチャ上の前提（すべて実測で確認済み。docs/02-api-reference.md 参照）:
 // - タブ数ぶんのインスタンスが同時稼働する（zellijの構造上回避不能）
-// - pipe は全インスタンスに配送されるため、選択状態は自然に同期する
-// - 副作用（フォーカス移動・OS問い合わせ）は可視インスタンスのみが実行する
+// - pipe は全インスタンスに配送される
+// - **PaneUpdate / TabUpdate は可視インスタンスにしか届かない。**
+//   バックグラウンドのインスタンスはタブ・ペイン一覧が古いままになり、
+//   「自分のタブがアクティブ」と思い込む
+// - Event::Visible は全インスタンスに届き、true になるのは常に1つだけ。
+//   したがって**唯一の権威は self.visible**（決定14）
 
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
@@ -128,6 +132,16 @@ impl StatusPayload {
     }
 }
 
+// サイドバーに並べる選択対象（ターミナルペイン1つぶん）
+#[derive(Debug, Clone)]
+struct Selectable {
+    tab_position: usize,
+    pane_id: u32,
+    title: String,
+    // フォーカス時の should_float_if_hidden の値に使う（決定14）
+    is_floating: bool,
+}
+
 #[derive(Default)]
 struct State {
     tabs: Vec<TabInfo>,
@@ -135,8 +149,8 @@ struct State {
     session_name: Option<String>,
     // key: ターミナルペインID
     agents: BTreeMap<u32, AgentInfo>,
-    // フラット化した選択対象（tab_position, pane_id, pane_title）
-    selectable: Vec<(usize, u32, String)>,
+    // フラット化した選択対象
+    selectable: Vec<Selectable>,
     selected: usize,
     visible: bool,
     own_plugin_id: Option<u32>,
@@ -277,20 +291,29 @@ impl ZellijPlugin for State {
                 false
             }
             NAV_UP_PIPE => {
-                if self.selected > 0 {
-                    self.selected -= 1;
+                // 選択を動かすのは可視インスタンスだけ（決定14）。
+                // 全員が自前で動かすと、一覧が古いインスタンスでは
+                // 境界判定とクランプの結果が違って選択がずれる。
+                if !self.is_authoritative() {
+                    return false;
                 }
+                self.selected = self.selected.saturating_sub(1);
+                self.broadcast_selection();
                 true
             }
             NAV_DOWN_PIPE => {
+                if !self.is_authoritative() {
+                    return false;
+                }
                 if self.selected + 1 < self.selectable.len() {
                     self.selected += 1;
                 }
+                self.broadcast_selection();
                 true
             }
             NAV_GO_PIPE => {
-                // 副作用はアクティブタブのインスタンスのみ実行（多重発行の防止）
-                if self.is_active_instance() {
+                // 副作用は可視インスタンスのみ実行（多重発行の防止・決定14）
+                if self.is_authoritative() {
                     self.focus_selected();
                 }
                 false
@@ -305,7 +328,7 @@ impl ZellijPlugin for State {
                     .and_then(|p| p.trim().parse().ok());
                 if let Some(target) = target {
                     if let Some(index) =
-                        self.selectable.iter().position(|(_, id, _)| *id == target)
+                        self.selectable.iter().position(|e| e.pane_id == target)
                     {
                         let changed = self.selected != index;
                         self.selected = index;
@@ -347,7 +370,7 @@ impl ZellijPlugin for State {
             NAV_MODE_PIPE => {
                 // キーの横取りは1インスタンスだけが行う。全インスタンスが
                 // intercept_key_presses() を呼ぶと誰が受け取るか不定になるため。
-                if self.is_active_instance() && !self.nav_mode {
+                if self.is_authoritative() && !self.nav_mode {
                     self.enter_nav_mode();
                     return true;
                 }
@@ -410,8 +433,9 @@ impl ZellijPlugin for State {
             y += 1;
 
             // ペイン行
-            for (tab_position, pane_id, pane_title) in &self.selectable {
-                if *tab_position != tab.position {
+            for entry in &self.selectable {
+                let (pane_id, pane_title) = (&entry.pane_id, &entry.title);
+                if entry.tab_position != tab.position {
                     continue;
                 }
                 if y >= rows {
@@ -463,24 +487,35 @@ impl ZellijPlugin for State {
 }
 
 impl State {
-    // 自分のペインがアクティブタブにあるか。
-    // タブ数ぶんのインスタンスのうち副作用（OS問い合わせ・フォーカス移動）を
-    // 実行してよいのは1つだけ、の判定に使う。全インスタンスが同じデータを
-    // 持つため判定結果は矛盾しない。Visible イベントは初回配送が保証されて
-    // いる確証がないため、こちらを正とする。
-    fn is_active_instance(&self) -> bool {
+    // 操作の権威を持つインスタンスか（決定14）。
+    //
+    // イベントの配送は当てにできない:
+    // - PaneUpdate / TabUpdate は「タブがアクティブなインスタンス」にしか
+    //   届かないので、バックグラウンドのインスタンスは自分のタブがまだ
+    //   アクティブだと思い込む（実測で複数が同時に真になった）
+    // - Event::Visible は真が常に1つだけで正確だが、**プラグインを
+    //   リロードすると再送されない**（zellij から見て可視状態は変化して
+    //   いないが、プラグインの状態は初期化される）
+    //
+    // そこでサーバへ直接問い合わせる。get_focused_pane_info() は
+    // 「このプラグインのクライアントにとっての」フォーカス中のタブを返すので、
+    // 常に最新かつ、真になるインスタンスは1つだけになる。
+    fn is_authoritative(&self) -> bool {
         let Some(own_id) = self.own_plugin_id else {
             return false;
         };
         let Some(manifest) = &self.panes else {
             return false;
         };
-        let Some(active_tab) = self.tabs.iter().find(|t| t.active) else {
-            return false;
+        let Ok((focused_tab, _)) = get_focused_pane_info() else {
+            // 問い合わせに失敗したときだけ Visible に落とす
+            return self.visible;
         };
+        // 自分のプラグインペインがフォーカス中のタブにいるか。
+        // manifest が古くても、自分のペインの所属タブは動かないので判定できる。
         manifest
             .panes
-            .get(&active_tab.position)
+            .get(&focused_tab)
             .map(|panes| panes.iter().any(|p| p.is_plugin && p.id == own_id))
             .unwrap_or(false)
     }
@@ -676,8 +711,17 @@ impl State {
     }
 
     fn focus_selected(&self) {
-        if let Some((_, pane_id, _)) = self.selectable.get(self.selected) {
-            focus_pane_with_id(PaneId::Terminal(*pane_id), false, false);
+        if let Some(entry) = self.selectable.get(self.selected) {
+            // 第2引数 should_float_if_hidden はターゲットに合わせて切り替える。
+            // false のままだと**フローティング層が隠れているタブのフローティング
+            // ペインにジャンプできない**（タブ切り替えすら起きず無反応）。
+            // かといって常に true にすると、今度は**フローティング表示中に
+            // タイルペインへ戻れなくなる**。どちらも実測で確認済み。
+            focus_pane_with_id(
+                PaneId::Terminal(entry.pane_id),
+                entry.is_floating,
+                false,
+            );
         }
     }
 
@@ -695,8 +739,12 @@ impl State {
                     if pane.is_plugin || pane.is_suppressed {
                         continue;
                     }
-                    self.selectable
-                        .push((position, pane.id, pane.title.clone()));
+                    self.selectable.push(Selectable {
+                        tab_position: position,
+                        pane_id: pane.id,
+                        title: pane.title.clone(),
+                        is_floating: pane.is_floating,
+                    });
                 }
             }
         }
@@ -780,9 +828,10 @@ impl State {
     // 選択位置を兄弟へ配る。navモード中の移動は横取り中の1インスタンスにしか
     // 起きないため、これがないとタブごとに違う行が光る。
     fn broadcast_selection(&self) {
-        let Some((_, pane_id, _)) = self.selectable.get(self.selected) else {
+        let Some(entry) = self.selectable.get(self.selected) else {
             return;
         };
+        let pane_id = entry.pane_id;
         for sibling in &self.known_siblings {
             pipe_message_to_plugin(
                 MessageToPlugin::new(SELECTION_PIPE)
