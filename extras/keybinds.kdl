@@ -45,6 +45,11 @@
 //     shared_except "locked" {
 //         bind "Alt Up"    { MessagePlugin "<URL>" { name "agent_spaces_up"; }; }
 //         bind "Alt Down"  { MessagePlugin "<URL>" { name "agent_spaces_down"; }; }
-//         bind "Alt Enter" { MessagePlugin "<URL>" { name "agent_spaces_go"; }; }
+//         bind "Alt g"     { MessagePlugin "<URL>" { name "agent_spaces_go"; }; }
 //     }
 // }
+//
+// **`Alt Enter` にバインドしてはいけない。** Claude Code の Shift+Enter は
+// 端末側の設定（`/terminal-setup` が入れる `Shift+Return -> ESC CR`）に依存していて、
+// zellij はその ESC CR を Alt+Enter として解釈する。`Alt Enter` を奪うと
+// Shift+Enter の改行がペインに届かなくなる。詳細は docs/02-api-reference.md。
