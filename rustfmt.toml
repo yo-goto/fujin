@@ -1,0 +1,4 @@
+# rustfmt は既定値で運用する。ここで明示しているのは、cargo 経由でなく
+# rustfmt を直接叩いたときにも Cargo.toml と同じ挙動になるようにするため。
+edition = "2021"
+newline_style = "Unix"

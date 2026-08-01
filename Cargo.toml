@@ -7,6 +7,16 @@ description = "Zellij plugin for herding multiple agent workspaces (panes/tabs/s
 [dependencies]
 zellij-tile = "0.44.3"
 
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+# プラグイン内の panic はサイドバーごと落として復旧手段がなくなるため、
+# 握り潰さず Option/Result として扱う
+unwrap_used = "warn"
+expect_used = "warn"
+
 [profile.release]
 opt-level = "z"
 lto = true

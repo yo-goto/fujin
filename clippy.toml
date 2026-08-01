@@ -1,0 +1,5 @@
+# テストコード内の unwrap/expect は許す（失敗すればテストが落ちるだけで、
+# 本番のようにプラグインごと巻き添えにはならない）。
+# 本体側の unwrap_used / expect_used の設定は Cargo.toml の [lints] にある。
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

@@ -15,6 +15,9 @@
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
+#[cfg(test)]
+mod tests;
+
 // ワイヤプロトコル: フックからの状態通知
 const STATUS_PIPE: &str = "fujin_status";
 // ワイヤプロトコル: キーバインドからのナビゲーション
@@ -118,7 +121,7 @@ impl StatusPayload {
                 let end = stripped.find('"')?;
                 Some(stripped[..end].to_string())
             } else {
-                let end = rest.find(|c: char| c == ',' || c == '}')?;
+                let end = rest.find([',', '}'])?;
                 Some(rest[..end].trim().to_string())
             }
         };
@@ -327,9 +330,7 @@ impl ZellijPlugin for State {
                     .as_deref()
                     .and_then(|p| p.trim().parse().ok());
                 if let Some(target) = target {
-                    if let Some(index) =
-                        self.selectable.iter().position(|e| e.pane_id == target)
-                    {
+                    if let Some(index) = self.selectable.iter().position(|e| e.pane_id == target) {
                         let changed = self.selected != index;
                         self.selected = index;
                         return changed;
@@ -424,7 +425,10 @@ impl ZellijPlugin for State {
             }
             // タブ見出し
             let marker = if tab.active { "▾" } else { "▸" };
-            let title = truncate(&format!("{} {} {}", marker, tab.position + 1, tab.name), cols);
+            let title = truncate(
+                &format!("{} {} {}", marker, tab.position + 1, tab.name),
+                cols,
+            );
             let mut text = Text::new(&title);
             if tab.active {
                 text = text.color_range(0, ..title.chars().count());
@@ -566,9 +570,7 @@ impl State {
             .panes
             .values()
             .flatten()
-            .filter(|p| {
-                p.is_plugin && p.id != own_id && p.plugin_url.as_deref() == Some(own_url)
-            })
+            .filter(|p| p.is_plugin && p.id != own_id && p.plugin_url.as_deref() == Some(own_url))
             .map(|p| p.id)
             .collect();
         let newcomers: Vec<u32> = siblings
@@ -595,7 +597,11 @@ impl State {
     fn state_dump(&self) -> String {
         let mut out = String::new();
         for (pane_id, info) in &self.agents {
-            let cwd = self.pane_cwds.get(pane_id).map(|s| s.as_str()).unwrap_or("");
+            let cwd = self
+                .pane_cwds
+                .get(pane_id)
+                .map(|s| s.as_str())
+                .unwrap_or("");
             out.push_str(&format!(
                 "{}\t{}\t{}\t{}\t{}\t{}\n",
                 pane_id,
@@ -717,11 +723,7 @@ impl State {
             // ペインにジャンプできない**（タブ切り替えすら起きず無反応）。
             // かといって常に true にすると、今度は**フローティング表示中に
             // タイルペインへ戻れなくなる**。どちらも実測で確認済み。
-            focus_pane_with_id(
-                PaneId::Terminal(entry.pane_id),
-                entry.is_floating,
-                false,
-            );
+            focus_pane_with_id(PaneId::Terminal(entry.pane_id), entry.is_floating, false);
         }
     }
 
@@ -874,11 +876,14 @@ impl State {
         self.agents.retain(|id, _| live.contains(id));
         self.pane_cwds.retain(|id, _| live.contains(id));
     }
-
 }
 
 // 文字数ベースの単純切り詰め（v1: CJK幅は考慮しない）
 fn truncate(s: &str, max: usize) -> String {
+    // 幅0のときに省略記号だけがはみ出さないようにする
+    if max == 0 {
+        return String::new();
+    }
     if s.chars().count() <= max {
         return s.to_string();
     }

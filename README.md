@@ -254,6 +254,27 @@ zellij が勝手に起動してしまう。付けなければ、起動中のプ�
 
 ## 開発
 
+### テスト・リント・フォーマット
+
+```bash
+make test       # ユニットテスト
+make lint       # clippy（wasm 向け・ホスト向けの両方、警告はエラー扱い）
+make fmt        # rustfmt をかける
+make fmt-check  # 差分があれば失敗する（CI 用）
+make check      # 上記まとめて（fmt-check → lint → test）
+```
+
+テストは**ホストターゲット**で走る。`.cargo/config.toml` が既定ターゲットを
+`wasm32-wasip1` にしているため素の `cargo test` はビルドしたテストを実行できず、
+`make test` が `--target <ホストのトリプル>` を補っている。
+
+ホスト向けにリンクするには wasm ホスト関数 `host_run_plugin_command` のスタブが
+要る（`src/tests.rs` の先頭にある）。このため副作用だけのホストコマンドは
+テスト中 no-op になり、**戻り値を読み返す問い合わせ系**（`get_plugin_ids`,
+`get_focused_pane_info`）は**テストから呼べない**。
+
+### 手動での動作確認
+
 ```bash
 # 開発用レイアウトで起動（サイドバー + 作業ペイン）
 zellij -l zellij.kdl
