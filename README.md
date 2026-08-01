@@ -1,6 +1,8 @@
-# agent-spaces
+# fujin（布陣）
 
 zellij用サイドバープラグイン。タブ > ペインを縦並びで一覧し、各ペインで動くAIエージェント（Claude Code等）の状態を可視化して、グローバルキーでジャンプする。
+
+名前は「布陣」＝陣を敷く、配置すること。複数のペインを部隊に見立てて配置し、俯瞰する。
 
 ```
 tenacious-cymbal          ← セッション名
@@ -37,8 +39,8 @@ tenacious-cymbal          ← セッション名
 ## ビルド
 
 ```bash
-cargo build            # 開発: target/wasm32-wasip1/debug/agent-spaces.wasm
-cargo build --release  # 配布: target/wasm32-wasip1/release/agent-spaces.wasm
+cargo build            # 開発: target/wasm32-wasip1/debug/fujin.wasm
+cargo build --release  # 配布: target/wasm32-wasip1/release/fujin.wasm
 ```
 
 ## セットアップ
@@ -46,7 +48,7 @@ cargo build --release  # 配布: target/wasm32-wasip1/release/agent-spaces.wasm
 ### 1. サイドバーの常駐（レイアウト）
 
 デフォルトレイアウトのタブテンプレートにサイドバーを埋め込む。例
-（`~/.config/zellij/layouts/agent-spaces.kdl`）:
+（`~/.config/zellij/layouts/fujin.kdl`）:
 
 ```kdl
 layout {
@@ -56,7 +58,7 @@ layout {
         }
         pane split_direction="vertical" {
             pane size=32 borderless=true {
-                plugin location="file:/path/to/agent-spaces.wasm"
+                plugin location="file:/path/to/fujin.wasm"
             }
             pane
         }
@@ -83,7 +85,7 @@ zellij 組み込みのデフォルトが残る。両方書けば起動経路に�
 
 ```kdl
 bind "n" {
-    NewTab { layout "agent-spaces"; }
+    NewTab { layout "fujin"; }
     SwitchToMode "normal"
 }
 ```
@@ -91,14 +93,14 @@ bind "n" {
 `~/.config/zellij/config.kdl` に:
 
 ```kdl
-default_layout "agent-spaces"
+default_layout "fujin"
 ```
 
 お試しなら常駐させずフローティングでも動く:
 
 ```bash
 zellij action new-pane --floating --width 40 --height 20 \
-  -p "file:/path/to/agent-spaces.wasm"
+  -p "file:/path/to/fujin.wasm"
 ```
 
 初回ロード時に権限承認プロンプトが出るので、ペインにフォーカスして `y` で承認する
@@ -119,7 +121,7 @@ zellij本体の `Ctrl+p` → pane モードと同じ操作感。`config.kdl` に
 
 ```kdl
 bind "Ctrl y" {
-    MessagePlugin "file:/path/to/agent-spaces.wasm" { name "agent_spaces_mode"; }
+    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_mode"; }
 }
 ```
 
@@ -147,13 +149,13 @@ bind "Ctrl y" {
 
 ```kdl
 bind "Alt Up" {
-    MessagePlugin "file:/path/to/agent-spaces.wasm" { name "agent_spaces_up"; }
+    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_up"; }
 }
 bind "Alt Down" {
-    MessagePlugin "file:/path/to/agent-spaces.wasm" { name "agent_spaces_down"; }
+    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_down"; }
 }
 bind "Alt Enter" {
-    MessagePlugin "file:/path/to/agent-spaces.wasm" { name "agent_spaces_go"; }
+    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_go"; }
 }
 ```
 
@@ -166,7 +168,7 @@ bind "Alt Enter" {
 
 ### 3. Claude Code フック（状態通知）
 
-`extras/claude-hooks/agent-spaces-hook.sh` をフックとして登録する。
+`extras/claude-hooks/fujin-hook.sh` をフックとして登録する。
 `~/.claude/settings.json` の `hooks` に追記:
 
 ```jsonc
@@ -178,7 +180,7 @@ bind "Alt Enter" {
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "/path/to/extras/claude-hooks/agent-spaces-hook.sh" }
+          { "type": "command", "command": "/path/to/extras/claude-hooks/fujin-hook.sh" }
         ]
       }
     ],
@@ -187,7 +189,7 @@ bind "Alt Enter" {
       {
         "matcher": "permission_prompt|agent_needs_input|idle_prompt|elicitation_dialog",
         "hooks": [
-          { "type": "command", "command": "/path/to/extras/claude-hooks/agent-spaces-hook.sh" }
+          { "type": "command", "command": "/path/to/extras/claude-hooks/fujin-hook.sh" }
         ]
       }
     ]
@@ -217,7 +219,7 @@ bind "Alt Enter" {
 レイアウトのplugin ブロックで指定:
 
 ```kdl
-plugin location="file:/path/to/agent-spaces.wasm" {
+plugin location="file:/path/to/fujin.wasm" {
     show_cwd "true"   // ペイン行に cwd を表示（デフォルト false）
 }
 ```
@@ -226,11 +228,11 @@ cwd はフックのペイロード由来なので、フック設定済みのエ�
 
 ## ワイヤプロトコル（他エージェントの対応）
 
-プラグインは pipe 名 `agent_spaces_status` で以下のJSONを受け取る。
+プラグインは pipe 名 `fujin_status` で以下のJSONを受け取る。
 Claude Code 以外のエージェント（codex 等）も、この形式で送れば同じように表示される:
 
 ```bash
-zellij pipe --name agent_spaces_status -- '{
+zellij pipe --name fujin_status -- '{
   "pane_id": '$ZELLIJ_PANE_ID',
   "agent": "codex",
   "event": "UserPromptSubmit",
@@ -242,8 +244,8 @@ zellij pipe --name agent_spaces_status -- '{
 - `event`: 上記マッピング表のイベント名
 - `cwd` / `detail`: 任意
 
-外部から使うのは `agent_spaces_status` と、キーバインド用の `agent_spaces_up` /
-`_down` / `_go` / `_mode` だけ。`agent_spaces_sync_state` / `_read` / `_selection` は
+外部から使うのは `fujin_status` と、キーバインド用の `fujin_up` /
+`_down` / `_go` / `_mode` だけ。`fujin_sync_state` / `_read` / `_selection` は
 インスタンス間の同期用の内部プロトコルなので、外から叩かないこと。
 
 **重要: `--plugin` オプションは付けないこと。** 付けると未起動のプラグインを
@@ -258,15 +260,15 @@ zellij -l zellij.kdl
 
 # コード変更後のリロード（zellij セッション内から）
 cargo build && zellij action start-or-reload-plugin \
-  "file:$PWD/target/wasm32-wasip1/debug/agent-spaces.wasm"
+  "file:$PWD/target/wasm32-wasip1/debug/fujin.wasm"
 
 # 動作テスト（pipe を手で叩く）
-zellij pipe --name agent_spaces_status -- \
+zellij pipe --name fujin_status -- \
   '{"pane_id":'$ZELLIJ_PANE_ID',"agent":"claude","event":"UserPromptSubmit"}'
-zellij pipe --name agent_spaces_down -- x
+zellij pipe --name fujin_down -- x
 
 # navモードに入る（キーバインドなしで試す）
-zellij pipe --name agent_spaces_mode -- x
+zellij pipe --name fujin_mode -- x
 ```
 
 `eprintln!` のログ出力先（macOS）:

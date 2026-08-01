@@ -1,11 +1,11 @@
-// agent-spaces 用グローバルキーバインド（config.kdl の keybinds ブロックに追記する）
+// fujin 用グローバルキーバインド（config.kdl の keybinds ブロックに追記する）
 //
 // MessagePlugin は URL 指定なので全インスタンスに届く（決定6）。
 // MessagePluginId は使わない — タブ数ぶんのインスタンスが同じキーを
 // 奪い合って衝突するため。
 //
 // 以下の <URL> は自分の環境のwasmパスに置き換える。開発中は debug ビルド:
-//   file:/Users/example/development/oss/zellij-plugins/agent-spaces/repos/main/target/wasm32-wasip1/debug/agent-spaces.wasm
+//   file:/path/to/repos/main/target/wasm32-wasip1/debug/fujin.wasm
 //
 // ============================================================
 // 推奨: navモード方式（決定12）
@@ -27,7 +27,7 @@
 //     shared_except "locked" {
 //         bind "Ctrl y" {
 //             MessagePlugin "<URL>" {
-//                 name "agent_spaces_mode"
+//                 name "fujin_mode"
 //             }
 //         }
 //     }
@@ -43,9 +43,9 @@
 //
 // keybinds {
 //     shared_except "locked" {
-//         bind "Alt Up"    { MessagePlugin "<URL>" { name "agent_spaces_up"; }; }
-//         bind "Alt Down"  { MessagePlugin "<URL>" { name "agent_spaces_down"; }; }
-//         bind "Alt g"     { MessagePlugin "<URL>" { name "agent_spaces_go"; }; }
+//         bind "Alt Up"    { MessagePlugin "<URL>" { name "fujin_up"; }; }
+//         bind "Alt Down"  { MessagePlugin "<URL>" { name "fujin_down"; }; }
+//         bind "Alt g"     { MessagePlugin "<URL>" { name "fujin_go"; }; }
 //     }
 // }
 //

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# agent-spaces: Claude Code フック → zellij pipe ブリッジ
+# fujin: Claude Code フック → zellij pipe ブリッジ
 #
 # stdin で受けたフックJSONを最小のペイロードに変換し、稼働中の
-# agent-spaces プラグインへ届ける。
+# fujin プラグインへ届ける。
 #
 # 重要（docs/04-design-decisions.md リスク1）:
 #   `--plugin` は絶対に付けないこと。付けると未起動のプラグインを
@@ -26,4 +26,4 @@ payload=$(jq -c '{
 
 [ -n "$payload" ] || exit 0
 
-exec zellij pipe --name agent_spaces_status -- "$payload"
+exec zellij pipe --name fujin_status -- "$payload"

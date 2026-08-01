@@ -1,4 +1,4 @@
-// agent-spaces — zellij用サイドバープラグイン
+// fujin — zellij用サイドバープラグイン
 //
 // タブ > ペインの縦並び表示、エージェント状態の可視化、グローバルキーでのジャンプ。
 // 設計決定は docs/04-design-decisions.md を参照。
@@ -16,19 +16,19 @@ use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 // ワイヤプロトコル: フックからの状態通知
-const STATUS_PIPE: &str = "agent_spaces_status";
+const STATUS_PIPE: &str = "fujin_status";
 // ワイヤプロトコル: キーバインドからのナビゲーション
-const NAV_UP_PIPE: &str = "agent_spaces_up";
-const NAV_DOWN_PIPE: &str = "agent_spaces_down";
-const NAV_GO_PIPE: &str = "agent_spaces_go";
+const NAV_UP_PIPE: &str = "fujin_up";
+const NAV_DOWN_PIPE: &str = "fujin_down";
+const NAV_GO_PIPE: &str = "fujin_go";
 // ワイヤプロトコル: navモードへの入場（zellijのモードキーと同じ使い勝手）
-const NAV_MODE_PIPE: &str = "agent_spaces_mode";
+const NAV_MODE_PIPE: &str = "fujin_mode";
 // ワイヤプロトコル: インスタンス間の状態同期（決定13）
-const SYNC_STATE_PIPE: &str = "agent_spaces_sync_state";
+const SYNC_STATE_PIPE: &str = "fujin_sync_state";
 // ワイヤプロトコル: 既読クリアの他インスタンスへの伝播（決定13）
-const READ_CLEAR_PIPE: &str = "agent_spaces_read";
+const READ_CLEAR_PIPE: &str = "fujin_read";
 // ワイヤプロトコル: 選択位置の他インスタンスへの伝播（決定13）
-const SELECTION_PIPE: &str = "agent_spaces_selection";
+const SELECTION_PIPE: &str = "fujin_selection";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum AgentState {
@@ -211,10 +211,10 @@ impl ZellijPlugin for State {
                 if self.permissions_granted {
                     // フォーカス巡回にサイドバーが混ざらないようにする（決定6）
                     set_selectable(false);
-                    // 既定のペイン名はwasmのフルURL（`(.) - file:/…/agent-spaces.wasm`）
+                    // 既定のペイン名はwasmのフルURL（`(.) - file:/…/fujin.wasm`）
                     // で長すぎるので、プラグイン名だけにする
                     if let Some(id) = self.own_plugin_id {
-                        rename_plugin_pane(id, "agent-spaces");
+                        rename_plugin_pane(id, "fujin");
                     }
                 }
                 true
@@ -286,7 +286,7 @@ impl ZellijPlugin for State {
                         self.apply_status(payload);
                         return true;
                     }
-                    eprintln!("agent-spaces: unparsable status payload: {}", raw);
+                    eprintln!("fujin: unparsable status payload: {}", raw);
                 }
                 false
             }
@@ -641,7 +641,7 @@ impl State {
         // 既に閉じたペインの状態が混ざらないようにする
         self.prune_stale_agents();
         // 起動ごとに高々1回。食い違いを追うときの手がかりになるので残す
-        eprintln!("agent-spaces: synced {} agents from peer", self.agents.len());
+        eprintln!("fujin: synced {} agents from peer", self.agents.len());
     }
 
     // --- navモード（決定12） ---
@@ -785,7 +785,7 @@ impl State {
             "TaskCreated" => entry.open_tasks += 1,
             "TaskCompleted" => entry.open_tasks = entry.open_tasks.saturating_sub(1),
             other => {
-                eprintln!("agent-spaces: unknown event: {}", other);
+                eprintln!("fujin: unknown event: {}", other);
             }
         }
     }
