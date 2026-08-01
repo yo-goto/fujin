@@ -43,6 +43,9 @@ cargo build            # 開発: target/wasm32-wasip1/debug/fujin.wasm
 cargo build --release  # 配布: target/wasm32-wasip1/release/fujin.wasm
 ```
 
+ビルドターゲットは `.cargo/config.toml` で `wasm32-wasip1` に固定してあるので
+`--target` の指定は要らない。テストだけは事情が違う（[開発](#開発)を参照）。
+
 ## セットアップ
 
 ### 1. サイドバーの常駐（レイアウト）
@@ -254,24 +257,53 @@ zellij が勝手に起動してしまう。付けなければ、起動中のプ�
 
 ## 開発
 
-### テスト・リント・フォーマット
+### タスクランナー
 
-```bash
-make test       # ユニットテスト
-make lint       # clippy（wasm 向け・ホスト向けの両方、警告はエラー扱い）
-make fmt        # rustfmt をかける
-make fmt-check  # 差分があれば失敗する（CI 用）
-make check      # 上記まとめて（fmt-check → lint → test）
-```
+ターゲットの切り替えが絡むので、Makefile 越しに叩く。
 
-テストは**ホストターゲット**で走る。`.cargo/config.toml` が既定ターゲットを
-`wasm32-wasip1` にしているため素の `cargo test` はビルドしたテストを実行できず、
-`make test` が `--target <ホストのトリプル>` を補っている。
+| コマンド | 内容 |
+| --- | --- |
+| `make build` / `make release` | wasm のビルド（`cargo build [--release]` と同じ） |
+| `make test` | ユニットテスト（ホストターゲット） |
+| `make lint` | clippy。wasm 向けとホスト向け（テストコード込み）の両方、警告はエラー扱い |
+| `make fmt` | rustfmt をかける |
+| `make fmt-check` | 整形差分があれば失敗する（CI 向け） |
+| `make check` | `fmt-check` → `lint` → `test` をまとめて |
 
-ホスト向けにリンクするには wasm ホスト関数 `host_run_plugin_command` のスタブが
-要る（`src/tests.rs` の先頭にある）。このため副作用だけのホストコマンドは
-テスト中 no-op になり、**戻り値を読み返す問い合わせ系**（`get_plugin_ids`,
-`get_focused_pane_info`）は**テストから呼べない**。
+コミット前は `make check` を通す。
+
+### テスト
+
+テストは `src/tests.rs`（`src/main.rs` の `#[cfg(test)] mod tests`）に置く。
+外部クレートは足さず、標準の `#[test]` のみ。
+
+**テストは wasm ではなくホストターゲットで走る。** `.cargo/config.toml` が既定
+ターゲットを `wasm32-wasip1` にしているため、素の `cargo test` はテストバイナリを
+wasm 向けにビルドしてしまい実行できない（wasm ランタイムが要る）。`make test` が
+`--target <ホストのトリプル>` を補っている。
+
+ホスト向けにリンクするには、wasm ホストが提供する関数 `host_run_plugin_command` の
+スタブが要る（`src/tests.rs` の先頭）。この都合で、テストから触れる範囲に制約がある:
+
+- **副作用だけのホストコマンド**（`focus_pane_with_id`, `pipe_message_to_plugin`,
+  `intercept_key_presses` 等）は no-op になる。呼ばれても安全
+- **戻り値を stdin から読み返す問い合わせ系**（`get_plugin_ids`,
+  `get_focused_pane_info`）は**テストから呼べない**。呼ぶと stdin の読み取りに
+  失敗して panic する。したがって `is_authoritative()` と、それを経由する
+  `fujin_up` / `fujin_down` / `fujin_go` / `fujin_mode` の pipe ハンドラは
+  ユニットテストの対象外で、実セッションでの手動確認に頼っている
+
+### リント・フォーマット
+
+設定の置き場所と方針:
+
+- **`Cargo.toml` の `[lints]`** — `unsafe_code` は deny。`clippy::all` に加えて
+  `unwrap_used` / `expect_used` も warn にしている。**プラグイン内の panic は
+  サイドバーごと落として復旧手段がなくなる**ため、`Option`/`Result` は握り潰さず
+  明示的に畳む
+- **`clippy.toml`** — テストコード内の `unwrap`/`expect` だけは許可
+  （失敗してもテストが落ちるだけなので）
+- **`rustfmt.toml`** — 既定値のまま。`edition` と `newline_style` だけ明示している
 
 ### 手動での動作確認
 
