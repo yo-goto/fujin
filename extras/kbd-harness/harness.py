@@ -7,7 +7,8 @@ import os, sys, pty, select, fcntl, termios, struct, signal
 
 SESSION = sys.argv[1]
 LAYOUT = sys.argv[2]
-BASE = os.path.dirname(os.path.abspath(__file__))
+# ログとFIFOはカレントディレクトリに作る（リポジトリを汚さないため）
+BASE = os.getcwd()
 OUT = os.path.join(BASE, f"{SESSION}.out.log")
 FIFO = os.path.join(BASE, f"{SESSION}.inject")
 
