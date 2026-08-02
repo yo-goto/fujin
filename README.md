@@ -423,3 +423,7 @@ $TMPDIR/zellij-<uid>/zellij-log/zellij.log
   `set_selectable(false)` なのでフォーカスできず、`Ctrl+p`→`x` でも
   `zellij action focus-pane-id` でも閉じられない（`close_self()` を一時的に
   仕込んでリロードするしかない）。**リロードは常にレイアウトと同じURLで**
+
+## ライセンス
+
+MIT License（`LICENSE` を参照）。依存している `zellij-tile` も MIT。

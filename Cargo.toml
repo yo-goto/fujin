@@ -3,6 +3,7 @@ name = "fujin"
 version = "0.1.0"
 edition = "2021"
 description = "Zellij plugin for herding multiple agent workspaces (panes/tabs/sessions)"
+license = "MIT"
 
 [dependencies]
 zellij-tile = "0.44.3"
