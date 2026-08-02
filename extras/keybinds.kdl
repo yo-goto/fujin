@@ -1,10 +1,29 @@
-// fujin 用グローバルキーバインド（config.kdl の keybinds ブロックに追記する）
+// fujin 用グローバルキーバインド（config.kdl に追記する）
 //
-// MessagePlugin は URL 指定なので全インスタンスに届く（決定6）。
+// MessagePlugin は URL/エイリアス指定なので全インスタンスに届く（決定6）。
 // MessagePluginId は使わない — タブ数ぶんのインスタンスが同じキーを
 // 奪い合って衝突するため。
 //
-// 以下の <URL> は自分の環境のwasmパスに置き換える。開発中は debug ビルド:
+// ============================================================
+// 前提: エイリアスを定義しておく
+// ============================================================
+// wasm のパスを1箇所にまとめられるうえ、レイアウト側とキーバインド側で
+// **設定（configuration）が食い違う事故を防げる**。
+//
+// MessagePlugin の宛先照合はパスだけでなく configuration 込みで行われる。
+// 食い違うと常駐サイドバーには届かず、zellij が「設定の一致する新しい
+// インスタンス」をその場に開く（実測）。fujin は unselectable なので、
+// そうしてできたペインは誰にも閉じられない。
+//
+// plugins {
+//     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
+//         // 設定はここに書く。レイアウト側にだけ書いてはいけない
+//         // show_cwd "true"
+//     }
+// }
+//
+// `file:~/…` の `~` は zellij が展開するので、ホームディレクトリ名は書かなくてよい。
+// 開発中は debug ビルドを直接指してもよい（相対パスは不可）:
 //   file:/path/to/repos/main/target/wasm32-wasip1/debug/fujin.wasm
 //
 // ============================================================
@@ -26,7 +45,7 @@
 // keybinds {
 //     shared_except "locked" {
 //         bind "Ctrl y" {
-//             MessagePlugin "<URL>" {
+//             MessagePlugin "fujin" {
 //                 name "fujin_mode"
 //             }
 //         }
@@ -43,13 +62,13 @@
 //
 // keybinds {
 //     shared_except "locked" {
-//         bind "Alt Up"    { MessagePlugin "<URL>" { name "fujin_up"; }; }
-//         bind "Alt Down"  { MessagePlugin "<URL>" { name "fujin_down"; }; }
-//         bind "Alt g"     { MessagePlugin "<URL>" { name "fujin_go"; }; }
+//         bind "Alt Up"    { MessagePlugin "fujin" { name "fujin_up"; }; }
+//         bind "Alt Down"  { MessagePlugin "fujin" { name "fujin_down"; }; }
+//         bind "Alt g"     { MessagePlugin "fujin" { name "fujin_go"; }; }
 //     }
 // }
 //
 // **`Alt Enter` にバインドしてはいけない。** Claude Code の Shift+Enter は
 // 端末側の設定（`/terminal-setup` が入れる `Shift+Return -> ESC CR`）に依存していて、
 // zellij はその ESC CR を Alt+Enter として解釈する。`Alt Enter` を奪うと
-// Shift+Enter の改行がペインに届かなくなる。詳細は docs/02-api-reference.md。
+// Shift+Enter の改行がペインに届かなくなる。詳細は docs/dev/api-reference.md。

@@ -6,7 +6,11 @@
 
 HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 
-.PHONY: all build release test fmt fmt-check lint check clean
+# インストール先。zellij の config ディレクトリは OS を問わず ~/.config/zellij に
+# 解決されるので、その配下を既定にしておく（zellij 側にプラグインの置き場所の規約は無い）
+PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
+
+.PHONY: all build release install test fmt fmt-check lint check clean
 
 all: check
 
@@ -15,6 +19,13 @@ build:
 
 release:
 	cargo build --release
+
+# 稼働中のセッションには反映されない。既存インスタンスは古い wasm のまま動くので、
+# 入れ替えたらセッションを作り直すこと（start-or-reload-plugin は1インスタンスしか
+# リロードしない）
+install: release
+	mkdir -p $(PLUGIN_DIR)
+	cp target/wasm32-wasip1/release/fujin.wasm $(PLUGIN_DIR)/fujin.wasm
 
 test:
 	cargo test --target $(HOST_TARGET)

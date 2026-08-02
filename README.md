@@ -48,7 +48,32 @@ cargo build --release  # 配布: target/wasm32-wasip1/release/fujin.wasm
 
 ## セットアップ
 
-### 1. サイドバーの常駐（レイアウト）
+### 1. wasm の配置とエイリアス定義
+
+wasm はどこに置いてもよいが、OS を問わず `~/.config/zellij` が config
+ディレクトリになるので、その配下にまとめておくと手順が環境に依存しない:
+
+```bash
+make install   # target/wasm32-wasip1/release/fujin.wasm を ~/.config/zellij/plugins/ へ
+```
+
+`~/.config/zellij/config.kdl` にエイリアスを定義する:
+
+```kdl
+plugins {
+    fujin location="file:~/.config/zellij/plugins/fujin.wasm"
+}
+```
+
+- **`file:~/…` の `~`（と `$HOME` などの環境変数）は zellij が展開する**ので、
+  ホームディレクトリ名を書かなくてよい
+- 以降、レイアウトにもキーバインドにも `"fujin"` とだけ書けば済む。
+  パスを1箇所にまとめられるほか、**設定の食い違いによる事故を構造的に防げる**
+  （[設定](#設定)を参照）
+- エイリアス定義の `location` に**相対パスは書けない**。cwd 補完が効かないため、
+  絶対パスか `~` 付きか `https://…` にすること
+
+### 2. サイドバーの常駐（レイアウト）
 
 デフォルトレイアウトのタブテンプレートにサイドバーを埋め込む。例
 （`~/.config/zellij/layouts/fujin.kdl`）:
@@ -61,7 +86,7 @@ layout {
         }
         pane split_direction="vertical" {
             pane size=32 borderless=true {
-                plugin location="file:/path/to/fujin.wasm"
+                plugin location="fujin"
             }
             pane
         }
@@ -102,17 +127,18 @@ default_layout "fujin"
 お試しなら常駐させずフローティングでも動く:
 
 ```bash
-zellij action new-pane --floating --width 40 --height 20 \
-  -p "file:/path/to/fujin.wasm"
+zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 ```
 
 初回ロード時に権限承認プロンプトが出るので、ペインにフォーカスして `y` で承認する
 （要求権限: `ReadApplicationState` / `ChangeApplicationState` / `ReadCliPipes` /
-`InterceptInput` / `MessageAndLaunchOtherPlugins`）。
+`InterceptInput` / `MessageAndLaunchOtherPlugins` / `OpenTerminalsOrPlugins`）。
+承認結果は展開後の wasm の絶対パスごとに記録されるので、**wasm を置き直すと
+再承認になる**。
 
 サイドバーの幅は zellij 標準の resize（`Ctrl+n` 等）でそのまま変更できる。
 
-### 2. グローバルキーバインド（ジャンプ機能）
+### 3. グローバルキーバインド（ジャンプ機能）
 
 `~/.config/zellij/config.kdl` の keybinds ブロック（`shared_except "locked"` など）に
 追加する。navモード方式と直接キー方式があり、併用もできる。
@@ -124,7 +150,7 @@ zellij本体の `Ctrl+p` → pane モードと同じ操作感。`config.kdl` に
 
 ```kdl
 bind "Ctrl y" {
-    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_mode"; }
+    MessagePlugin "fujin" { name "fujin_mode"; }
 }
 ```
 
@@ -152,24 +178,28 @@ bind "Ctrl y" {
 
 ```kdl
 bind "Alt Up" {
-    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_up"; }
+    MessagePlugin "fujin" { name "fujin_up"; }
 }
 bind "Alt Down" {
-    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_down"; }
+    MessagePlugin "fujin" { name "fujin_down"; }
 }
-bind "Alt Enter" {
-    MessagePlugin "file:/path/to/fujin.wasm" { name "fujin_go"; }
+bind "Alt g" {
+    MessagePlugin "fujin" { name "fujin_go"; }
 }
 ```
+
+**`Alt Enter` にはバインドしないこと。** Claude Code の Shift+Enter は端末側の設定
+（`/terminal-setup` が入れる `Shift+Return -> ESC CR`）に依存していて、zellij はその
+`ESC CR` を `Alt Enter` として解釈する。奪うと Shift+Enter の改行がペインに届かなくなる。
 
 いずれの方式でも、作業ペインにフォーカスを置いたまま操作できる（サイドバーに
 フォーカスを移す必要はない。そもそもサイドバーはフォーカス巡回から除外されている）。
 
 注意: `MessagePluginId` は使わないこと。サイドバーはタブごとに1インスタンス
-起動するため、ID指定ではキーが衝突する。URL指定の `MessagePlugin` なら全
-インスタンスに届く。
+起動するため、ID指定ではキーが衝突する。エイリアス（またはURL）指定の
+`MessagePlugin` なら全インスタンスに届く。
 
-### 3. Claude Code フック（状態通知）
+### 4. Claude Code フック（状態通知）
 
 `extras/claude-hooks/fujin-hook.sh` をフックとして登録する。
 `~/.claude/settings.json` の `hooks` に追記:
@@ -219,15 +249,30 @@ bind "Alt Enter" {
 
 ## 設定
 
-レイアウトのplugin ブロックで指定:
+**エイリアス定義（`config.kdl` の `plugins` ブロック）に書くこと。**
 
 ```kdl
-plugin location="file:/path/to/fujin.wasm" {
-    show_cwd "true"   // ペイン行に cwd を表示（デフォルト false）
+plugins {
+    fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
+        show_cwd "true"   // ペイン行に cwd を表示（デフォルト false）
+    }
 }
 ```
 
 cwd はフックのペイロード由来なので、フック設定済みのエージェントペインにのみ表示される。
+
+### レイアウト側にだけ設定を書いてはいけない
+
+`MessagePlugin` の宛先照合は**wasm のパスだけでなく設定（configuration）込み**で行われる。
+レイアウトの plugin ブロックにだけ `show_cwd "true"` を書き、キーバインド側に書かないと、
+両者は別物と見なされて**キーが常駐サイドバーに届かない**。しかも届かないだけで済まず、
+zellij は**設定の一致する新しいインスタンスをその場に開いてしまう**（実測: 打鍵1回で
+プラグインペインが1枚増える）。fujin のサイドバーは `set_selectable(false)` で
+フォーカス巡回から外れているため、**そうしてできたペインはユーザーにも CLI にも閉じられない**。
+
+エイリアスに寄せておけば、レイアウトもキーバインドも同じ定義を参照するので、この
+食い違いは起きない。エイリアスを使わない場合は、レイアウトと**すべての**
+`MessagePlugin` に同じ configuration を書き写す必要がある。
 
 ## ワイヤプロトコル（他エージェントの対応）
 
@@ -264,6 +309,7 @@ zellij が勝手に起動してしまう。付けなければ、起動中のプ�
 | コマンド | 内容 |
 | --- | --- |
 | `make build` / `make release` | wasm のビルド（`cargo build [--release]` と同じ） |
+| `make install` | リリースビルドを `~/.config/zellij/plugins/` へコピー（`PLUGIN_DIR` で変更可） |
 | `make test` | ユニットテスト（ホストターゲット） |
 | `make lint` | clippy。wasm 向けとホスト向け（テストコード込み）の両方、警告はエラー扱い |
 | `make fmt` | rustfmt をかける |
