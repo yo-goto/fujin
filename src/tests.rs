@@ -39,6 +39,14 @@ fn plugin_pane(id: u32, url: &str) -> PaneInfo {
     }
 }
 
+// 臨時召喚されたインスタンス（決定16）。常駐との違いはフローティングかどうか
+fn floating_plugin_pane(id: u32, url: &str) -> PaneInfo {
+    PaneInfo {
+        is_floating: true,
+        ..plugin_pane(id, url)
+    }
+}
+
 fn manifest(tabs: Vec<(usize, Vec<PaneInfo>)>) -> PaneManifest {
     PaneManifest {
         panes: tabs.into_iter().collect::<HashMap<_, _>>(),
@@ -555,6 +563,113 @@ fn siblings_are_the_same_plugin_in_other_tabs() {
         state.known_siblings.iter().copied().collect::<Vec<_>>(),
         vec![6]
     );
+}
+
+// --- 臨時召喚（決定16） ---
+//
+// 召喚そのもの（summon_floating_if_absent）は get_focused_pane_info /
+// get_pane_info を経由するのでここでは検証できない。召喚された側の
+// 入場と、取り残しの掃除だけを見る。
+
+#[test]
+fn a_summoned_instance_enters_nav_mode_once_ready() {
+    let mut state = state_with_panes(3);
+    state.summoned = true;
+    state.pending_nav_entry = true;
+
+    state.enter_nav_mode_if_pending();
+    assert!(state.nav_mode);
+    assert!(!state.pending_nav_entry, "予約は使い切る");
+}
+
+#[test]
+fn a_pending_entry_waits_for_permissions() {
+    // 承認前に入場すると横取りの要求が通らず、キーが戻らないまま無反応になる
+    let mut state = state_with_panes(3);
+    state.summoned = true;
+    state.pending_nav_entry = true;
+    state.permissions_granted = false;
+
+    state.enter_nav_mode_if_pending();
+    assert!(!state.nav_mode);
+    assert!(state.pending_nav_entry, "予約は次の機会まで残す");
+}
+
+#[test]
+fn a_pending_entry_waits_for_a_non_empty_list() {
+    // 一覧が空のまま入ると j/k が効かず、抜けるしかない状態になる
+    let mut state = State {
+        summoned: true,
+        pending_nav_entry: true,
+        permissions_granted: true,
+        ..Default::default()
+    };
+
+    state.enter_nav_mode_if_pending();
+    assert!(!state.nav_mode);
+    assert!(state.pending_nav_entry);
+}
+
+#[test]
+fn a_pending_entry_does_not_re_enter_after_leaving() {
+    // 入場の機会は PermissionRequestResult / PaneUpdate / TabUpdate の
+    // 3箇所から来る。予約を使い切らないと、抜けた直後に入り直してしまう
+    let mut state = state_with_panes(3);
+    state.summoned = true;
+    state.pending_nav_entry = true;
+
+    state.enter_nav_mode_if_pending();
+    state.handle_nav_key(KeyWithModifier::new(BareKey::Esc));
+    assert!(!state.nav_mode);
+
+    state.enter_nav_mode_if_pending();
+    assert!(!state.nav_mode, "一度抜けたら予約では戻らない");
+}
+
+#[test]
+fn dismiss_makes_a_summoned_instance_leave_nav_mode() {
+    let mut state = state_with_panes(3);
+    state.summoned = true;
+    state.own_plugin_id = Some(6);
+    state.nav_mode = true;
+
+    state.pipe(pipe_message(DISMISS_PIPE, ""));
+    assert!(!state.nav_mode, "横取りしたまま消えるとキーが戻らない");
+}
+
+#[test]
+fn dismiss_leaves_the_resident_sidebar_in_place() {
+    // 常駐が消えると復帰手段が無くなる
+    let url = "file:/x/fujin.wasm";
+    let mut state = State {
+        own_plugin_id: Some(5),
+        own_plugin_url: Some(url.to_string()),
+        nav_mode: true,
+        panes: Some(manifest(vec![(0, vec![plugin_pane(5, url)])])),
+        ..Default::default()
+    };
+
+    state.pipe(pipe_message(DISMISS_PIPE, ""));
+    assert!(state.nav_mode, "常駐は掃除の対象外");
+}
+
+#[test]
+fn dismiss_forgets_what_it_summoned() {
+    // 記録が残ると、閉じたはずのタブで召喚が抑止されてしまう
+    let url = "file:/x/fujin.wasm";
+    let mut state = State {
+        own_plugin_id: Some(5),
+        own_plugin_url: Some(url.to_string()),
+        panes: Some(manifest(vec![(
+            0,
+            vec![plugin_pane(5, url), floating_plugin_pane(9, url)],
+        )])),
+        summoned_panes: BTreeMap::from([(0, 9)]),
+        ..Default::default()
+    };
+
+    state.pipe(pipe_message(DISMISS_PIPE, ""));
+    assert!(state.summoned_panes.is_empty());
 }
 
 // --- pipe（ワイヤプロトコル） ---
