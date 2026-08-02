@@ -624,13 +624,23 @@ impl State {
             eprintln!("fujin: summon skipped (own id/url unknown)");
             return;
         };
-        // 一覧は**無いまま**のことがある。召喚役はフォーカス中のタブに
-        // 居ない＝非可視で、非可視のインスタンスには PaneUpdate が届かない。
-        // 一度も可視になっていない常駐は一覧を永久に持たないので、
-        // ここで弾くと「fujin が居ないタブで Ctrl+y が無反応」に逆戻りする
-        //（実測: 起動直後の1回目が `no pane manifest` で不発）。
-        // 一覧が要る判定は、無いなりに安全側へ倒して先へ進む。
-        let manifest = self.panes.clone();
+        // 一覧が無いまま先へ進んではいけない。
+        //
+        // 一覧はフォーカス中のタブに fujin が既に居るかを見る唯一の材料で、
+        // 無いまま進むと「常駐が居るタブなのに重ねて召喚する」ことになる。
+        // 実際に一度そう壊した（fujin レイアウトのセッションで、まだ訪れて
+        // いないタブの常駐が召喚役として暴走した）。
+        //
+        // かといって諦めると今度は召喚できない。非可視のインスタンスには
+        // PaneUpdate が届かないので、一度も可視になっていない常駐は一覧を
+        // 永久に持たないため。サーバに問い合わせて埋める。
+        let manifest = match self.panes.clone().or_else(query_pane_manifest) {
+            Some(manifest) => manifest,
+            None => {
+                eprintln!("fujin: summon skipped (no pane manifest)");
+                return;
+            }
+        };
         let Ok((focused_tab, _)) = get_focused_pane_info() else {
             eprintln!("fujin: summon skipped (focused pane query failed)");
             return;
@@ -655,8 +665,8 @@ impl State {
         // そのタブに兄弟が居るなら、そいつが権威を持つので任せる。
         // manifest が古くて取りこぼしても、二重に出るだけで操作不能にはならない。
         let already_present = manifest
-            .as_ref()
-            .and_then(|m| m.panes.get(&focused_tab))
+            .panes
+            .get(&focused_tab)
             .map(|panes| {
                 panes
                     .iter()
@@ -672,7 +682,7 @@ impl State {
             return;
         }
         // 代表でなければ黙って降りる（インスタンス数ぶん出るとノイズになる）
-        if !self.is_summon_delegate(own_id, &own_url) {
+        if !Self::is_summon_delegate(&manifest, own_id, &own_url) {
             return;
         }
         eprintln!("fujin: summoning floating instance into tab {focused_tab}");
@@ -740,14 +750,7 @@ impl State {
     // 単純な最小IDだと、閉じられたペインが manifest に残っているかどうかで
     // インスタンスごとに結論が食い違う。`get_pane_info()` はサーバへの
     // 問い合わせなので、生存確認を挟めば鮮度の違いを吸収できる。
-    fn is_summon_delegate(&self, own_id: u32, own_url: &str) -> bool {
-        let Some(manifest) = self.panes.as_ref() else {
-            // 一覧が無いと兄弟を知る手段が無い。ここで降りると誰も召喚せず
-            // 無反応になるので、譲らずに自分でやる。複数が同時に名乗り出て
-            // 重ねて召喚しても、召喚された本人がトグルで退場するため
-            // 積み上がらない（決定16）
-            return true;
-        };
+    fn is_summon_delegate(manifest: &PaneManifest, own_id: u32, own_url: &str) -> bool {
         let mut ids: Vec<u32> = manifest
             .panes
             .values()
@@ -1187,6 +1190,24 @@ impl State {
         self.agents.retain(|id, _| live.contains(id));
         self.pane_cwds.retain(|id, _| live.contains(id));
     }
+}
+
+// ペイン一覧をサーバから直接引く（決定16）。
+//
+// `PaneUpdate` は可視インスタンスにしか届かないので、一度も可視になって
+// いないインスタンスは `self.panes` を永久に持たない。召喚役はたいてい
+// フォーカス中のタブに居ない＝非可視なので、これが無いと判定材料が無い。
+// `SessionInfo` には `panes` が丸ごと入っており、可視性に依らず取れる。
+//
+// 毎フレーム呼ぶようなものではない（全セッションぶんの情報が返る）。
+// 一覧が無いときの穴埋めに限って使う。
+fn query_pane_manifest() -> Option<PaneManifest> {
+    get_session_list()
+        .ok()?
+        .live_sessions
+        .into_iter()
+        .find(|session| session.is_current_session)
+        .map(|session| session.panes)
 }
 
 // 文字数ベースの単純切り詰め（v1: CJK幅は考慮しない）
