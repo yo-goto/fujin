@@ -32,6 +32,11 @@ const SYNC_STATE_PIPE: &str = "fujin_sync_state";
 const READ_CLEAR_PIPE: &str = "fujin_read";
 // ワイヤプロトコル: 選択位置の他インスタンスへの伝播（決定13）
 const SELECTION_PIPE: &str = "fujin_selection";
+// 臨時召喚されたインスタンスに渡す configuration キー（決定16）。
+// これが "true" で起動したインスタンスは、準備でき次第 navモードへ入る
+const SUMMONED_CONFIG_KEY: &str = "summoned";
+// 召喚するフローティングの幅。レイアウトの常駐サイドバー（size=32）に合わせる
+const SIDEBAR_WIDTH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum AgentState {
@@ -167,6 +172,11 @@ struct State {
     own_plugin_url: Option<String>,
     // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
     known_siblings: std::collections::BTreeSet<u32>,
+    // 臨時召喚された（フローティングの）インスタンスか（決定16）
+    summoned: bool,
+    // 準備が整い次第 navモードへ入る予約。召喚直後は権限も一覧も未取得で、
+    // その時点で入場しても選択対象が空なので、PaneUpdate を待ってから入る
+    pending_nav_entry: bool,
 }
 
 register_plugin!(State);
@@ -177,6 +187,13 @@ impl ZellijPlugin for State {
             .get("show_cwd")
             .map(|v| v == "true")
             .unwrap_or(false);
+        // 別インスタンスに召喚されたフローティングなら、入場pipeを取り逃している。
+        // 押し直させずに済むよう、準備でき次第こちらから navモードへ入る（決定16）
+        self.summoned = configuration
+            .get(SUMMONED_CONFIG_KEY)
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        self.pending_nav_entry = self.summoned;
         self.own_plugin_id = Some(get_plugin_ids().plugin_id);
         // selectable はペイン側の属性で、リロードしても前回の false が残る。
         // 権限を追加した新版をリロードすると「承認プロンプトは出ているのに
@@ -191,6 +208,10 @@ impl ZellijPlugin for State {
             PermissionType::InterceptInput,
             // 他インスタンスとの状態同期のため（決定13）
             PermissionType::MessageAndLaunchOtherPlugins,
+            // フローティングでの臨時召喚のため（決定16）。
+            // MessageAndLaunchOtherPlugins では足りない。OpenPluginPaneFloating は
+            // これを要求し、拒否されると shim 側の unwrap でプラグインごと落ちる
+            PermissionType::OpenTerminalsOrPlugins,
         ]);
         subscribe(&[
             EventType::TabUpdate,
@@ -245,12 +266,16 @@ impl ZellijPlugin for State {
                 // インスタンスを見つけたら状態を配る（決定13）
                 self.learn_own_plugin_url();
                 self.push_state_to_new_siblings();
+                self.enter_nav_mode_if_pending();
                 true
             }
             Event::BeforeClose => {
-                // 横取りしたままプラグインが消えるとキー入力が戻らなくなる
+                // 横取りしたままプラグインが消えるとキー入力が戻らなくなる。
+                // ここでは exit_nav_mode() を使わない。閉じられている最中に
+                // 自分を close_plugin_pane() すると二重解放になるため
                 if self.nav_mode {
-                    self.exit_nav_mode();
+                    self.nav_mode = false;
+                    clear_key_presses_intercepts();
                 }
                 false
             }
@@ -371,10 +396,18 @@ impl ZellijPlugin for State {
             NAV_MODE_PIPE => {
                 // キーの横取りは1インスタンスだけが行う。全インスタンスが
                 // intercept_key_presses() を呼ぶと誰が受け取るか不定になるため。
-                if self.is_authoritative() && !self.nav_mode {
-                    self.enter_nav_mode();
-                    return true;
+                if self.is_authoritative() {
+                    if !self.nav_mode {
+                        self.enter_nav_mode();
+                        return true;
+                    }
+                    return false;
                 }
+                // ここへ来たインスタンスはフォーカス中のタブに居ない。
+                // そのタブに fujin が1つも無ければ権威を持つインスタンスが
+                // どこにも存在せず、pipe は届いているのに無反応になる。
+                // 代表1つがフローティングで召喚して穴を埋める（決定16）。
+                self.summon_floating_if_absent();
                 false
             }
             _ => false,
@@ -524,6 +557,140 @@ impl State {
             .unwrap_or(false)
     }
 
+    // --- 臨時召喚（決定16） ---
+    //
+    // フォーカス中のタブに fujin が1つも居ないと、`is_authoritative()` が
+    // 真になるインスタンスがどこにも存在せず、入場pipeが届いているのに
+    // 誰も横取りを始めない（無反応に見える）。
+    //
+    // レイアウト側だけでは穴を塞ぎきれない。既存セッションの復活、
+    // セッションマネージャ経由でのタブ作成、別レイアウトの指定、
+    // ユーザーがサイドバーを閉じた場合はいずれも fujin の居ないタブを作る。
+    // そこで代表1つがフローティングで自分を召喚する。
+    //
+    // 常駐をフローティングに変えるわけではない（決定5は維持）。タイルは
+    // 幅を返す代わりに下のペインを欠けさせないので長時間の常駐に向くが、
+    // ここでは一時的に出すだけなので重なっても構わない。ピン留めもしない。
+    fn summon_floating_if_absent(&mut self) {
+        let (Some(own_id), Some(own_url)) = (self.own_plugin_id, self.own_plugin_url.clone())
+        else {
+            eprintln!("fujin: summon skipped (own id/url unknown)");
+            return;
+        };
+        let Some(manifest) = self.panes.as_ref() else {
+            eprintln!("fujin: summon skipped (no pane manifest)");
+            return;
+        };
+        let Ok((focused_tab, _)) = get_focused_pane_info() else {
+            eprintln!("fujin: summon skipped (focused pane query failed)");
+            return;
+        };
+        // そのタブに兄弟が居るなら、そいつが権威を持つので任せる。
+        // manifest が古くて取りこぼしても、二重に出るだけで操作不能にはならない。
+        let already_present = manifest
+            .panes
+            .get(&focused_tab)
+            .map(|panes| {
+                panes
+                    .iter()
+                    .any(|p| p.is_plugin && p.plugin_url.as_deref() == Some(own_url.as_str()))
+            })
+            .unwrap_or(false);
+        // 居るのに権威が立たなかった＝ manifest のずれ。実装を疑う手がかりになる
+        if already_present {
+            eprintln!(
+                "fujin: summon skipped (tab {} already has fujin)",
+                focused_tab
+            );
+            return;
+        }
+        // 代表でなければ黙って降りる（インスタンス数ぶん出るとノイズになる）
+        if !self.is_summon_delegate(own_id, &own_url) {
+            return;
+        }
+        eprintln!("fujin: summoning floating instance into tab {focused_tab}");
+
+        let mut config = BTreeMap::new();
+        config.insert(SUMMONED_CONFIG_KEY.to_string(), "true".to_string());
+        if self.show_cwd {
+            config.insert("show_cwd".to_string(), "true".to_string());
+        }
+        // 常駐サイドバーと同じ見た目・同じ位置に出す。
+        //
+        // ピン留めは必須。タブのフローティングは既定で非表示状態のため、
+        // 普通に開くとペインは在るのに描画されない。`show_floating_panes()`
+        // で表示に切り替える手も試したが、召喚した側でも召喚された側でも
+        // "Tab not found" で失敗する（zellij 0.44.3、tab index も None も不可）。
+        // ピン留めしたペインはその表示状態に関係なく最前面に出る。
+        let mut coordinates = FloatingPaneCoordinates::default()
+            .with_x_fixed(0)
+            .with_y_fixed(0)
+            .with_width_fixed(SIDEBAR_WIDTH)
+            .with_height_percent(100);
+        coordinates.pinned = Some(true);
+        let summoned =
+            open_plugin_pane_floating(&own_url, config, Some(coordinates), BTreeMap::new());
+        // 表示への切り替えはここではやらない。召喚した側は非フォーカスの
+        // タブに居るため `show_floating_panes()` が「アクティブなタブ」を
+        // 特定できず、`None` でも tab index でも "Tab not found" になる（実測）。
+        // 召喚された本人に任せる（`enter_nav_mode_if_pending()`）。
+
+        // 決定13の同期は「可視インスタンスが PaneUpdate で新入りに気づいて配る」
+        // 方式だが、このタブには可視インスタンスが居ないため誰も気づけない。
+        // 召喚した本人が明示的に配る。
+        if let Some(PaneId::Plugin(new_id)) = summoned {
+            if !self.agents.is_empty() {
+                pipe_message_to_plugin(
+                    MessageToPlugin::new(SYNC_STATE_PIPE)
+                        .with_destination_plugin_id(new_id)
+                        .with_payload(self.state_dump()),
+                );
+            }
+        }
+    }
+
+    // 召喚の実行役を1つに絞る。兄弟IDの昇順で、実在する最初のIDが代表。
+    //
+    // 単純な最小IDだと、閉じられたペインが manifest に残っているかどうかで
+    // インスタンスごとに結論が食い違う。`get_pane_info()` はサーバへの
+    // 問い合わせなので、生存確認を挟めば鮮度の違いを吸収できる。
+    fn is_summon_delegate(&self, own_id: u32, own_url: &str) -> bool {
+        let Some(manifest) = self.panes.as_ref() else {
+            return false;
+        };
+        let mut ids: Vec<u32> = manifest
+            .panes
+            .values()
+            .flatten()
+            .filter(|p| p.is_plugin && p.plugin_url.as_deref() == Some(own_url))
+            .map(|p| p.id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        for id in ids {
+            if id == own_id {
+                return true;
+            }
+            // 自分より若いインスタンスが生きていればそちらに譲る
+            if get_pane_info(PaneId::Plugin(id)).is_some() {
+                return false;
+            }
+        }
+        false
+    }
+
+    // 召喚されたインスタンスの入場。入場pipeは自分の起動前に流れているので
+    // 受け取れない。一覧が揃ってから入る（空のまま入ると j/k が効かない）。
+    fn enter_nav_mode_if_pending(&mut self) {
+        if !self.pending_nav_entry || !self.permissions_granted || self.selectable.is_empty() {
+            return;
+        }
+        self.pending_nav_entry = false;
+        if !self.nav_mode {
+            self.enter_nav_mode();
+        }
+    }
+
     // --- インスタンス間の状態同期（決定13） ---
     //
     // pipe は起動中の全インスタンスに届くが、**後から起動したインスタンスは
@@ -670,6 +837,15 @@ impl State {
     fn exit_nav_mode(&mut self) {
         self.nav_mode = false;
         clear_key_presses_intercepts();
+        // 臨時召喚されたインスタンスは用が済んだら自分で退場する（決定16）。
+        // 残すと作業ペインに重なり続けるうえ、召喚時に表示へ切り替えた
+        // フローティングの可視状態も元へ戻せない。次の入場でまた呼べばよい
+        // （召喚から入場まで実測16ms）。
+        if self.summoned {
+            if let Some(own_id) = self.own_plugin_id {
+                close_plugin_pane(own_id);
+            }
+        }
     }
 
     // モード中のキー解釈。戻り値は再描画するか。
