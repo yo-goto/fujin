@@ -243,8 +243,17 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
                 if self.permissions_granted {
-                    // フォーカス巡回にサイドバーが混ざらないようにする（決定6）
-                    set_selectable(false);
+                    // フォーカス巡回にサイドバーが混ざらないようにする（決定6）。
+                    //
+                    // **臨時召喚は例外**（決定16）。unselectable なペインは
+                    // フォーカスできず、zellij にはペインIDを指定して閉じる
+                    // 手段が無いので、プラグイン側のロジックが壊れると
+                    // ユーザーには消す手段が一つも無くなる（実測でそうなった）。
+                    // 一時的に出ているだけなので、巡回に混ざる不都合より
+                    // 「必ず自分で消せる」ほうを取る
+                    if !self.summoned {
+                        set_selectable(false);
+                    }
                     // 既定のペイン名はwasmのフルURL（`(.) - file:/…/fujin.wasm`）
                     // で長すぎるので、プラグイン名だけにする
                     if let Some(id) = self.own_plugin_id {
@@ -425,6 +434,13 @@ impl ZellijPlugin for State {
                 false
             }
             NAV_MODE_PIPE => {
+                // **臨時召喚されたインスタンスにはこの pipe が届かない。**
+                // キーバインドの `MessagePlugin` はURL一致で配送されるが、
+                // 召喚インスタンスは configuration に `summoned=true` を持つため
+                // 一致しない（決定13で `with_plugin_url` について確認したのと
+                // 同じ制約）。実測でも受信ログが一切出なかった。
+                // したがってトグルは本人ではなく**召喚役**が担う（決定16）。
+                //
                 // キーの横取りは1インスタンスだけが行う。全インスタンスが
                 // intercept_key_presses() を呼ぶと誰が受け取るか不定になるため。
                 if self.is_authoritative() {
@@ -608,32 +624,39 @@ impl State {
             eprintln!("fujin: summon skipped (own id/url unknown)");
             return;
         };
-        let Some(manifest) = self.panes.as_ref() else {
-            eprintln!("fujin: summon skipped (no pane manifest)");
-            return;
-        };
+        // 一覧は**無いまま**のことがある。召喚役はフォーカス中のタブに
+        // 居ない＝非可視で、非可視のインスタンスには PaneUpdate が届かない。
+        // 一度も可視になっていない常駐は一覧を永久に持たないので、
+        // ここで弾くと「fujin が居ないタブで Ctrl+y が無反応」に逆戻りする
+        //（実測: 起動直後の1回目が `no pane manifest` で不発）。
+        // 一覧が要る判定は、無いなりに安全側へ倒して先へ進む。
+        let manifest = self.panes.clone();
         let Ok((focused_tab, _)) = get_focused_pane_info() else {
             eprintln!("fujin: summon skipped (focused pane query failed)");
             return;
         };
-        // 自分が前に召喚したものがまだ生きていれば重ねない。
+        // 自分が前に召喚したものがまだ生きていれば、**同じキーで引っ込める**
+        //（トグル・決定16）。召喚された本人はこの pipe を受け取れないので、
+        // 出した側が始末をつけるしかない。
         //
-        // 一覧では判定できない。召喚役は多くの場合フォーカス中のタブに
+        // 生死の判定に一覧は使えない。召喚役は多くの場合フォーカス中のタブに
         // 居ない＝非可視で、**非可視のインスタンスには PaneUpdate が届かない**
         // ため、自分が召喚したペインすら一覧に載らない。実測では入場のたびに
         // 積み上がって7枚溜まった。`get_pane_info()` はサーバへの問い合わせな
         // ので、記録したIDの生存確認には使える。
-        if let Some(previous) = self.summoned_panes.get(&focused_tab) {
-            if get_pane_info(PaneId::Plugin(*previous)).is_some() {
-                eprintln!("fujin: summon skipped (tab {focused_tab} already has a summon)");
+        if let Some(previous) = self.summoned_panes.get(&focused_tab).copied() {
+            if get_pane_info(PaneId::Plugin(previous)).is_some() {
+                eprintln!("fujin: dismissing summon {previous} (toggled off)");
+                close_plugin_pane(previous);
+                self.summoned_panes.remove(&focused_tab);
                 return;
             }
         }
         // そのタブに兄弟が居るなら、そいつが権威を持つので任せる。
         // manifest が古くて取りこぼしても、二重に出るだけで操作不能にはならない。
         let already_present = manifest
-            .panes
-            .get(&focused_tab)
+            .as_ref()
+            .and_then(|m| m.panes.get(&focused_tab))
             .map(|panes| {
                 panes
                     .iter()
@@ -719,7 +742,11 @@ impl State {
     // 問い合わせなので、生存確認を挟めば鮮度の違いを吸収できる。
     fn is_summon_delegate(&self, own_id: u32, own_url: &str) -> bool {
         let Some(manifest) = self.panes.as_ref() else {
-            return false;
+            // 一覧が無いと兄弟を知る手段が無い。ここで降りると誰も召喚せず
+            // 無反応になるので、譲らずに自分でやる。複数が同時に名乗り出て
+            // 重ねて召喚しても、召喚された本人がトグルで退場するため
+            // 積み上がらない（決定16）
+            return true;
         };
         let mut ids: Vec<u32> = manifest
             .panes
@@ -745,7 +772,17 @@ impl State {
     // 召喚されたインスタンスの入場。入場pipeは自分の起動前に流れているので
     // 受け取れない。一覧が揃ってから入る（空のまま入ると j/k が効かない）。
     fn enter_nav_mode_if_pending(&mut self) {
-        if !self.pending_nav_entry || !self.permissions_granted || self.selectable.is_empty() {
+        if !self.pending_nav_entry {
+            return;
+        }
+        if !self.permissions_granted || self.selectable.is_empty() {
+            // 入場できないまま取り残された召喚は横取りをしないので Esc が
+            // 届かない。無言で詰まると原因が追えないので、待った理由を残す
+            eprintln!(
+                "fujin: nav entry deferred (permissions={}, selectable={})",
+                self.permissions_granted,
+                self.selectable.len()
+            );
             return;
         }
         self.pending_nav_entry = false;
@@ -898,6 +935,7 @@ impl State {
     // プラグイン側で解釈する。
 
     fn enter_nav_mode(&mut self) {
+        eprintln!("fujin: entering nav mode (summoned={})", self.summoned);
         self.nav_mode = true;
         // 選択位置は前回のまま引き継ぐ。以前は入場のたびに実フォーカスから
         // 引き直していたが、それはインスタンス間で選択がずれることへの
