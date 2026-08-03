@@ -15,6 +15,9 @@
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
+mod search;
+use search::{match_pane, Field, Hit};
+
 #[cfg(test)]
 mod tests;
 
@@ -157,6 +160,20 @@ struct Selectable {
     is_floating: bool,
 }
 
+// 検索サブモード（navモード内の `/`）のローカルUI状態。
+// 権威インスタンスにしか発生しないため、兄弟への同期は不要（決定13の範囲外）
+#[derive(Debug, Default)]
+struct SearchState {
+    query: String,
+    // ペインID -> ヒット情報。ツリー順は selectable 側が持つので、ここは順序を持たない
+    hits: BTreeMap<u32, Hit>,
+    // 結果内の選択（ペインID）。インデックスで持つと rebuild_selectable() を
+    // またいだときに別の行を指す（決定13が禁じた罠のローカル版）
+    cursor: Option<u32>,
+    // 検索に入る前の選択（Esc で戻すため）
+    saved: Option<u32>,
+}
+
 #[derive(Default)]
 struct State {
     tabs: Vec<TabInfo>,
@@ -187,6 +204,9 @@ struct State {
     // 自分が召喚したフローティングの、タブindex -> プラグインID（決定16）。
     // 重ねて召喚しないための記録。一覧では代用できない（下記 summon 参照）
     summoned_panes: BTreeMap<usize, u32>,
+    // 検索サブモード中か否かは is_some() で表す。
+    // フラグとクエリが食い違う状態を作らせない
+    search: Option<SearchState>,
 }
 
 register_plugin!(State);
@@ -473,8 +493,26 @@ impl ZellijPlugin for State {
             return;
         }
         let mut y = 0;
-        // ヘッダ: セッション名（navモード中はモード名に置き換える）
-        if self.nav_mode {
+        // ヘッダ: セッション名（navモード中はモード名、検索中はクエリ入力行）
+        if let Some(search) = &self.search {
+            let header = truncate(&format!("/{}▏", search.query), cols);
+            print_text_with_coordinates(
+                Text::new(&header).color_range(3, ..header.chars().count()),
+                0,
+                y,
+                None,
+                None,
+            );
+            y += 1;
+            // 0件は空リストではなく明示する。絞り込みが効いているのか
+            // 描画が壊れているのか区別できないため
+            if search.hits.is_empty() {
+                if y < rows {
+                    print_text_with_coordinates(Text::new("  一致なし"), 0, y, None, None);
+                }
+                return;
+            }
+        } else if self.nav_mode {
             let header = truncate("-- NAV --  j/k ↵ esc", cols);
             print_text_with_coordinates(
                 Text::new(&header).color_range(3, ..header.chars().count()),
@@ -503,15 +541,49 @@ impl ZellijPlugin for State {
             if y >= rows {
                 break;
             }
+            // 絞り込み中、配下に一致ペインを持たないタブは見出しごと消す。
+            // flat_index は非検索時の選択にしか使わないので、間引いてもずれない
+            if let Some(search) = &self.search {
+                let has_hit = self.selectable.iter().any(|e| {
+                    e.tab_position == tab.position && search.hits.contains_key(&e.pane_id)
+                });
+                if !has_hit {
+                    continue;
+                }
+            }
             // タブ見出し
             let marker = if tab.active { "▾" } else { "▸" };
-            let title = truncate(
-                &format!("{} {} {}", marker, tab.position + 1, tab.name),
-                cols,
-            );
+            let heading_prefix = format!("{} {} ", marker, tab.position + 1);
+            let full_heading = format!("{}{}", heading_prefix, tab.name);
+            let title = truncate(&full_heading, cols);
             let mut text = Text::new(&title);
             if tab.active {
                 text = text.color_range(0, ..title.chars().count());
+            }
+            // タブ名にヒットしたら見出し側をハイライトする（ヒット箇所の提示）。
+            // 配下のどのペインの Hit も同じタブ名を指すので、最初の1つで足りる
+            if let Some(search) = &self.search {
+                let tab_hit = self
+                    .selectable
+                    .iter()
+                    .filter(|e| e.tab_position == tab.position)
+                    .find_map(|e| {
+                        search
+                            .hits
+                            .get(&e.pane_id)
+                            .filter(|h| h.field == Field::Tab)
+                    });
+                if let Some(hit) = tab_hit {
+                    let indices = shift_highlight_indices(
+                        &hit.indices,
+                        heading_prefix.chars().count(),
+                        &title,
+                        full_heading.chars().count(),
+                    );
+                    if !indices.is_empty() {
+                        text = text.color_indices(1, indices);
+                    }
+                }
             }
             print_text_with_coordinates(text, 0, y, None, None);
             y += 1;
@@ -522,10 +594,21 @@ impl ZellijPlugin for State {
                 if entry.tab_position != tab.position {
                     continue;
                 }
+                let this_index = flat_index;
+                flat_index += 1;
+                // 絞り込みで外れたペインは描かない
+                let hit = self.search.as_ref().and_then(|s| s.hits.get(pane_id));
+                if self.search.is_some() && hit.is_none() {
+                    continue;
+                }
                 if y >= rows {
                     break;
                 }
-                let is_selected = flat_index == self.selected;
+                // 検索中の選択は結果内カーソル（ペインID）で決まる
+                let is_selected = match &self.search {
+                    Some(search) => search.cursor == Some(*pane_id),
+                    None => this_index == self.selected,
+                };
                 let agent = self.agents.get(pane_id);
                 let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
                 // 選択行は左端にバーを立てる。テーマの選択色が沈む配色でも
@@ -541,12 +624,28 @@ impl ZellijPlugin for State {
                         label.push_str(&format!(" [{}]", a.open_tasks));
                     }
                 }
-                if self.show_cwd {
+                // cwd にヒットしたペインは show_cwd が false でも cwd を出す。
+                // 画面に無い文字列でヒットしたように見せないため
+                let show_cwd_here =
+                    self.show_cwd || matches!(hit, Some(h) if h.field == Field::Cwd);
+                let mut cwd_offset = None;
+                if show_cwd_here {
                     if let Some(cwd) = self.pane_cwds.get(pane_id) {
+                        cwd_offset = Some(label.chars().count() + 2);
                         label.push_str(&format!("  {}", cwd));
                     }
                 }
+                let full_len = label.chars().count();
                 let mut label = truncate(&label, cols);
+                // ハイライトする場所が、そのままヒットしたフィールドの提示になる
+                let highlight = hit.and_then(|hit| {
+                    let offset = match hit.field {
+                        Field::Title => Some(4), // "▌ {icon} " の4文字ぶん
+                        Field::Cwd => cwd_offset,
+                        Field::Tab => None, // タブ見出し側で描いている
+                    };
+                    offset.map(|o| shift_highlight_indices(&hit.indices, o, &label, full_len))
+                });
                 if is_selected {
                     // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
                     // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない
@@ -558,13 +657,16 @@ impl ZellijPlugin for State {
                     // アイコン部分（先頭2..3文字目）に状態色
                     text = text.color_range(a.state.color(), 2..3);
                 }
+                if let Some(indices) = highlight.filter(|i| !i.is_empty()) {
+                    // レベル1で固定（決定11のv1スコープ: 設定項目は増やさない）
+                    text = text.color_indices(1, indices);
+                }
                 if is_selected {
                     // opaque を付けないと背景が透けて選択色が沈む
                     text = text.selected().opaque().color_range(2, 0..1);
                 }
                 print_text_with_coordinates(text, 0, y, None, None);
                 y += 1;
-                flat_index += 1;
             }
         }
     }
@@ -951,6 +1053,9 @@ impl State {
 
     fn exit_nav_mode(&mut self) {
         self.nav_mode = false;
+        // 検索サブモードごと抜ける場合（安全弁・確定）はクエリも破棄する。
+        // 次回の入場は常に空クエリから始まる
+        self.search = None;
         clear_key_presses_intercepts();
         // 臨時召喚されたインスタンスは用が済んだら自分で退場する（決定16）。
         // 残すと作業ペインに重なり続けるうえ、召喚時に表示へ切り替えた
@@ -988,6 +1093,11 @@ impl State {
 
     // モード中のキー解釈。戻り値は再描画するか。
     fn handle_nav_key(&mut self, key: KeyWithModifier) -> bool {
+        // 検索サブモード中は専用ハンドラへ。下の修飾キー判定より手前に
+        // 置くこと — 検索側は Shift+Tab（修飾付き）を通す必要がある
+        if self.search.is_some() {
+            return self.handle_search_key(key);
+        }
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す。
         if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
@@ -995,6 +1105,8 @@ impl State {
             return true;
         }
         match key.bare_key {
+            // 検索サブモードへ（要件: search-explorer.md）
+            BareKey::Char('/') => self.enter_search(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => {
                 if self.selected + 1 < self.selectable.len() {
                     self.selected += 1;
@@ -1028,6 +1140,156 @@ impl State {
         // 横取り中の移動は自分にしか起きないので、都度配る
         self.broadcast_selection();
         true
+    }
+
+    // --- 検索サブモード（要件: docs/requirements/search-explorer.md） ---
+
+    // 検索中のキー解釈。navモードの安全弁（決定12）を検索用に引き直したもの。
+    // 印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる。
+    fn handle_search_key(&mut self, key: KeyWithModifier) -> bool {
+        // Shift だけは素通し（Shift付き印字可能文字と Shift+Tab のため）。
+        // それ以外の修飾キーは安全弁 — 検索だけでなく navモードごと離脱する
+        if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
+            self.exit_nav_mode();
+            return true;
+        }
+        let shifted = key.key_modifiers.contains(&KeyModifier::Shift);
+        match key.bare_key {
+            // Esc は二段階の1段目: クエリを破棄して navモードへ戻るだけ。
+            // exit_nav_mode() を呼んではいけない — 召喚インスタンスなら
+            // 検索の取り消しでサイドバーごと閉じてしまう（決定16）
+            BareKey::Esc => self.exit_search(),
+            BareKey::Enter => self.confirm_search(),
+            BareKey::Backspace => {
+                if let Some(search) = &mut self.search {
+                    search.query.pop();
+                }
+                self.refilter();
+            }
+            BareKey::Up => self.move_search_cursor(false),
+            BareKey::Down => self.move_search_cursor(true),
+            BareKey::Tab => self.move_search_cursor(!shifted),
+            BareKey::Char(c) => {
+                if let Some(search) = &mut self.search {
+                    search.query.push(c);
+                }
+                self.refilter();
+            }
+            // 未定義キーは navモードごと離脱（安全弁は最上位まで効かせる）
+            _ => self.exit_nav_mode(),
+        }
+        // 検索中の移動・入力では broadcast_selection() を呼ばない。
+        // Esc で「検索前の位置に戻す」以上、途中経過を配ると兄弟だけが
+        // 取り消せない位置に取り残される（決定13）。配るのは確定時だけで、
+        // それは confirm_search() の中で行う
+        true
+    }
+
+    fn enter_search(&mut self) {
+        let saved = self.selectable.get(self.selected).map(|e| e.pane_id);
+        self.search = Some(SearchState {
+            query: String::new(),
+            hits: BTreeMap::new(),
+            cursor: saved,
+            saved,
+        });
+        self.refilter();
+    }
+
+    // Esc の1段目。クエリを破棄し、選択を検索前に戻して navモードに留まる
+    fn exit_search(&mut self) {
+        let Some(search) = self.search.take() else {
+            return;
+        };
+        if let Some(saved) = search.saved {
+            if let Some(index) = self.selectable.iter().position(|e| e.pane_id == saved) {
+                self.selected = index;
+            }
+        }
+    }
+
+    fn confirm_search(&mut self) {
+        // 0件ヒット時の Enter は何もしない（検索サブモードに留まる）
+        let Some(cursor) = self.search.as_ref().and_then(|s| s.cursor) else {
+            return;
+        };
+        let Some(index) = self.selectable.iter().position(|e| e.pane_id == cursor) else {
+            return;
+        };
+        self.selected = index;
+        // フォーカス移動でタブが変わりうるので、先に横取りを解除する
+        //（navモードの Enter と同じ順序。search も一緒に破棄される）
+        self.exit_nav_mode();
+        self.broadcast_selection(); // 確定時だけ配る（決定13）
+        self.focus_selected();
+    }
+
+    // 絞り込みの再計算。クエリの変化と一覧の作り直し（rebuild_selectable）の
+    // 両方から呼ばれる。ペインの増減で古い結果のまま表示しないため
+    fn refilter(&mut self) {
+        let Some(search) = &self.search else {
+            return;
+        };
+        // self.search を可変借用したまま selectable / tabs を読めないので、
+        // ローカルに組み立ててから代入する
+        let query = search.query.clone();
+        let mut hits: BTreeMap<u32, Hit> = BTreeMap::new();
+        for entry in &self.selectable {
+            let tab_name = self
+                .tabs
+                .iter()
+                .find(|t| t.position == entry.tab_position)
+                .map(|t| t.name.as_str())
+                .unwrap_or("");
+            let cwd = self.pane_cwds.get(&entry.pane_id).map(String::as_str);
+            if let Some(hit) = match_pane(&query, &entry.title, tab_name, cwd) {
+                hits.insert(entry.pane_id, hit);
+            }
+        }
+        // カーソルの追従はペインIDで行う。結果に残っていれば維持し、
+        // 消えていればツリー順の先頭ヒットへ寄せる。0件なら None
+        let cursor = self
+            .search
+            .as_ref()
+            .and_then(|s| s.cursor)
+            .filter(|id| hits.contains_key(id))
+            .or_else(|| {
+                self.selectable
+                    .iter()
+                    .map(|e| e.pane_id)
+                    .find(|id| hits.contains_key(id))
+            });
+        if let Some(search) = &mut self.search {
+            search.hits = hits;
+            search.cursor = cursor;
+        }
+    }
+
+    // 検索結果内のカーソル移動。ツリー順で前後へ動かし、端で止まる
+    fn move_search_cursor(&mut self, forward: bool) {
+        let Some(search) = &self.search else {
+            return;
+        };
+        let results: Vec<u32> = self
+            .selectable
+            .iter()
+            .map(|e| e.pane_id)
+            .filter(|id| search.hits.contains_key(id))
+            .collect();
+        if results.is_empty() {
+            return;
+        }
+        let current = search
+            .cursor
+            .and_then(|c| results.iter().position(|&id| id == c));
+        let next = match current {
+            Some(i) if forward => (i + 1).min(results.len() - 1),
+            Some(i) => i.saturating_sub(1),
+            None => 0,
+        };
+        if let Some(search) = &mut self.search {
+            search.cursor = Some(results[next]);
+        }
     }
 
     fn focus_selected(&self) {
@@ -1066,6 +1328,11 @@ impl State {
         }
         if self.selected >= self.selectable.len() {
             self.selected = self.selectable.len().saturating_sub(1);
+        }
+        // 検索中にペインが増減したら絞り込みを引き直す。
+        // 古い hits のままだと閉じたペインが結果に残り続ける
+        if self.search.is_some() {
+            self.refilter();
         }
     }
 
@@ -1208,6 +1475,28 @@ fn query_pane_manifest() -> Option<PaneManifest> {
         .into_iter()
         .find(|session| session.is_current_session)
         .map(|session| session.panes)
+}
+
+// マッチ位置（フィールド内の char index）を行ラベル内の位置へずらし、
+// truncate() で切られて画面に無い位置を捨てる
+fn shift_highlight_indices(
+    indices: &[usize],
+    offset: usize,
+    truncated: &str,
+    original_len: usize,
+) -> Vec<usize> {
+    let visible = truncated.chars().count();
+    // 切り詰められた行の末尾は … なので、そこには色を乗せない
+    let limit = if visible < original_len {
+        visible.saturating_sub(1)
+    } else {
+        visible
+    };
+    indices
+        .iter()
+        .map(|i| i + offset)
+        .filter(|i| *i < limit)
+        .collect()
 }
 
 // 文字数ベースの単純切り詰め（v1: CJK幅は考慮しない）

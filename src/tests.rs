@@ -530,6 +530,307 @@ fn nav_leaves_on_undefined_keys() {
     }
 }
 
+// --- 検索サブモード（要件: docs/requirements/search-explorer.md） ---
+//
+// match_one / match_pane の単体テストは src/search.rs 側にある。
+// ここでは State を通したキー処理と絞り込みの追従を見る。
+
+// タブ2枚（tab1: alpha, bravo / tab2: charlie）。bravo だけ cwd を持つ
+fn searchable_state() -> State {
+    let mut state = State {
+        tabs: vec![tab(0, true), tab(1, false)],
+        panes: Some(manifest(vec![
+            (
+                0,
+                vec![terminal_pane(1, "alpha"), terminal_pane(2, "bravo")],
+            ),
+            (1, vec![terminal_pane(3, "charlie")]),
+        ])),
+        permissions_granted: true,
+        nav_mode: true,
+        ..Default::default()
+    };
+    state.pane_cwds.insert(2, "/work/fujin".to_string());
+    state.rebuild_selectable();
+    state
+}
+
+fn key(bare: BareKey) -> KeyWithModifier {
+    KeyWithModifier::new(bare)
+}
+
+fn type_query(state: &mut State, query: &str) {
+    for c in query.chars() {
+        state.handle_nav_key(key(BareKey::Char(c)));
+    }
+}
+
+#[test]
+fn slash_enters_search_with_an_empty_query_matching_everything() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+
+    let search = state.search.as_ref().unwrap();
+    assert!(state.nav_mode, "検索はnavモードの内側");
+    assert_eq!(search.query, "");
+    assert_eq!(search.hits.len(), 3, "空クエリは全件一致");
+    assert_eq!(search.cursor, Some(1), "カーソルは検索前の選択から始まる");
+}
+
+#[test]
+fn printable_chars_feed_the_query_not_the_selection() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    // navモードでは j は移動キーだが、検索中はクエリになる
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.search.as_ref().unwrap().query, "j");
+    assert_eq!(state.selected, 0, "選択行は動かない");
+}
+
+#[test]
+fn backspace_deletes_the_last_char_and_refilters() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    // "al" だと charlie（ch"a"r"l"ie）にもサブシーケンス一致するので "alp" を使う
+    type_query(&mut state, "alpx");
+    assert!(state.search.as_ref().unwrap().hits.is_empty());
+
+    state.handle_nav_key(key(BareKey::Backspace));
+    let search = state.search.as_ref().unwrap();
+    assert_eq!(search.query, "alp");
+    assert_eq!(search.hits.keys().copied().collect::<Vec<_>>(), vec![1]);
+}
+
+#[test]
+fn query_matches_titles() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "alpha");
+    let search = state.search.as_ref().unwrap();
+    assert_eq!(search.hits.keys().copied().collect::<Vec<_>>(), vec![1]);
+    assert_eq!(search.cursor, Some(1));
+}
+
+#[test]
+fn a_tab_name_match_keeps_all_its_panes() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "tab1");
+    let search = state.search.as_ref().unwrap();
+    // tab1 配下の全ペインが残り、tab2 配下は消える
+    assert_eq!(search.hits.keys().copied().collect::<Vec<_>>(), vec![1, 2]);
+    assert!(search
+        .hits
+        .values()
+        .all(|h| h.field == crate::search::Field::Tab));
+}
+
+#[test]
+fn cwd_matches_even_when_show_cwd_is_off() {
+    let mut state = searchable_state();
+    assert!(!state.show_cwd);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "fujin");
+    let search = state.search.as_ref().unwrap();
+    // cwd を持つ bravo だけが当たる。cwd の無いペインは cwd では一致しない
+    assert_eq!(search.hits.keys().copied().collect::<Vec<_>>(), vec![2]);
+    assert_eq!(search.hits[&2].field, crate::search::Field::Cwd);
+}
+
+#[test]
+fn cursor_moves_in_tree_order_and_stops_at_the_edges() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+
+    state.handle_nav_key(key(BareKey::Down));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(2));
+    state.handle_nav_key(key(BareKey::Tab));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(3));
+    // 末尾で止まる
+    state.handle_nav_key(key(BareKey::Down));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(3));
+
+    state.handle_nav_key(key(BareKey::Up));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(2));
+    state.handle_nav_key(key(BareKey::Tab).with_shift_modifier());
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(1));
+    // 先頭で止まる
+    state.handle_nav_key(key(BareKey::Up));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(1));
+
+    assert!(state.nav_mode, "カーソル移動でモードを抜けない");
+    assert!(state.search.is_some());
+}
+
+#[test]
+fn esc_is_two_staged_and_does_not_close_a_summoned_instance() {
+    let mut state = searchable_state();
+    state.summoned = true;
+    state.own_plugin_id = Some(9);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "charlie");
+
+    // 1段目: クエリ破棄のみ。召喚インスタンスでも navモードに留まる
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(state.search.is_none());
+    assert!(state.nav_mode, "検索のEscでnavモードごと抜けてはいけない");
+
+    // 2段目: navモードから離脱（召喚ならここで自分を閉じる）
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(!state.nav_mode);
+}
+
+#[test]
+fn esc_restores_the_selection_saved_on_entry() {
+    let mut state = searchable_state();
+    state.selected = 1; // bravo
+    state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Down));
+    state.handle_nav_key(key(BareKey::Down));
+
+    // 検索中に先頭へペインが増えてインデックスがずれても、ペインIDで戻す
+    state.panes = Some(manifest(vec![
+        (
+            0,
+            vec![
+                terminal_pane(9, "newcomer"),
+                terminal_pane(1, "alpha"),
+                terminal_pane(2, "bravo"),
+            ],
+        ),
+        (1, vec![terminal_pane(3, "charlie")]),
+    ]));
+    state.rebuild_selectable();
+
+    state.handle_nav_key(key(BareKey::Esc));
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+}
+
+#[test]
+fn enter_jumps_and_leaves_nav_mode_entirely() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "charlie");
+
+    state.handle_nav_key(key(BareKey::Enter));
+    assert!(!state.nav_mode, "確定はnavモードごと抜ける");
+    assert!(state.search.is_none(), "クエリは破棄される");
+    assert_eq!(state.selectable[state.selected].pane_id, 3);
+}
+
+#[test]
+fn enter_with_no_hits_does_nothing() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "zzz");
+    assert!(state.search.as_ref().unwrap().hits.is_empty());
+
+    state.handle_nav_key(key(BareKey::Enter));
+    assert!(state.nav_mode, "0件ヒットでは検索サブモードに留まる");
+    assert!(state.search.is_some());
+    assert_eq!(state.selected, 0, "ジャンプは起きない");
+}
+
+#[test]
+fn modified_keys_leave_nav_mode_from_search_too() {
+    // 安全弁は最上位まで効かせる（決定12と同様）
+    for key in [
+        KeyWithModifier::new(BareKey::Char('n')).with_ctrl_modifier(),
+        KeyWithModifier::new(BareKey::Char('x')).with_alt_modifier(),
+    ] {
+        let mut state = searchable_state();
+        state.handle_nav_key(KeyWithModifier::new(BareKey::Char('/')));
+        state.handle_nav_key(key.clone());
+        assert!(!state.nav_mode, "{:?} でnavモードごと抜けるべき", key);
+        assert!(state.search.is_none(), "{:?} で検索状態は破棄すべき", key);
+    }
+}
+
+#[test]
+fn reentering_search_starts_with_an_empty_query() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Esc));
+
+    state.handle_nav_key(key(BareKey::Char('/')));
+    assert_eq!(state.search.as_ref().unwrap().query, "");
+}
+
+#[test]
+fn the_cursor_follows_its_pane_through_list_updates() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Down)); // cursor = bravo(2)
+
+    // 別タブでペインが増えても、カーソルは同じペインに留まる
+    state.panes = Some(manifest(vec![
+        (
+            0,
+            vec![terminal_pane(1, "alpha"), terminal_pane(2, "bravo")],
+        ),
+        (
+            1,
+            vec![terminal_pane(3, "charlie"), terminal_pane(4, "delta")],
+        ),
+    ]));
+    state.rebuild_selectable();
+    let search = state.search.as_ref().unwrap();
+    assert_eq!(search.cursor, Some(2));
+    assert_eq!(search.hits.len(), 4, "一覧の更新で絞り込みも引き直す");
+}
+
+#[test]
+fn the_cursor_falls_back_to_the_first_hit_when_its_pane_closes() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Down)); // cursor = bravo(2)
+
+    state.panes = Some(manifest(vec![
+        (0, vec![terminal_pane(1, "alpha")]),
+        (1, vec![terminal_pane(3, "charlie")]),
+    ]));
+    state.rebuild_selectable();
+    assert_eq!(
+        state.search.as_ref().unwrap().cursor,
+        Some(1),
+        "消えたら結果の先頭へ寄せる"
+    );
+}
+
+#[test]
+fn refiltering_with_no_hits_clears_the_cursor() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "alpha");
+    state.panes = Some(manifest(vec![(1, vec![terminal_pane(3, "charlie")])]));
+    state.rebuild_selectable();
+    assert_eq!(state.search.as_ref().unwrap().cursor, None);
+}
+
+// --- shift_highlight_indices（ハイライト位置の変換） ---
+
+#[test]
+fn highlight_indices_are_shifted_by_the_label_prefix() {
+    // "▌ ○ alpha" — タイトルは4文字目から
+    assert_eq!(
+        shift_highlight_indices(&[0, 2], 4, "▌ ○ alpha", 9),
+        vec![4, 6]
+    );
+}
+
+#[test]
+fn highlight_indices_beyond_the_truncation_are_dropped() {
+    // 元9文字を6文字に切り詰めると、末尾は … になる（実位置5が省略記号）
+    let truncated = truncate("▌ ○ alpha", 6);
+    assert_eq!(truncated.chars().count(), 6);
+    assert_eq!(
+        shift_highlight_indices(&[0, 1, 2, 3, 4], 4, &truncated, 9),
+        vec![4],
+        "省略記号とその先の位置には色を乗せない"
+    );
+}
+
 // --- 兄弟インスタンスの検出（決定13） ---
 
 #[test]
@@ -765,4 +1066,29 @@ fn render_survives_a_cramped_sidebar() {
     state.render(2, 1);
     state.render(0, 0);
     state.render(40, 20);
+}
+
+#[test]
+fn render_survives_search_mode() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    // cwd ヒット（show_cwd=false でも cwd 行が出る経路）とハイライトを通す
+    type_query(&mut state, "fujin");
+    state.render(40, 20);
+    state.render(2, 1);
+    state.render(0, 0);
+
+    // タブ名ヒット（見出しのハイライト経路）
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "tab1");
+    state.render(40, 20);
+    state.render(3, 2);
+
+    // 0件（「一致なし」の行）
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "zzz");
+    state.render(40, 20);
+    state.render(1, 1);
 }
