@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/logo.svg" alt="fujin logo" width="180" />
+</div>
+
 # fujin (布陣)
 
 A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualizes
