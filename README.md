@@ -2,7 +2,7 @@
   <img src="assets/logo.svg" alt="fujin logo" width="180" />
 </div>
 
-# fujin (布陣)
+# fujin
 
 A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualizes
 the state of AI agents (Claude Code, etc.) running in each pane, and lets you

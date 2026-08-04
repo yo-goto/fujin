@@ -2,7 +2,7 @@
   <img src="assets/logo.svg" alt="fujin logo" width="180" />
 </div>
 
-# fujin（布陣）
+# fujin
 
 zellij用サイドバープラグインです。タブ > ペインを縦並びで一覧し、各ペインで動くAIエージェント（Claude Code等）の状態を可視化して、グローバルキーでジャンプできます。
 
