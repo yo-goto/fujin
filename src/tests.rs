@@ -12,6 +12,8 @@
 //   ここでは検証しない
 
 use super::*;
+use crate::agent::{AgentState, StatusPayload};
+use crate::render::{shift_highlight_indices, truncate};
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -530,7 +532,7 @@ fn nav_leaves_on_undefined_keys() {
     }
 }
 
-// --- 検索サブモード（要件: docs/requirements/search-explorer.md） ---
+// --- 検索サブモード（要件: docs/requirements/search-explorer/） ---
 //
 // match_one / match_pane の単体テストは src/search.rs 側にある。
 // ここでは State を通したキー処理と絞り込みの追従を見る。
