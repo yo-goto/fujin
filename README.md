@@ -12,7 +12,7 @@ The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" /
 "to arrange a formation" — treating your panes as a formation to arrange and
 oversee at a glance. **Zellij, plus eyes for your agents.**
 
-```
+```text
 tenacious-cymbal          ← session name
 ▸ 1 scheme
     nu
