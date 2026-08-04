@@ -1086,6 +1086,42 @@ fn dismiss_forgets_what_it_summoned() {
     assert!(state.summoned_panes.is_empty());
 }
 
+#[test]
+fn a_tab_that_already_has_fujin_is_recognized() {
+    // 「そのタブに居るなら召喚しない」の判定そのもの。常駐（タイル）でも
+    // 既に出ている召喚（フローティング）でも、居るなら重ねない
+    let url = "file:/x/fujin.wasm";
+    let other = "file:/x/other.wasm";
+    let manifest = manifest(vec![
+        (0, vec![plugin_pane(1, url), terminal_pane(10, "pane1")]),
+        (1, vec![terminal_pane(11, "pane2"), plugin_pane(2, other)]),
+        (2, vec![floating_plugin_pane(3, url)]),
+    ]);
+
+    assert!(State::tab_has_fujin(&manifest, 0, url));
+    // 別プラグインは兄弟ではない
+    assert!(!State::tab_has_fujin(&manifest, 1, url));
+    assert!(State::tab_has_fujin(&manifest, 2, url));
+    // 一覧に無いタブ（＝一覧が古いと新規タブがこうなる。だから召喚の判定では
+    // 凍った self.panes ではなくサーバへ問い合わせ直した一覧を使う）
+    assert!(!State::tab_has_fujin(&manifest, 3, url));
+}
+
+#[test]
+fn summon_candidates_are_ordered_and_deduped() {
+    // 代表は「昇順で最初に生きているID」。順序が揺れるとインスタンスごとに
+    // 結論が食い違い、誰も召喚しない／全員が召喚するのどちらにもなる
+    let url = "file:/x/fujin.wasm";
+    let other = "file:/x/other.wasm";
+    let manifest = manifest(vec![
+        (0, vec![plugin_pane(7, url), terminal_pane(1, "pane1")]),
+        (1, vec![plugin_pane(3, url), plugin_pane(9, other)]),
+        (2, vec![plugin_pane(7, url), floating_plugin_pane(5, url)]),
+    ]);
+
+    assert_eq!(State::sibling_plugin_ids(&manifest, url), vec![3, 5, 7]);
+}
+
 // --- pipe（ワイヤプロトコル） ---
 
 fn pipe_message(name: &str, payload: &str) -> PipeMessage {

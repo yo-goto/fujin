@@ -27,21 +27,30 @@ impl State {
             eprintln!("fujin: summon skipped (own id/url unknown)");
             return;
         };
-        // 一覧はフォーカス中のタブに fujin が既に居るかを見る唯一の材料で、
-        // 無いまま進むと常駐が居るタブへ重ねて召喚してしまう（実際に一度壊した:
-        // まだ訪れていないタブの常駐が召喚役として暴走した）。かといって諦めると
-        // 今度は召喚できない。非可視インスタンスには PaneUpdate が届かず、一度も
-        // 可視になっていない常駐は一覧を永久に持たないため、サーバに問い合わせて埋める
-        let manifest = match self.panes.clone().or_else(query_pane_manifest) {
-            Some(manifest) => manifest,
-            None => {
-                eprintln!("fujin: summon skipped (no pane manifest)");
-                return;
-            }
-        };
         let Ok((focused_tab, _)) = get_focused_pane_info() else {
             eprintln!("fujin: summon skipped (focused pane query failed)");
             return;
+        };
+        // 一覧はフォーカス中のタブに fujin が既に居るかを見る唯一の材料で、
+        // 古いまま進むと常駐が居るタブへ重ねて召喚してしまう（実際に二度壊した:
+        // まだ訪れていないタブの常駐が召喚役として暴走した／新規タブに常駐が
+        // 居るのに重ねて召喚した）。かといって諦めると今度は召喚できない。
+        //
+        // **`self.panes` は使わない。** ここへ来る時点で自分はフォーカス中の
+        // タブに居ない＝非可視であり、非可視インスタンスには PaneUpdate が
+        // 届かない。`self.panes` は良くて「最後に可視だった時点」で凍っており
+        //（一度も可視でなければ永久に `None`）、その後に作られたタブの常駐は
+        // 載らない。凍った一覧で判定すると新規タブへ重ねて召喚してしまうため、
+        // 毎回サーバに問い合わせ直す。重い問い合わせだが、増殖して消せない事故
+        //（決定16で一度実際に壊した経路）の方がコストが高い
+        let manifest = match query_pane_manifest().or_else(|| self.panes.clone()) {
+            Some(manifest) => manifest,
+            None => {
+                // 問い合わせが落ちたときだけ凍った一覧に頼る（それも無ければここ）。
+                // 諦めると「Ctrl+y が無反応」に逆戻りするので、経路自体は残す
+                eprintln!("fujin: summon skipped (no pane manifest)");
+                return;
+            }
         };
         // 自分が前に召喚したものがまだ生きていれば、**同じキーで引っ込める**
         //（トグル・決定16）。召喚された本人はこの pipe を受け取れないので、
@@ -60,18 +69,8 @@ impl State {
             }
         }
         // そのタブに兄弟が居るなら、そいつが権威を持つので任せる。
-        // manifest が古くて取りこぼしても、二重に出るだけで操作不能にはならない。
         // 居るのに権威が立たなかった＝ manifest のずれ。実装を疑う手がかりになる
-        let already_present = manifest
-            .panes
-            .get(&focused_tab)
-            .map(|panes| {
-                panes
-                    .iter()
-                    .any(|p| p.is_plugin && p.plugin_url.as_deref() == Some(own_url.as_str()))
-            })
-            .unwrap_or(false);
-        if already_present {
+        if Self::tab_has_fujin(&manifest, focused_tab, &own_url) {
             eprintln!(
                 "fujin: summon skipped (tab {} already has fujin)",
                 focused_tab
@@ -142,12 +141,26 @@ impl State {
         coordinates
     }
 
-    // 召喚の実行役を1つに絞る。兄弟IDの昇順で、実在する最初のIDが代表。
-    //
-    // 単純な最小IDだと、閉じられたペインが manifest に残っているかどうかで
-    // インスタンスごとに結論が食い違う。`get_pane_info()` はサーバへの
-    // 問い合わせなので、生存確認を挟めば鮮度の違いを吸収できる
-    fn is_summon_delegate(manifest: &PaneManifest, own_id: u32, own_url: &str) -> bool {
+    // 指定タブに自分と同じ fujin が居るか。常駐（タイル）と召喚（フローティング）を
+    // 区別しない。既に出ている召喚に重ねて召喚しないためでもある
+    pub(crate) fn tab_has_fujin(
+        manifest: &PaneManifest,
+        tab_position: usize,
+        own_url: &str,
+    ) -> bool {
+        manifest
+            .panes
+            .get(&tab_position)
+            .map(|panes| {
+                panes
+                    .iter()
+                    .any(|p| p.is_plugin && p.plugin_url.as_deref() == Some(own_url))
+            })
+            .unwrap_or(false)
+    }
+
+    // 一覧に載っている兄弟インスタンスのIDを昇順・重複なしで
+    pub(crate) fn sibling_plugin_ids(manifest: &PaneManifest, own_url: &str) -> Vec<u32> {
         let mut ids: Vec<u32> = manifest
             .panes
             .values()
@@ -157,7 +170,16 @@ impl State {
             .collect();
         ids.sort_unstable();
         ids.dedup();
-        for id in ids {
+        ids
+    }
+
+    // 召喚の実行役を1つに絞る。兄弟IDの昇順で、実在する最初のIDが代表。
+    //
+    // 単純な最小IDだと、閉じられたペインが manifest に残っているかどうかで
+    // インスタンスごとに結論が食い違う。`get_pane_info()` はサーバへの
+    // 問い合わせなので、生存確認を挟めば鮮度の違いを吸収できる
+    fn is_summon_delegate(manifest: &PaneManifest, own_id: u32, own_url: &str) -> bool {
+        for id in Self::sibling_plugin_ids(manifest, own_url) {
             if id == own_id {
                 return true;
             }
@@ -216,8 +238,9 @@ impl State {
 }
 
 // ペイン一覧をサーバから直接引く。`SessionInfo` には `panes` が丸ごと入って
-// おり、可視性に依らず取れる。全セッションぶんの情報が返る重い問い合わせなので、
-// 一覧が無いときの穴埋めに限って使う
+// おり、**可視性に依らず・イベント配送を待たずに**取れる。全セッションぶんの
+// 情報が返る重い問い合わせなので、召喚の判定のように `self.panes` の鮮度を
+// 信用できない場面に限って使う
 fn query_pane_manifest() -> Option<PaneManifest> {
     get_session_list()
         .ok()?
