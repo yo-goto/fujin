@@ -76,7 +76,6 @@ struct Selectable {
 struct State {
     tabs: Vec<TabInfo>,
     panes: Option<PaneManifest>,
-    session_name: Option<String>,
     // key: ターミナルペインID
     agents: BTreeMap<u32, AgentInfo>,
     // フラット化した選択対象
@@ -92,6 +91,15 @@ struct State {
     pane_cwds: BTreeMap<u32, String>,
     // navモード中か。全キーを横取りしているインスタンスだけが true になる
     nav_mode: bool,
+    // 直近に観測した「zellijが実際にフォーカスしているターミナルペイン」
+    //（要件: docs/requirements/focus-sync/）。ホストへの問い合わせ結果を
+    // ここに畳んでおき、navモードの入退場はこの値だけを見る（問い合わせ系の
+    // ホスト関数はテストから呼べないため、判定ロジックを切り離しておく）
+    focused_pane: Option<u32>,
+    // navモードを抜けたときのフォーカスと選択（要件: focus-sync）。
+    // 次の入場で選択の初期値を決めるのに使う
+    focus_at_nav_exit: Option<u32>,
+    selection_at_nav_exit: Option<u32>,
     // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
     known_siblings: BTreeSet<u32>,
     // 臨時召喚された（フローティングの）インスタンスか（決定16）
@@ -144,7 +152,6 @@ impl ZellijPlugin for State {
         subscribe(&[
             EventType::TabUpdate,
             EventType::PaneUpdate,
-            EventType::ModeUpdate,
             EventType::PermissionRequestResult,
             EventType::Visible,
             EventType::InterceptedKeyPress,
@@ -186,14 +193,11 @@ impl ZellijPlugin for State {
                 self.visible = visible;
                 visible
             }
-            Event::ModeUpdate(mode_info) => {
-                let changed = self.session_name != mode_info.session_name;
-                self.session_name = mode_info.session_name;
-                changed
-            }
             Event::TabUpdate(tabs) => {
                 self.tabs = tabs;
                 self.rebuild_selectable();
+                // タブの切り替えでもフォーカスは動く（要件: focus-sync）
+                self.refresh_focus();
                 self.enter_nav_mode_if_pending();
                 true
             }
@@ -206,6 +210,8 @@ impl ZellijPlugin for State {
                 // インスタンスを見つけたら状態を配る（決定13）
                 self.learn_own_plugin_url();
                 self.push_state_to_new_siblings();
+                // ペインのフォーカス移動はここに届く（要件: focus-sync）
+                self.refresh_focus();
                 self.enter_nav_mode_if_pending();
                 true
             }
@@ -263,7 +269,7 @@ impl ZellijPlugin for State {
             // 動かすと、一覧が古いインスタンスでは境界判定とクランプの結果が
             // 違って選択がずれる
             NAV_UP_PIPE => {
-                if !self.is_authoritative() {
+                if !self.refresh_focus() {
                     return false;
                 }
                 self.selected = self.selected.saturating_sub(1);
@@ -271,7 +277,7 @@ impl ZellijPlugin for State {
                 true
             }
             NAV_DOWN_PIPE => {
-                if !self.is_authoritative() {
+                if !self.refresh_focus() {
                     return false;
                 }
                 if self.selected + 1 < self.selectable.len() {
@@ -282,7 +288,7 @@ impl ZellijPlugin for State {
             }
             NAV_GO_PIPE => {
                 // 副作用は可視インスタンスのみ実行（多重発行の防止・決定14）
-                if self.is_authoritative() {
+                if self.refresh_focus() {
                     self.focus_selected();
                 }
                 false
@@ -301,18 +307,12 @@ impl ZellijPlugin for State {
                 // 選択はインデックスではなく**ペインIDで**運ぶ。インデックスは
                 // 各インスタンスの selectable に依存し、一覧が古いインスタンス
                 // では別の行を指してしまうため
-                let target: Option<u32> = pipe_message
+                pipe_message
                     .payload
                     .as_deref()
-                    .and_then(|p| p.trim().parse().ok());
-                if let Some(target) = target {
-                    if let Some(index) = self.selectable.iter().position(|e| e.pane_id == target) {
-                        let changed = self.selected != index;
-                        self.selected = index;
-                        return changed;
-                    }
-                }
-                false
+                    .and_then(|p| p.trim().parse::<u32>().ok())
+                    .map(|target| self.select_pane_id(target))
+                    .unwrap_or(false)
             }
             READ_CLEAR_PIPE => {
                 // 可視インスタンスが観測した既読クリアを取り込む
@@ -346,7 +346,9 @@ impl ZellijPlugin for State {
                 // 召喚は configuration に `summoned=true` を持つため一致しない
                 //（実測: 受信ログが一切出ない）。トグルは本人ではなく
                 // 召喚役が担う（決定16）
-                if self.is_authoritative() {
+                // refresh_focus() が入場直前の実フォーカスを取り込むので、
+                // enter_nav_mode() は最新のフォーカスを見て初期位置を決められる
+                if self.refresh_focus() {
                     if !self.nav_mode {
                         self.enter_nav_mode();
                         return true;
@@ -369,9 +371,12 @@ impl ZellijPlugin for State {
 }
 
 impl State {
-    // 操作の権威を持つインスタンスか（決定14）。
+    // フォーカス情報をサーバへ1回だけ問い合わせて、
+    //  - 観測したフォーカスを取り込み、navモード外なら選択行を追従させる
+    //    （要件: docs/requirements/focus-sync/）
+    //  - 自分が操作の権威を持つインスタンスか（決定14）を返す
     //
-    // イベントの配送は当てにできない:
+    // 権威の判定にイベントの配送は当てにできない:
     // - PaneUpdate / TabUpdate は非可視インスタンスに届かないため、
     //   「自分のタブがアクティブ」なインスタンスが複数現れる（実測）
     // - Event::Visible は真が常に1つだけで正確だが、**プラグインを
@@ -379,24 +384,50 @@ impl State {
     //   プラグインの状態は初期化される）
     //
     // そこでサーバへ直接問い合わせる。get_focused_pane_info() は
-    // 「このプラグインのクライアントにとっての」フォーカス中のタブを返すので、
-    // 常に最新かつ、真になるインスタンスは1つだけになる。
-    fn is_authoritative(&self) -> bool {
-        let Some(own_id) = self.own_plugin_id else {
-            return false;
-        };
-        let Some(manifest) = &self.panes else {
-            return false;
-        };
-        let Ok((focused_tab, _)) = get_focused_pane_info() else {
+    // 「このプラグインのクライアントにとっての」フォーカス中のタブ／ペインを
+    // 返すので、常に最新かつ、権威になるインスタンスは1つだけになる。
+    fn refresh_focus(&mut self) -> bool {
+        let Ok((focused_tab, focused_pane)) = get_focused_pane_info() else {
             // 問い合わせに失敗したときだけ Visible に落とす
             return self.visible;
         };
-        // 自分のプラグインペインがフォーカス中のタブにいるか。
-        // manifest が古くても、自分のペインの所属タブは動かないので判定できる
+        if !self.owns_tab(focused_tab) {
+            // フォーカス中のタブに居ないインスタンスは選択を自分では動かさない。
+            // 動かすのは権威1つだけで、兄弟へは決定13の同期で配られる
+            return false;
+        }
+        let focused = match focused_pane {
+            PaneId::Terminal(id) => Some(id),
+            // プラグインペインは selectable に無いので追従対象外
+            PaneId::Plugin(_) => None,
+        };
+        // **フォーカスが動いたときだけ**引き直す。PaneUpdate はペイン名の変化
+        // でも飛んでくるので、毎回引き直すと fujin_up / fujin_down で動かした
+        // 選択が勝手に戻ってしまう
+        if focused != self.focused_pane {
+            self.focused_pane = focused;
+            // navモード中の選択はユーザーの探索カーソルなので追従させない
+            //（フォーカスの記録だけは続ける。退場時の比較材料になる）
+            if !self.nav_mode {
+                if let Some(pane_id) = focused {
+                    if self.select_pane_id(pane_id) {
+                        self.broadcast_selection();
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    // 自分のプラグインペインが指定タブに居るか。
+    // manifest が古くても、自分のペインの所属タブは動かないので判定できる
+    pub(crate) fn owns_tab(&self, tab_position: usize) -> bool {
+        let (Some(own_id), Some(manifest)) = (self.own_plugin_id, self.panes.as_ref()) else {
+            return false;
+        };
         manifest
             .panes
-            .get(&focused_tab)
+            .get(&tab_position)
             .map(|panes| panes.iter().any(|p| p.is_plugin && p.id == own_id))
             .unwrap_or(false)
     }

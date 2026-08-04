@@ -8,8 +8,10 @@
 //   intercept_key_presses 等）は下のスタブで何もしなくなるので、呼ばれても安全
 // - **戻り値を stdin から読み返す問い合わせ系は呼べない**（get_plugin_ids,
 //   get_focused_pane_info 等）。テスト中に呼ぶと stdin の読み取りに失敗して panic する。
-//   したがって is_authoritative() とそれを経由する pipe ハンドラ（NAV_*）は
-//   ここでは検証しない
+//   したがって refresh_focus() とそれを経由する pipe ハンドラ（NAV_*）は
+//   ここでは検証しない。フォーカス同期（要件: focus-sync）のうち、
+//   問い合わせ結果を畳んだ先（State::focused_pane）から先のロジックは
+//   フィールドを直接立てて検証する
 
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
@@ -530,6 +532,115 @@ fn nav_leaves_on_undefined_keys() {
         assert!(!state.nav_mode, "{:?} でモードを抜けるべき", key);
         assert_eq!(state.selected, 0, "{:?} で選択を動かすべきでない", key);
     }
+}
+
+// --- フォーカス同期（要件: docs/requirements/focus-sync/） ---
+//
+// 実フォーカスの問い合わせ（refresh_focus）はここでは呼べないので、
+// 観測結果を畳んだ State::focused_pane を直接立てて先のロジックを見る。
+
+#[test]
+fn nav_entry_starts_from_the_focused_pane() {
+    // 退場の記録が無い初回の入場は、常にフォーカス中のペインから始まる
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(3);
+
+    state.enter_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 3);
+}
+
+#[test]
+fn nav_entry_follows_focus_moved_after_leaving() {
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j'))); // pane2 まで探索して
+    state.handle_nav_key(key(BareKey::Esc)); // 退場（フォーカスは pane1 のまま）
+
+    // 退場後に通常のzellij操作でフォーカスが動いた
+    state.focused_pane = Some(3);
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 3,
+        "作業場所が変わったら現在のフォーカスから始める"
+    );
+}
+
+#[test]
+fn nav_entry_restores_the_exploring_position_when_focus_did_not_move() {
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+    state.handle_nav_key(key(BareKey::Esc));
+
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 2,
+        "フォーカスを動かしていないなら探索位置を復元する"
+    );
+}
+
+#[test]
+fn leaving_nav_mode_puts_the_highlight_back_on_the_focused_pane() {
+    // navモード外のハイライトは常に実フォーカスと一致する
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.handle_nav_key(key(BareKey::Esc));
+
+    assert_eq!(state.selectable[state.selected].pane_id, 1);
+}
+
+#[test]
+fn jumping_leaves_the_highlight_on_the_jump_target() {
+    // ジャンプでは実フォーカスが選択行へ移るので、選択は戻さない
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.handle_nav_key(key(BareKey::Enter));
+    assert!(!state.nav_mode);
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+
+    // ジャンプ後のフォーカスは選択行と一致するので、次の入場もそこから
+    state.focused_pane = Some(2);
+    state.enter_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+}
+
+#[test]
+fn select_pane_id_ignores_unknown_panes() {
+    let mut state = state_with_panes(3);
+    state.selected = 1;
+
+    assert!(!state.select_pane_id(99), "一覧に無いペインでは動かさない");
+    assert_eq!(state.selected, 1);
+    assert!(!state.select_pane_id(2), "同じ行なら「動いた」にはしない");
+    assert!(state.select_pane_id(3));
+    assert_eq!(state.selected, 2);
+}
+
+#[test]
+fn owns_tab_only_matches_the_tab_holding_this_instance() {
+    // 権威判定（決定14）の材料。フォーカス中のタブに自分が居るかだけを見る
+    let state = State {
+        own_plugin_id: Some(9),
+        panes: Some(manifest(vec![
+            (
+                0,
+                vec![terminal_pane(1, "pane1"), plugin_pane(9, "fujin.wasm")],
+            ),
+            (1, vec![terminal_pane(2, "pane2")]),
+        ])),
+        ..Default::default()
+    };
+
+    assert!(state.owns_tab(0));
+    assert!(!state.owns_tab(1));
+    assert!(!state.owns_tab(2), "存在しないタブ");
 }
 
 // --- 検索サブモード（要件: docs/requirements/search-explorer/） ---
@@ -1059,7 +1170,6 @@ fn unknown_pipes_are_ignored() {
 fn render_survives_a_cramped_sidebar() {
     let mut state = state_with_panes(3);
     state.apply_status(status(1, "Stop"));
-    state.session_name = Some("session".to_string());
     state.show_cwd = true;
     state
         .pane_cwds

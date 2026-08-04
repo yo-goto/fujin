@@ -1,7 +1,11 @@
 // サイドバーの描画。
 //
-// レイアウト: ヘッダ1行（セッション名 / navモード名 / 検索クエリ）に続けて、
-// タブ見出し > 配下のペイン行 をタブ順で縦に並べる。
+// レイアウト: navモード名・検索クエリのヘッダ1行（通常表示のときは無し）に
+// 続けて、タブ見出し > 配下のペイン行 をタブ順で縦に並べる。
+//
+// 通常表示でヘッダを出さないのは、セッション名を zellij 本体のトップバーが
+// `Zellij (セッション名)` の形で常時出しており、重複が視認性を下げるため
+//（要件: docs/requirements/sidebar-tree/）。
 
 use zellij_tile::prelude::*;
 
@@ -21,7 +25,7 @@ impl State {
             return;
         }
         let mut y = 0;
-        // ヘッダ: 検索中はクエリ入力行、navモード中はモード名、通常はセッション名
+        // ヘッダ: 検索中はクエリ入力行、navモード中はモード名。通常表示では出さない
         if let Some(search) = &self.search {
             let header = truncate(&format!("/{}▏", search.query), cols);
             print_text_with_coordinates(
@@ -44,16 +48,6 @@ impl State {
             let header = truncate("-- NAV --  j/k ↵ esc", cols);
             print_text_with_coordinates(
                 Text::new(&header).color_range(3, ..header.chars().count()),
-                0,
-                y,
-                None,
-                None,
-            );
-            y += 1;
-        } else if let Some(name) = &self.session_name {
-            let header = truncate(name, cols);
-            print_text_with_coordinates(
-                Text::new(&header).color_range(2, ..header.chars().count()),
                 0,
                 y,
                 None,

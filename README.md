@@ -13,7 +13,6 @@ The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" /
 oversee at a glance. **Zellij, plus eyes for your agents.**
 
 ```text
-tenacious-cymbal          ← session name
 ▸ 1 scheme
     nu
     koka
@@ -257,6 +256,10 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 
 Any other key also exits the mode (a safety valve so you never get stuck with
 keystrokes going nowhere).
+
+The highlighted row always follows the pane you have focused, so nav mode starts
+on the pane you are working in. The one exception: if you leave with `Esc` and
+come back without moving the focus, it resumes where you were browsing.
 
 ### Search (`/` inside nav mode)
 

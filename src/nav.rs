@@ -29,16 +29,38 @@ impl State {
     pub(crate) fn enter_nav_mode(&mut self) {
         eprintln!("fujin: entering nav mode (summoned={})", self.summoned);
         self.nav_mode = true;
-        // 選択位置は前回のまま引き継ぐ。実フォーカスから引き直すと
-        // 「作業中のペイン＝多くは自分がいる行」へ毎回選択が戻り、
-        // 前回どこまで見ていたかが失われる（選択のずれ自体は決定13の
-        // 選択同期で防いでいるので、引き直しは不要）
+        if let Some(pane_id) = self.nav_entry_selection() {
+            self.select_pane_id(pane_id);
+        }
         self.broadcast_selection();
         intercept_key_presses();
     }
 
+    // 入場時に選択すべきペイン（要件: docs/requirements/focus-sync/）。
+    //
+    // - 退場後にフォーカスが動いていた → 現在のフォーカスから始める。
+    //   ユーザーが作業場所を変えた以上、古い探索位置を出すと
+    //   「なぜここが選ばれているのか」と混乱を招く
+    // - 動いていない（Escで抜けたまま実フォーカスに触れていない）→
+    //   退場時の探索位置を復元する。「ちょっと確認して抜けたが、すぐ見たい」に応える
+    //
+    // Enterでジャンプして退場した場合は、ジャンプでフォーカスが選択行へ移るため
+    // 前者の分岐を通り、結果としてジャンプ先が選ばれる（どちらでも同じ行になる）
+    fn nav_entry_selection(&self) -> Option<u32> {
+        let focused = self.focused_pane?;
+        if self.focus_at_nav_exit == Some(focused) {
+            self.selection_at_nav_exit.or(Some(focused))
+        } else {
+            Some(focused)
+        }
+    }
+
     pub(crate) fn exit_nav_mode(&mut self) {
         self.nav_mode = false;
+        // 次の入場で「退場後にフォーカスが動いたか」を判定するために控える
+        //（要件: focus-sync）
+        self.focus_at_nav_exit = self.focused_pane;
+        self.selection_at_nav_exit = self.selectable.get(self.selected).map(|e| e.pane_id);
         // 検索サブモードごと抜ける場合はクエリも破棄する。
         // 次回の入場は常に空クエリから始まる
         self.search = None;
@@ -53,6 +75,29 @@ impl State {
         }
     }
 
+    // ジャンプを伴わない離脱（Esc / q / 未定義キー）。navモード外のハイライトは
+    // 常に実フォーカスと一致するので、探索で動かした選択はここで戻す
+    //（要件: focus-sync）。探索位置そのものは exit_nav_mode() が控えていて、
+    // フォーカスが動かないまま入り直せば復元される
+    fn leave_nav_mode(&mut self) {
+        self.exit_nav_mode();
+        if let Some(focused) = self.focused_pane {
+            self.select_pane_id(focused);
+        }
+    }
+
+    // ペインIDで選択行を移す。戻り値は選択が動いたか。
+    // インデックスではなくペインIDを入口にするのは決定13と同じ理由で、
+    // 一覧が古いインスタンスでも同じ行を指せるようにするため
+    pub(crate) fn select_pane_id(&mut self, pane_id: u32) -> bool {
+        let Some(index) = self.selectable.iter().position(|e| e.pane_id == pane_id) else {
+            return false;
+        };
+        let changed = self.selected != index;
+        self.selected = index;
+        changed
+    }
+
     // モード中のキー解釈。戻り値は再描画するか
     pub(crate) fn handle_nav_key(&mut self, key: KeyWithModifier) -> bool {
         // 検索サブモード中は専用ハンドラへ。下の修飾キー判定より手前に
@@ -63,7 +108,7 @@ impl State {
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す
         if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
-            self.exit_nav_mode();
+            self.leave_nav_mode();
             return true;
         }
         match key.bare_key {
@@ -97,7 +142,7 @@ impl State {
             }
             // Esc / q は明示的な離脱。それ以外の未定義キーでも抜ける:
             // 万一プラグインが応答不能になってもキー入力が取り残されないため
-            _ => self.exit_nav_mode(),
+            _ => self.leave_nav_mode(),
         }
         // 横取り中の移動は自分にしか起きないので、都度配る
         self.broadcast_selection();
@@ -110,7 +155,7 @@ impl State {
         // Shift だけは素通し（Shift付き印字可能文字と Shift+Tab のため）。
         // それ以外の修飾キーは安全弁 — 検索だけでなく navモードごと離脱する
         if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
-            self.exit_nav_mode();
+            self.leave_nav_mode();
             return true;
         }
         let shifted = key.key_modifiers.contains(&KeyModifier::Shift);
@@ -136,7 +181,7 @@ impl State {
                 self.refilter();
             }
             // 未定義キーは navモードごと離脱（安全弁は最上位まで効かせる）
-            _ => self.exit_nav_mode(),
+            _ => self.leave_nav_mode(),
         }
         // 検索中の移動・入力では broadcast_selection() を呼ばない。
         // Esc で「検索前の位置に戻す」以上、途中経過を配ると兄弟だけが
@@ -162,9 +207,7 @@ impl State {
             return;
         };
         if let Some(saved) = search.saved {
-            if let Some(index) = self.selectable.iter().position(|e| e.pane_id == saved) {
-                self.selected = index;
-            }
+            self.select_pane_id(saved);
         }
     }
 
