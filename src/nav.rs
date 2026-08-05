@@ -57,6 +57,9 @@ impl State {
 
     pub(crate) fn exit_nav_mode(&mut self) {
         self.nav_mode = false;
+        // ヘルプオーバーレイはnavモードの内側の表示。開いたまま退場すると
+        // ツリー表示に戻れなくなる（navモード外にキーは届かない）
+        self.help_overlay = false;
         // 次の入場で「退場後にフォーカスが動いたか」を判定するために控える
         //（要件: focus-sync）
         self.focus_at_nav_exit = self.focused_pane;
@@ -102,6 +105,22 @@ impl State {
 
     // モード中のキー解釈。戻り値は再描画するか
     pub(crate) fn handle_nav_key(&mut self, key: KeyWithModifier) -> bool {
+        // ヘルプオーバーレイ表示中はどのキーでも閉じるだけで、キーそのものは
+        // 操作として解釈しない（要件: nav-mode-hints）。安全弁（決定12）より
+        // 手前に置くのは、修飾キー付きでも「閉じる」で済ませてnavモードを
+        // 継続させるため — 閲覧を終わらせただけで退場するのは筋が通らない
+        if self.help_overlay {
+            self.help_overlay = false;
+            return true;
+        }
+        // `?` はヘルプオーバーレイを開く。検索サブモードへの振り分けより手前に
+        // 置く — 検索中の印字可能文字はクエリになるので、後ろに置くと `?` が
+        // クエリへ入ってヘルプを呼べなくなる（検索サブモード中も `?` で開ける
+        // ことが要件。代償としてクエリに `?` は打てない）
+        if key.bare_key == BareKey::Char('?') && !has_hard_modifier(&key) {
+            self.help_overlay = true;
+            return true;
+        }
         // 検索サブモード中は専用ハンドラへ。下の修飾キー判定より手前に
         // 置くこと — 検索側は Shift+Tab（修飾付き）を通す必要がある
         if self.search.is_some() {
@@ -109,7 +128,7 @@ impl State {
         }
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す
-        if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
+        if has_hard_modifier(&key) {
             self.leave_nav_mode();
             return true;
         }
@@ -155,8 +174,8 @@ impl State {
     // 印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる
     fn handle_search_key(&mut self, key: KeyWithModifier) -> bool {
         // Shift だけは素通し（Shift付き印字可能文字と Shift+Tab のため）。
-        // それ以外の修飾キーは安全弁 — 検索だけでなく navモードごと離脱する
-        if key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift) {
+        // それ以外の修飾キーは安全弁 — 検索だけでなく navモードごと抜ける
+        if has_hard_modifier(&key) {
             self.leave_nav_mode();
             return true;
         }
@@ -336,6 +355,41 @@ impl State {
         }
     }
 
+    // ヘルプオーバーレイに出すキー一覧（要件: nav-mode-hints）。
+    // 表示中のモードで内容を出し分ける。文言は英語で統一する
+    pub(crate) fn help_lines(&self) -> &'static [&'static str] {
+        if self.search.is_some() {
+            &[
+                "[SEARCH] keys",
+                "",
+                "type          filter panes",
+                "backspace     delete char",
+                "up/down tab   move cursor",
+                "shift+tab     move back",
+                "enter         jump & exit",
+                "esc           cancel search",
+                "?             this help",
+                "",
+                "press any key to close",
+            ]
+        } else {
+            &[
+                "[NAV] keys",
+                "",
+                "j k up down   move",
+                "tab           move down",
+                "g G           top / bottom",
+                "1-9           jump to n",
+                "enter l space jump & exit",
+                "/             search",
+                "?             this help",
+                "esc q         exit",
+                "",
+                "press any key to close",
+            ]
+        }
+    }
+
     // 選択対象（ターミナルペイン）のフラットリストをタブ順で再構築
     pub(crate) fn rebuild_selectable(&mut self) {
         self.selectable.clear();
@@ -368,4 +422,10 @@ impl State {
             self.refilter();
         }
     }
+}
+
+// Shift 以外の修飾キー（Ctrl / Alt / Super）が付いているか。
+// 安全弁（決定12）の判定条件で、Shift だけは印字可能文字の一部として素通しする
+fn has_hard_modifier(key: &KeyWithModifier) -> bool {
+    key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift)
 }

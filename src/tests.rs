@@ -15,7 +15,7 @@
 
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
-use crate::render::{shift_highlight_indices, truncate};
+use crate::render::{shift_highlight_indices, truncate, Row};
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -532,6 +532,158 @@ fn nav_leaves_on_undefined_keys() {
         assert!(!state.nav_mode, "{:?} でモードを抜けるべき", key);
         assert_eq!(state.selected, 0, "{:?} で選択を動かすべきでない", key);
     }
+}
+
+// --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/nav-mode/） ---
+//
+// サイドバー幅は32文字（決定3）。ヘッダもヘルプもこの幅を前提に文言を決めてある
+
+#[test]
+fn the_nav_header_shows_the_help_and_exit_hints() {
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+
+    let header = state.header_line(32);
+    assert!(header.contains("[NAV]"), "{}", header);
+    assert!(header.contains("?:help"), "{}", header);
+    assert!(header.contains("esc:exit"), "{}", header);
+    assert!(header.chars().count() <= 32, "サイドバー幅に収まる");
+}
+
+#[test]
+fn the_search_header_keeps_the_help_hint_beside_the_query() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "alp");
+
+    let header = state.header_line(32);
+    assert!(header.starts_with("/alp"), "{}", header);
+    assert!(header.contains("?:help"), "{}", header);
+    assert!(header.chars().count() <= 32);
+}
+
+#[test]
+fn a_long_query_wins_over_the_help_hint() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "0123456789");
+
+    // 幅12にはヒントを置く余地が無い。入力中のクエリのほうを残す
+    let header = state.header_line(12);
+    assert!(!header.contains("?:help"), "{}", header);
+    assert!(header.chars().count() <= 12);
+}
+
+#[test]
+fn question_mark_opens_the_help_overlay() {
+    for key in [
+        KeyWithModifier::new(BareKey::Char('?')),
+        // Shift+/ として届く端末もある
+        KeyWithModifier::new(BareKey::Char('?')).with_shift_modifier(),
+    ] {
+        let mut state = state_with_panes(3);
+        state.nav_mode = true;
+        state.handle_nav_key(key.clone());
+
+        assert!(state.help_overlay, "{:?} でヘルプを開くべき", key);
+        assert!(state.nav_mode, "ヘルプはnavモードの内側");
+        assert_eq!(state.selected, 0, "選択は動かさない");
+    }
+}
+
+#[test]
+fn the_help_overlay_covers_the_whole_sidebar() {
+    let mut state = state_with_panes(3);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    let rows = state.visible_rows();
+    assert!(rows.len() > 1);
+    assert!(
+        rows.iter().all(|r| matches!(r, Row::Help(_))),
+        "ヘルプ表示中はツリーを出さない"
+    );
+    // 行クリックの逆引きも当たらない（要件: click-to-focus と食い違わせない）
+    assert!((0..rows.len()).all(|y| state.pane_at_row(y).is_none()));
+}
+
+#[test]
+fn the_help_lines_fit_the_sidebar_width() {
+    let mut state = searchable_state();
+    for line in state.help_lines() {
+        assert!(line.chars().count() <= 32, "navモード: {}", line);
+    }
+    state.handle_nav_key(key(BareKey::Char('/')));
+    for line in state.help_lines() {
+        assert!(line.chars().count() <= 32, "検索サブモード: {}", line);
+    }
+}
+
+#[test]
+fn any_key_closes_the_help_overlay_without_acting_on_it() {
+    let mut state = state_with_panes(3);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+    state.handle_nav_key(key(BareKey::Char('j')));
+
+    assert!(!state.help_overlay);
+    assert!(state.nav_mode, "閉じてもnavモードは継続する");
+    assert_eq!(state.selected, 0, "閉じるためのキーは操作として解釈しない");
+}
+
+#[test]
+fn modified_keys_only_close_the_help_overlay() {
+    // 安全弁（決定12）より手前で閉じる。閲覧をやめただけで退場させるのは筋が通らない
+    let mut state = state_with_panes(3);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+    state.handle_nav_key(KeyWithModifier::new(BareKey::Char('n')).with_ctrl_modifier());
+
+    assert!(!state.help_overlay);
+    assert!(state.nav_mode);
+}
+
+#[test]
+fn the_help_overlay_opens_from_the_search_submode_too() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "alp");
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    assert!(state.help_overlay);
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("alp"),
+        "? はクエリに入らない"
+    );
+    assert_eq!(
+        state.help_lines().first().copied(),
+        Some("[SEARCH] keys"),
+        "検索サブモードのキーを出す"
+    );
+
+    // 閉じたら開く前の表示（検索サブモード）に戻る。Esc も閉じるだけで、
+    // 検索の取り消しにはならない
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(!state.help_overlay);
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("alp"),
+        "検索は中断されない"
+    );
+}
+
+#[test]
+fn leaving_nav_mode_closes_the_help_overlay() {
+    let mut state = state_with_panes(3);
+    state.nav_mode = true;
+    state.help_overlay = true;
+    state.leave_nav_mode();
+
+    assert!(
+        !state.help_overlay,
+        "開いたまま退場するとツリー表示へ戻れない"
+    );
 }
 
 // --- フォーカス同期（要件: docs/requirements/focus-sync/） ---

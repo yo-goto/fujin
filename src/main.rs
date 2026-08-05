@@ -91,6 +91,9 @@ struct State {
     pane_cwds: BTreeMap<u32, String>,
     // navモード中か。全キーを横取りしているインスタンスだけが true になる
     nav_mode: bool,
+    // ヘルプオーバーレイを表示中か（要件: docs/requirements/nav-mode/）。
+    // navモードの内側の表示状態なので、退場時には必ず倒れる
+    help_overlay: bool,
     // 直近に観測した「zellijが実際にフォーカスしているターミナルペイン」
     //（要件: docs/requirements/focus-sync/）。ホストへの問い合わせ結果を
     // ここに畳んでおき、navモードの入退場はこの値だけを見る（問い合わせ系の

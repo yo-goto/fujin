@@ -21,6 +21,9 @@ use crate::{Selectable, State};
 pub(crate) enum Row<'a> {
     // navモード名 / 検索クエリの入力行
     Header,
+    // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
+    // 開いている間はサイドバー全体がこの行だけになる
+    Help(&'a str),
     // 検索が0件のときの通知行
     NoMatch,
     Tab(&'a TabInfo),
@@ -39,6 +42,10 @@ impl State {
         let mut rows = Vec::new();
         if !self.permissions_granted {
             return rows;
+        }
+        // ヘルプオーバーレイはサイドバー全体を覆う。ツリーも一緒には出さない
+        if self.help_overlay {
+            return self.help_lines().iter().map(|l| Row::Help(l)).collect();
         }
         // ヘッダ: 検索中はクエリ入力行、navモード中はモード名。通常表示では出さない
         if self.search.is_some() || self.nav_mode {
@@ -119,10 +126,7 @@ impl State {
             }
             match row {
                 Row::Header => {
-                    let header = match &self.search {
-                        Some(search) => truncate(&format!("/{}▏", search.query), cols),
-                        None => truncate("-- NAV --  j/k ↵ esc", cols),
-                    };
+                    let header = self.header_line(cols);
                     print_text_with_coordinates(
                         Text::new(&header).color_range(3, ..header.chars().count()),
                         0,
@@ -130,6 +134,15 @@ impl State {
                         None,
                         None,
                     );
+                }
+                Row::Help(line) => {
+                    let line = truncate(line, cols);
+                    let mut text = Text::new(&line);
+                    // 見出し行だけ色を乗せて、キー一覧との区切りを付ける
+                    if y == 0 {
+                        text = text.color_range(3, ..line.chars().count());
+                    }
+                    print_text_with_coordinates(text, 0, y, None, None);
                 }
                 Row::NoMatch => {
                     print_text_with_coordinates(Text::new("  一致なし"), 0, y, None, None);
@@ -152,6 +165,28 @@ impl State {
                 }
             }
         }
+    }
+
+    // ヘッダ1行の文字列（要件: docs/requirements/nav-mode/ の操作ヒント）。
+    //
+    // サイドバー幅は32文字（決定3）で全キーの説明は載らないので、常時出すのは
+    // モード名とヘルプ・退出キーだけに絞り、詳細は `?` のヘルプオーバーレイへ
+    // 追い出してある。文言は英語で統一する
+    pub(crate) fn header_line(&self, cols: usize) -> String {
+        let Some(search) = &self.search else {
+            return truncate("[NAV]  ?:help  esc:exit", cols);
+        };
+        // 検索中はクエリ入力行が主役。ヒントは右端へ寄せ、クエリが伸びて
+        // ぶつかるところまで来たら入力中の文字列のほうを優先して落とす
+        let query = format!("/{}▏", search.query);
+        let hint = "?:help";
+        let pad = cols
+            .saturating_sub(query.chars().count())
+            .saturating_sub(hint.chars().count());
+        if pad == 0 {
+            return truncate(&query, cols);
+        }
+        format!("{}{}{}", query, " ".repeat(pad), hint)
     }
 
     // タブ見出し1行ぶんの Text を組み立てる

@@ -264,7 +264,7 @@ If nothing happens, check that zellij's `mouse_mode` is still enabled in
 ### Nav mode
 
 Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
-`-- NAV --`, and the following keys become active:
+`[NAV]  ?:help  esc:exit`, and the following keys become active:
 
 | Key | Action |
 |---|---|
@@ -274,6 +274,7 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `1`-`9` | jump straight to the nth item and exit the mode |
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
 | `/` | enter search sub-mode (below) |
+| `?` | open the full key help (below) |
 | `Esc` / `q` | exit the mode |
 
 Any other key also exits the mode (a safety valve so you never get stuck with
@@ -297,11 +298,21 @@ as a hint for which field matched (a cwd match is shown on that row even if
 | `Backspace` | delete the last character of the query |
 | `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
 | `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
+| `?` | open the full key help (below; `?` is the one character that does not go into the query) |
 | `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
 
 The query is discarded every time you leave search, so it always starts empty
 next time. `cwd` is only known for panes that reported it via the hook — an
 ordinary shell pane won't match on cwd.
+
+### Help (`?` inside nav mode)
+
+The sidebar is 32 columns wide, which is not enough to spell out every key, so
+the always-visible hints are limited to `?:help` and `esc:exit` in the header.
+Pressing `?` replaces the whole sidebar with the key list; any key closes it and
+brings back whatever was on screen before (nav mode or the search sub-mode). The
+key you press to close is not acted on, so press it again afterwards if you meant
+it as a command. Nav mode stays active the whole time.
 
 ### Event → state mapping
 
