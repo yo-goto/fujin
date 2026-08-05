@@ -226,19 +226,57 @@ fn status_events_drive_agent_state() {
 }
 
 #[test]
-fn stop_clears_running_subagents() {
+fn subagents_are_counted_until_they_stop() {
     let mut state = State::default();
+    state.apply_status(status(1, "UserPromptSubmit"));
     state.apply_status(status(1, "SubagentStart"));
     state.apply_status(status(1, "SubagentStart"));
     assert_eq!(state.agents[&1].subagents, 2);
 
     state.apply_status(status(1, "SubagentStop"));
     assert_eq!(state.agents[&1].subagents, 1);
+    // ターンはまだ終わっていないので done にはしない
+    assert_eq!(state.agents[&1].state, AgentState::Working);
 
-    // ターン終了時点でサブエージェントは全て終わっている
+    state.apply_status(status(1, "SubagentStop"));
+    assert_eq!(state.agents[&1].subagents, 0);
+    assert_eq!(state.agents[&1].state, AgentState::Working);
+
     state.apply_status(status(1, "Stop"));
     assert_eq!(state.agents[&1].state, AgentState::Done);
+}
+
+// バックグラウンドのサブエージェントを起動すると、そのターンは待たずに終わるので
+// サブエージェントが走っている最中に Stop が届く（実測トレース: SessionStart →
+// UserPromptSubmit → SubagentStart → Stop → …数十秒後… → SubagentStop）。
+// この間ペインは working のままでなければならない
+#[test]
+fn background_subagent_keeps_the_pane_working() {
+    let mut state = state_with_panes(1);
+    state.apply_status(status(1, "SessionStart"));
+    state.apply_status(status(1, "UserPromptSubmit"));
+    state.apply_status(status(1, "SubagentStart"));
+    state.apply_status(status(1, "Stop"));
+
+    assert_eq!(state.agents[&1].subagents, 1);
+    assert_eq!(state.agents[&1].state, AgentState::Working);
+
+    // 走っている最中にフォーカスされても既読化で idle に落ちない
+    let focused = PaneInfo {
+        is_focused: true,
+        ..terminal_pane(1, "pane1")
+    };
+    state.apply_read_model(&manifest(vec![(0, vec![focused.clone()])]));
+    assert_eq!(state.agents[&1].state, AgentState::Working);
+
+    // サブエージェントが終わって初めて done になる
+    state.apply_status(status(1, "SubagentStop"));
     assert_eq!(state.agents[&1].subagents, 0);
+    assert_eq!(state.agents[&1].state, AgentState::Done);
+
+    // done になった後はこれまで通り既読化できる
+    state.apply_read_model(&manifest(vec![(0, vec![focused])]));
+    assert_eq!(state.agents[&1].state, AgentState::Idle);
 }
 
 #[test]
@@ -298,6 +336,8 @@ fn state_dump_round_trips() {
     let mut source = State::default();
     source.apply_status(status(1, "UserPromptSubmit"));
     source.apply_status(status(1, "SubagentStart"));
+    // バックグラウンドのサブエージェントを残したままターンが終わった状態
+    source.apply_status(status(1, "Stop"));
     source.apply_status(status(2, "TaskCreated"));
     source.pane_cwds.insert(1, "/work/fujin".to_string());
 
@@ -308,6 +348,10 @@ fn state_dump_round_trips() {
     assert_eq!(restored.agents[&1].state, AgentState::Working);
     assert_eq!(restored.agents[&1].subagents, 1);
     assert_eq!(restored.agents[&1].agent, "claude");
+    // ターン終了済みも運ぶ。運ばないと同期先が最後の SubagentStop で done にできない
+    assert!(restored.agents[&1].turn_ended);
+    restored.apply_status(status(1, "SubagentStop"));
+    assert_eq!(restored.agents[&1].state, AgentState::Done);
     assert_eq!(
         restored.pane_cwds.get(&1).map(String::as_str),
         Some("/work/fujin")

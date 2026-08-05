@@ -321,10 +321,10 @@ it as a command. Nav mode stays active the whole time.
 | `SessionStart` | idle (register, reset counters) |
 | `UserPromptSubmit` | working |
 | `Notification` | blocked (message retained) |
-| `Stop` | done (subagent count reset to 0) |
+| `Stop` | done — but stays working while background subagents are still running |
 | `StopFailure` / `PostToolUseFailure` | error |
 | `SessionEnd` | unregister |
-| `SubagentStart` / `SubagentStop` | subagent count ±1 |
+| `SubagentStart` / `SubagentStop` | subagent count ±1; done when the last one stops after `Stop` |
 | `TaskCreated` / `TaskCompleted` | incomplete task count ±1 |
 
 ## Configuration
