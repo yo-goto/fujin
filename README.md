@@ -114,16 +114,20 @@ layout {
 }
 ```
 
-**Use `pane`, not `children`.** `children` is a marker meaning "insert this
-layout's own tab panes here." A template-only layout with no `tab` node has
-nothing to insert, so you'd end up with **a tab that has zero terminal panes**.
-If that happens at session creation, zellij just exits.
+> [!CAUTION]
+> Use `pane`, not `children`. `children` is a marker meaning "insert this
+> layout's own tab panes here." A template-only layout with no `tab` node has
+> nothing to insert, so you'd end up with **a tab that has zero terminal panes**.
+> If that happens at session creation, zellij just exits.
 
-**Write the same content into `new_tab_template` as well.** `default_tab_template`
-is documented to fall back to the "new tab template," but **that fallback
-doesn't kick in when a session is created via the session manager
-(`Ctrl+o` → `w`) with a chosen layout** — you get zellij's built-in default
-instead. Writing both makes it work regardless of how the tab was created.
+<!-- -->
+
+> [!IMPORTANT]
+> Write the same content into `new_tab_template` as well. `default_tab_template`
+> is documented to fall back to the "new tab template," but **that fallback
+> doesn't kick in when a session is created via the session manager
+> (`Ctrl+o` → `w`) with a chosen layout** — you get zellij's built-in default
+> instead. Writing both makes it work regardless of how the tab was created.
 
 If you want it to work reliably no matter the launch path, you can also specify
 the layout on the `NewTab` keybinding itself:
@@ -176,13 +180,14 @@ bind "Ctrl y" {
 }
 ```
 
-**Keep `floating true`.** When a session has no fujin instance at all (a session
-created without the layout, for example), this pipe has no recipient, so zellij
-launches fujin itself. By default it opens tiled — splitting your working pane
-and landing on the right at an arbitrary width — and the plugin cannot fix that
-from the inside. With `floating true` it opens floating, and fujin moves itself
-to the same left edge and width as the resident sidebar (closing on `Esc` or on
-a jump). It has no effect when fujin is already running.
+> [!IMPORTANT]
+> Keep `floating true`. When a session has no fujin instance at all (a session
+> created without the layout, for example), this pipe has no recipient, so zellij
+> launches fujin itself. By default it opens tiled — splitting your working pane
+> and landing on the right at an arbitrary width — and the plugin cannot fix that
+> from the inside. With `floating true` it opens floating, and fujin moves itself
+> to the same left edge and width as the resident sidebar (closing on `Esc` or on
+> a jump). It has no effect when fujin is already running.
 
 `Ctrl+y` is unused by zellij's defaults; feel free to pick something else if
 it's taken (`p`/`t`/`n`/`h`/`s`/`o`/`q`/`g` are already spoken for by default).
@@ -206,14 +211,18 @@ bind "Alt g" {
 }
 ```
 
-**Don't bind `Alt Enter`.** Claude Code's Shift+Enter relies on a terminal-side
-setting (`Shift+Return -> ESC CR`, installed by `/terminal-setup`), and zellij
-interprets that `ESC CR` as `Alt Enter`. Claiming it breaks Shift+Enter's
-newline from reaching the pane.
+> [!CAUTION]
+> Don't bind `Alt Enter`. Claude Code's Shift+Enter relies on a terminal-side
+> setting (`Shift+Return -> ESC CR`, installed by `/terminal-setup`), and zellij
+> interprets that `ESC CR` as `Alt Enter`. Claiming it breaks Shift+Enter's
+> newline from reaching the pane.
 
-Note: don't use `MessagePluginId`. The sidebar launches one instance per tab,
-so targeting by ID causes key collisions. A `MessagePlugin` addressed by alias
-(or URL) reaches every instance instead.
+<!-- -->
+
+> [!NOTE]
+> Don't use `MessagePluginId`. The sidebar launches one instance per tab,
+> so targeting by ID causes key collisions. A `MessagePlugin` addressed by alias
+> (or URL) reaches every instance instead.
 
 ### 3. Claude Code hooks (state notifications)
 
@@ -349,14 +358,15 @@ have the hook configured.
 
 ### Don't put settings only on the layout side
 
-`MessagePlugin` destination matching is done on **the wasm path plus its
-configuration**, not the path alone. If you write `show_cwd "true"` only on
-the layout's plugin block and not on the keybindings, the two are treated as
-different plugins, and **keys stop reaching the resident sidebar**. Worse,
-zellij doesn't just fail silently — it **opens a brand new instance on the
-spot that matches the configuration** (observed in practice: one keypress adds
-one more plugin pane). Since fujin's sidebar calls `set_selectable(false)`,
-**the resulting pane can't be closed by the user or the CLI**.
+> [!WARNING]
+> `MessagePlugin` destination matching is done on **the wasm path plus its
+> configuration**, not the path alone. If you write `show_cwd "true"` only on
+> the layout's plugin block and not on the keybindings, the two are treated as
+> different plugins, and **keys stop reaching the resident sidebar**. Worse,
+> zellij doesn't just fail silently — it **opens a brand new instance on the
+> spot that matches the configuration** (observed in practice: one keypress adds
+> one more plugin pane). Since fujin's sidebar calls `set_selectable(false)`,
+> **the resulting pane can't be closed by the user or the CLI**.
 
 Sticking to the alias means the layout and the keybindings both resolve to the
 same definition, so this mismatch can't happen. If you skip the alias, you
@@ -387,10 +397,11 @@ keybinding ones, `fujin_up` / `_down` / `_go` / `_mode`. `fujin_sync_state` /
 `_read` / `_selection` are an internal protocol for syncing between instances
 — don't call them from outside.
 
-**Important: don't pass the `--plugin` option.** Doing so makes zellij launch
-the plugin if it isn't already running. Without it, the message is only
-delivered to a running plugin, and the call is a harmless no-op when nothing
-is running.
+> [!IMPORTANT]
+> Don't pass the `--plugin` option. Doing so makes zellij launch
+> the plugin if it isn't already running. Without it, the message is only
+> delivered to a running plugin, and the call is a harmless no-op when nothing
+> is running.
 
 ## Development
 
