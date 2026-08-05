@@ -12,57 +12,51 @@ use zellij_tile::prelude::*;
 use crate::search::{Field, Hit};
 use crate::{Selectable, State};
 
+// 画面に縦に積む1行ぶんの中身。
+//
+// 描画（draw）とクリック位置の逆引き（pane_at_row、要件:
+// docs/requirements/click-to-focus/）が**同じ並びを共有する**ために切り出してある。
+// 行の増減を伴うレイアウト変更は必ず visible_rows() 側で行うこと。
+// 描画だけ直すとクリックが行ずれする
+pub(crate) enum Row<'a> {
+    // navモード名 / 検索クエリの入力行
+    Header,
+    // 検索が0件のときの通知行
+    NoMatch,
+    Tab(&'a TabInfo),
+    Pane {
+        entry: &'a Selectable,
+        // 非検索時の選択判定に使うフラットな通し番号（self.selected と突き合わせる）
+        flat_index: usize,
+        hit: Option<&'a Hit>,
+    },
+}
+
 impl State {
-    pub(crate) fn draw(&self, rows: usize, cols: usize) {
+    // 画面に並ぶ行を上から順に組み立てる。`rows`（画面高）での打ち切りは
+    // 呼び出し側の責務 — 行の並び自体は高さに依らないため
+    pub(crate) fn visible_rows(&self) -> Vec<Row<'_>> {
+        let mut rows = Vec::new();
         if !self.permissions_granted {
-            print_text_with_coordinates(
-                Text::new("permissions required (press y)"),
-                0,
-                0,
-                None,
-                None,
-            );
-            return;
+            return rows;
         }
-        let mut y = 0;
         // ヘッダ: 検索中はクエリ入力行、navモード中はモード名。通常表示では出さない
+        if self.search.is_some() || self.nav_mode {
+            rows.push(Row::Header);
+        }
         if let Some(search) = &self.search {
-            let header = truncate(&format!("/{}▏", search.query), cols);
-            print_text_with_coordinates(
-                Text::new(&header).color_range(3, ..header.chars().count()),
-                0,
-                y,
-                None,
-                None,
-            );
-            y += 1;
             // 0件は空リストではなく明示する。絞り込みが効いているのか
             // 描画が壊れているのか区別できないため
             if search.hits.is_empty() {
-                if y < rows {
-                    print_text_with_coordinates(Text::new("  一致なし"), 0, y, None, None);
-                }
-                return;
+                rows.push(Row::NoMatch);
+                return rows;
             }
-        } else if self.nav_mode {
-            let header = truncate("-- NAV --  j/k ↵ esc", cols);
-            print_text_with_coordinates(
-                Text::new(&header).color_range(3, ..header.chars().count()),
-                0,
-                y,
-                None,
-                None,
-            );
-            y += 1;
         }
 
         let mut flat_index = 0;
         let mut sorted_tabs: Vec<&TabInfo> = self.tabs.iter().collect();
         sorted_tabs.sort_by_key(|t| t.position);
         for tab in sorted_tabs {
-            if y >= rows {
-                break;
-            }
             // 絞り込み中、配下に一致ペインを持たないタブは見出しごと消す。
             // flat_index は非検索時の選択にしか使わないので、間引いてもずれない
             if let Some(search) = &self.search {
@@ -73,8 +67,7 @@ impl State {
                     continue;
                 }
             }
-            print_text_with_coordinates(self.tab_heading(tab, cols), 0, y, None, None);
-            y += 1;
+            rows.push(Row::Tab(tab));
 
             for entry in &self.selectable {
                 if entry.tab_position != tab.position {
@@ -90,17 +83,73 @@ impl State {
                 if self.search.is_some() && hit.is_none() {
                     continue;
                 }
-                if y >= rows {
-                    break;
+                rows.push(Row::Pane {
+                    entry,
+                    flat_index: this_index,
+                    hit,
+                });
+            }
+        }
+        rows
+    }
+
+    // 画面のこの行に載っているペイン（要件: docs/requirements/click-to-focus/）。
+    // ヘッダ・タブ見出し・一覧の外は None
+    pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
+        match self.visible_rows().get(row)? {
+            Row::Pane { entry, .. } => Some(entry.pane_id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn draw(&self, rows: usize, cols: usize) {
+        if !self.permissions_granted {
+            print_text_with_coordinates(
+                Text::new("permissions required (press y)"),
+                0,
+                0,
+                None,
+                None,
+            );
+            return;
+        }
+        for (y, row) in self.visible_rows().into_iter().enumerate() {
+            if y >= rows {
+                break;
+            }
+            match row {
+                Row::Header => {
+                    let header = match &self.search {
+                        Some(search) => truncate(&format!("/{}▏", search.query), cols),
+                        None => truncate("-- NAV --  j/k ↵ esc", cols),
+                    };
+                    print_text_with_coordinates(
+                        Text::new(&header).color_range(3, ..header.chars().count()),
+                        0,
+                        y,
+                        None,
+                        None,
+                    );
                 }
-                // 検索中の選択は結果内カーソル（ペインID）で決まる
-                let is_selected = match &self.search {
-                    Some(search) => search.cursor == Some(entry.pane_id),
-                    None => this_index == self.selected,
-                };
-                let row = self.pane_row(entry, is_selected, hit, cols);
-                print_text_with_coordinates(row, 0, y, None, None);
-                y += 1;
+                Row::NoMatch => {
+                    print_text_with_coordinates(Text::new("  一致なし"), 0, y, None, None);
+                }
+                Row::Tab(tab) => {
+                    print_text_with_coordinates(self.tab_heading(tab, cols), 0, y, None, None);
+                }
+                Row::Pane {
+                    entry,
+                    flat_index,
+                    hit,
+                } => {
+                    // 検索中の選択は結果内カーソル（ペインID）で決まる
+                    let is_selected = match &self.search {
+                        Some(search) => search.cursor == Some(entry.pane_id),
+                        None => flat_index == self.selected,
+                    };
+                    let row = self.pane_row(entry, is_selected, hit, cols);
+                    print_text_with_coordinates(row, 0, y, None, None);
+                }
             }
         }
     }

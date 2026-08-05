@@ -162,6 +162,8 @@ impl ZellijPlugin for State {
             EventType::PermissionRequestResult,
             EventType::Visible,
             EventType::InterceptedKeyPress,
+            // ペイン行のクリックでのジャンプ（要件: docs/requirements/click-to-focus/）
+            EventType::Mouse,
             // プラグイン終了・リロード時に横取りを解除する保険
             EventType::BeforeClose,
         ]);
@@ -241,6 +243,9 @@ impl ZellijPlugin for State {
                 }
                 false
             }
+            // 左クリックだけを扱う（要件: click-to-focus）。
+            // ダブルクリック・ドラッグ・右クリックはv1対象外
+            Event::Mouse(Mouse::LeftClick(line, _column)) => self.handle_click(line),
             Event::InterceptedKeyPress(key) => {
                 // 横取りを要求したインスタンスにしか届かないが、念のため
                 if !self.nav_mode {

@@ -297,6 +297,32 @@ impl State {
         }
     }
 
+    // サイドバーの行を左クリックしたときのジャンプ
+    //（要件: docs/requirements/click-to-focus/）。戻り値は再描画するか。
+    //
+    // 引数の `line` は描画時のy座標そのもの（zellij は isize で渡してくる）。
+    // 行→ペインの対応は render 側のレイアウトから引く
+    pub(crate) fn handle_click(&mut self, line: isize) -> bool {
+        // 負の行はサイドバーの外
+        let Ok(row) = usize::try_from(line) else {
+            return false;
+        };
+        // タブ見出し・ヘッダ・一覧の外側のクリックは何も起こさない
+        let Some(pane_id) = self.pane_at_row(row) else {
+            return false;
+        };
+        // navモード中にマウスが届いた場合も Enter と同じ扱いにする（v1の要件は
+        // 通常時のクリックのみだが、横取りを残したままフォーカスだけ動かすと
+        // ジャンプ先で j/k を食われ続けるため、取り残しを作らない側に倒す）
+        if self.nav_mode {
+            self.exit_nav_mode();
+        }
+        self.select_pane_id(pane_id);
+        self.broadcast_selection();
+        self.focus_selected();
+        true
+    }
+
     pub(crate) fn focus_selected(&self) {
         if let Some(entry) = self.selectable.get(self.selected) {
             // 第2引数 should_float_if_hidden はターゲットに合わせて切り替える。
