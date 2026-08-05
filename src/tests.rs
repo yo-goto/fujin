@@ -15,8 +15,10 @@
 
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
-use crate::render::{pad_to_width, shift_highlight_indices, truncate, Row};
-use crate::search::{Field, Hit};
+use crate::render::{
+    cwd_row, fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate,
+    truncate_start, CounterColumn, Row,
+};
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -1594,83 +1596,289 @@ fn unknown_pipes_are_ignored() {
     assert!(!state.pipe(pipe_message("some_other_plugin", "payload")));
 }
 
-// --- ペイン行の折り合い優先順位（決定21） ---
+// --- ペイン行のレイアウト（決定21・決定22） ---
 //
-// 幅が足りないとき削る優先順位は cwd → ペイン名。サブエージェント数 `+N`・
-// 未完了タスク数 `[M]` は最後まで残す
+// カウンタ列は右端に揃え、幅はフレーム全体で共有する。ペイン名はその残り幅に
+// 収めるので、名前が長くてもサブエージェント数 `+N`・未完了タスク数 `[M]` は
+// 消えない。cwd はペイン行に混ぜず、続く cwd行に出す
+
+const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定3）
+
+// 1ペインだけを持つ状態。ペイン名を指定して作る
+fn state_with_one_pane(title: &str) -> State {
+    let mut state = state_with_panes(0);
+    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, title)])]));
+    state.rebuild_selectable();
+    state
+}
+
+// そのフレームのカウンタ列（描画と同じ手順で測る）
+fn column_of(state: &State) -> CounterColumn {
+    state.counter_column(&state.visible_rows())
+}
+
+// content 内で needle が始まる列（表示セル基準）
+fn column_at(content: &str, needle: &str) -> usize {
+    let byte = content
+        .find(needle)
+        .unwrap_or_else(|| panic!("{:?} が {:?} に無い", needle, content));
+    unicode_width::UnicodeWidthStr::width(&content[..byte])
+}
+
+fn repeat_status(state: &mut State, pane_id: u32, event: &str, times: usize) {
+    for _ in 0..times {
+        state.apply_status(status(pane_id, event));
+    }
+}
 
 #[test]
-fn counters_survive_when_the_pane_title_is_long() {
+fn counters_are_flush_with_the_right_edge() {
+    let mut state = state_with_one_pane("要件定義とドキュメント整理タスクの続き");
+    repeat_status(&mut state, 1, "SubagentStart", 2);
+    repeat_status(&mut state, 1, "TaskCreated", 3);
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    let content = text.content();
+    assert!(
+        content.ends_with("+2 [3]"),
+        "カウンタ列は右端に揃える: {}",
+        content
+    );
+    assert_eq!(
+        unicode_width::UnicodeWidthStr::width(content),
+        SIDEBAR,
+        "行はサイドバー幅ちょうどに収まる: {}",
+        content
+    );
+    assert!(
+        content.contains('…'),
+        "収まらないぶんはペイン名側を畳む: {}",
+        content
+    );
+}
+
+#[test]
+fn the_counter_column_is_shared_by_every_row() {
+    // サブエージェント数だけのペインと、未完了タスク数だけのペイン。
+    // 桁がずれると一覧を縦に舐められないので、列はフレーム全体で共有する
     let mut state = state_with_panes(0);
     state.panes = Some(manifest(vec![(
         0,
-        vec![terminal_pane(1, "要件定義とドキュメント整理タスクの続き")],
+        vec![terminal_pane(1, "alpha"), terminal_pane(2, "bravo")],
     )]));
     state.rebuild_selectable();
-    state.apply_status(status(1, "SubagentStart"));
-    state.apply_status(status(1, "SubagentStart"));
-    state.apply_status(status(1, "TaskCreated"));
-    state.apply_status(status(1, "TaskCreated"));
-    state.apply_status(status(1, "TaskCreated"));
+    repeat_status(&mut state, 1, "SubagentStart", 12);
+    repeat_status(&mut state, 2, "TaskCreated", 3);
 
-    let entry = &state.selectable[0];
-    let text = state.pane_row(entry, false, None, 32);
-    let content = text.content();
-    assert!(content.contains("+2"), "{}", content);
-    assert!(content.contains("[3]"), "{}", content);
+    let column = column_of(&state);
+    let first = state.pane_row(&state.selectable[0], false, None, column, SIDEBAR);
+    let second = state.pane_row(&state.selectable[1], false, None, column, SIDEBAR);
+
+    // 列幅は `+12`（3）と `[3]`（3）、あいだの空白1つで計7セル
+    assert_eq!(column_at(first.content(), "+12"), SIDEBAR - 7);
+    assert_eq!(column_at(second.content(), "[3]"), SIDEBAR - 3);
     assert!(
-        unicode_width::UnicodeWidthStr::width(content) <= 32,
-        "{}",
-        content
+        !second.content().contains('+'),
+        "サブエージェント数を持たない行は、その位置を空けたままにする: {}",
+        second.content()
     );
 }
 
 #[test]
-fn cwd_is_dropped_before_the_title_when_space_is_tight() {
-    let mut state = state_with_panes(0);
-    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, "claude-worker")])]));
-    state.rebuild_selectable();
+fn the_counter_column_costs_nothing_when_nobody_has_counters() {
+    // 静かなフレームでは列を予約しない。予約するとペイン名の幅がその場で失われる
+    let state = state_with_one_pane("abcdefghijklmnopqrstuvwxyz0123456789");
+    assert_eq!(column_of(&state), CounterColumn::default());
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    let content = text.content();
+    assert!(content.starts_with("    abcdefghij"), "{}", content);
+    assert!(content.ends_with('…'), "{}", content);
+    assert_eq!(unicode_width::UnicodeWidthStr::width(content), SIDEBAR);
+}
+
+#[test]
+fn a_pane_name_that_is_a_path_keeps_its_tail() {
+    // ペイン名に cwd がそのまま入ることがある。末尾を切ると
+    // `/Users/example/develo…` のようにどの行も同じ見た目になってしまう
+    let state = state_with_one_pane("/Users/example/development/oss/zellij-plugins/fujin");
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    let content = text.content();
+    assert!(
+        content.ends_with("zellij-plugins/fujin"),
+        "パスは先頭省略で末尾を残す: {}",
+        content
+    );
+    assert!(content.contains('…'), "{}", content);
+    assert_eq!(unicode_width::UnicodeWidthStr::width(content), SIDEBAR);
+}
+
+// --- cwd行（決定22） ---
+
+#[test]
+fn the_cwd_is_rendered_as_its_own_row() {
+    let mut state = state_with_one_pane("claude-worker");
     state.show_cwd = true;
-    state.pane_cwds.insert(
-        1,
-        "/very/long/nested/path/that/does/not/fit/here".to_string(),
+    state
+        .pane_cwds
+        .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
+
+    let rows = state.visible_rows();
+    // 0: tab1見出し / 1: ペイン行 / 2: cwd行
+    assert!(matches!(rows[1], Row::Pane { .. }));
+    assert!(matches!(rows[2], Row::Cwd { .. }));
+    assert_eq!(
+        state.pane_at_row(2),
+        Some(1),
+        "cwd行のクリックも同じペインに当たる（要件: click-to-focus）"
     );
 
-    let entry = &state.selectable[0];
-    let text = state.pane_row(entry, false, None, 32);
-    let content = text.content();
-    assert!(content.contains("claude-worker"), "{}", content);
+    let pane_text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
     assert!(
-        !content.contains("/very/long"),
-        "幅が足りないcwdは丸ごと落ちる（中間切り詰めはしない）: {}",
-        content
+        !pane_text.content().contains("/work"),
+        "cwd はペイン行には出ない: {}",
+        pane_text.content()
     );
 }
 
 #[test]
-fn cwd_search_hit_is_shown_even_when_space_is_tight() {
-    // show_cwd=false でも cwd ヒットは画面に無い文字列に見えないよう出す
-    // （既存挙動）。決定21の優先順位（cwdを先に落とす）はこの例外には適用しない
-    let mut state = state_with_panes(0);
-    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, "claude-worker")])]));
-    state.rebuild_selectable();
-    state.pane_cwds.insert(
-        1,
-        "/very/long/nested/path/that/does/not/fit/here".to_string(),
-    );
+fn a_pane_without_a_cwd_gets_no_extra_row() {
+    // 空の cwd行で縦を消費しない（サイドバーはスクロールしないので行数は貴重）
+    let mut state = state_with_one_pane("claude-worker");
+    state.show_cwd = true;
 
-    let hit = Hit {
-        score: 0,
-        field: Field::Cwd,
-        indices: vec![0],
+    let rows = state.visible_rows();
+    assert_eq!(rows.len(), 2, "タブ見出し行とペイン行だけ");
+}
+
+#[test]
+fn the_cwd_row_appears_for_a_search_hit_even_when_show_cwd_is_off() {
+    // 画面に無い文字列でヒットしたように見せない（決定18）
+    let mut state = searchable_state();
+    assert!(!state.show_cwd);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "fujin");
+
+    let rows = state.visible_rows();
+    let cwd_rows: Vec<&Row> = rows
+        .iter()
+        .filter(|r| matches!(r, Row::Cwd { .. }))
+        .collect();
+    assert_eq!(cwd_rows.len(), 1, "cwd を持つ bravo の行だけ");
+    let Some(Row::Cwd { entry, hit, .. }) = cwd_rows.first() else {
+        panic!("cwd行が無い");
     };
-    let entry = &state.selectable[0];
-    let text = state.pane_row(entry, false, Some(&hit), 32);
+    assert_eq!(entry.pane_id, 2);
+    assert!(hit.is_some(), "ヒット箇所を提示するのでハイライトを持つ");
+}
+
+#[test]
+fn the_cwd_row_is_not_highlighted_by_a_pane_name_hit() {
+    // ペイン名に当たっただけの行では cwd行を光らせない
+    let mut state = searchable_state();
+    state.show_cwd = true;
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "bravo");
+
+    let rows = state.visible_rows();
+    let Some(Row::Cwd { hit, .. }) = rows.iter().find(|r| matches!(r, Row::Cwd { .. })) else {
+        panic!("cwd行が無い");
+    };
+    assert!(hit.is_none());
+}
+
+#[test]
+fn the_cwd_row_keeps_the_tail_of_the_path() {
+    let text = cwd_row(
+        "/Users/example/development/oss/zellij-plugins/fujin",
+        false,
+        None,
+        SIDEBAR,
+    );
     let content = text.content();
     assert!(
-        content.contains("/very/long"),
-        "cwdヒット時は幅が厳しくても出す: {}",
+        content.ends_with("zellij-plugins/fujin"),
+        "末尾のディレクトリ名を残す: {}",
         content
+    );
+    assert!(
+        content.starts_with("      …"),
+        "字下げして続きに見せる: {}",
+        content
+    );
+    assert!(unicode_width::UnicodeWidthStr::width(content) <= SIDEBAR);
+}
+
+#[test]
+fn the_cwd_row_survives_a_sidebar_narrower_than_its_indent() {
+    // 字下げより狭い幅でも算術が破綻しない
+    let text = cwd_row("/work/fujin", false, None, 3);
+    assert!(unicode_width::UnicodeWidthStr::width(text.content()) <= 6);
+}
+
+// --- 先頭省略とハイライト位置 ---
+
+#[test]
+fn truncate_start_leaves_short_strings_alone() {
+    assert_eq!(truncate_start("/a/b", 5), ("/a/b".to_string(), 0));
+    // 境界: ちょうど収まるときは省略記号を付けない
+    assert_eq!(truncate_start("/a/bc", 5), ("/a/bc".to_string(), 0));
+}
+
+#[test]
+fn truncate_start_drops_the_head_within_budget() {
+    let (folded, dropped) = truncate_start("/aa/bb/cc", 5);
+    assert_eq!(folded, "…b/cc");
+    assert_eq!(dropped, 5);
+    assert_eq!(folded.chars().count(), 5);
+    // 全角は2セルぶん食う
+    let (folded, dropped) = truncate_start("/あ/いう", 5);
+    assert_eq!(folded, "…いう");
+    assert_eq!(dropped, 3);
+}
+
+#[test]
+fn highlight_indices_follow_a_leading_ellipsis() {
+    // "/aa/bb/cc" を先頭省略すると "…b/cc"。落ちた側（0..5）のヒットは捨て、
+    // 残った側は省略記号1文字ぶん右へずれる
+    assert_eq!(
+        fold_highlight_indices(&[0, 4, 5, 8], "…b/cc", 5, 9, 6),
+        vec![6 + 1, 6 + 1 + 3]
+    );
+}
+
+#[test]
+fn highlight_indices_after_a_trailing_ellipsis_are_dropped() {
+    // 末尾切り詰め側は既存の規則のまま。"abcdefghi" を "abcd…" に詰めたので、
+    // 見えている 0..4 は offset ぶんずらし、省略記号に重なる 4 以降は捨てる
+    assert_eq!(
+        fold_highlight_indices(&[0, 3, 4, 8], "abcd…", 0, 9, 4),
+        vec![4, 7]
     );
 }
 

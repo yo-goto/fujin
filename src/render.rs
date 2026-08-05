@@ -10,6 +10,7 @@
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::*;
 
+use crate::agent::AgentInfo;
 use crate::search::{Field, Hit};
 use crate::{Selectable, State};
 
@@ -34,6 +35,16 @@ pub(crate) enum Row<'a> {
         flat_index: usize,
         hit: Option<&'a Hit>,
     },
+    // 直前のペイン行の cwd（決定22）。ペイン行と同じペインを指すので、
+    // 選択のハイライトも行クリックもペイン行と同じ扱いにする
+    Cwd {
+        entry: &'a Selectable,
+        flat_index: usize,
+        cwd: &'a str,
+        // cwd に一致したヒットだけを持つ（ペイン名・タブ名のヒットは
+        // この行のハイライトには関係しない）
+        hit: Option<&'a Hit>,
+    },
 }
 
 // ヘルプオーバーレイの行の種類（中身は nav::help_lines() が持つ）。
@@ -50,6 +61,12 @@ pub(crate) enum HelpRow {
 
 // 行の左に空ける余白。文字を左端に貼り付けると窮屈に見える
 const HELP_INDENT: usize = 2;
+// cwd行の字下げ。ペイン名の開始位置（4セル）よりさらに右へ寄せて、
+// 隣のペイン行ではなく「上のペイン行の続き」として読ませる
+const CWD_INDENT: usize = 6;
+// ペイン名とカウンタ列のあいだに最低限空ける幅。
+// 名前と数字がくっつくと、どこまでが名前か読めなくなる
+const COUNTER_GAP: usize = 1;
 // キー列の幅（説明との間の空白を含む）。説明の開始位置をここで揃える。
 // いちばん長いキー（`j k up down tab`）と、いちばん長い説明（`cancel search`）が
 // 左マージン込みで幅32（決定3）にちょうど収まる値
@@ -100,7 +117,77 @@ fn compose(segments: &[(&str, Ink)], cols: usize) -> Text {
     text
 }
 
+// カウンタ列の幅（決定22）。サブエージェント数 `+N`・未完了タスク数 `[M]` を
+// それぞれ固定幅のフィールドに右揃えで置き、行をまたいで桁を揃える。
+//
+// 幅は**そのフレームに出るペイン行の実測最大**で決める。誰もカウンタを持っていない
+// フレームでは 0 になり、ペイン名が幅をすべて使える。固定幅で常に予約すると、
+// 静かなときにも右端が空白のまま失われる
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub(crate) struct CounterColumn {
+    subagents: usize,
+    open_tasks: usize,
+}
+
+impl CounterColumn {
+    // 列全体の表示幅。両方あるときだけ、あいだに空白1つを挟む
+    fn width(&self) -> usize {
+        match (self.subagents, self.open_tasks) {
+            (0, 0) => 0,
+            (s, 0) | (0, s) => s,
+            (s, t) => s + 1 + t,
+        }
+    }
+
+    // この列に載る1行ぶんの文字列。持っていないカウンタのフィールドは空白で埋め、
+    // 桁の位置を行ごとにずらさない
+    fn render(&self, subagents: &str, open_tasks: &str) -> String {
+        if self.width() == 0 {
+            return String::new();
+        }
+        let mut out = pad_left(subagents, self.subagents);
+        if self.subagents > 0 && self.open_tasks > 0 {
+            out.push(' ');
+        }
+        out.push_str(&pad_left(open_tasks, self.open_tasks));
+        out
+    }
+}
+
+// ペイン行に出すカウンタの文字列。0 のときは出さない（決定11: 静かな行は静かに）
+fn counter_labels(agent: Option<&AgentInfo>) -> (String, String) {
+    let Some(agent) = agent else {
+        return (String::new(), String::new());
+    };
+    let subagents = if agent.subagents > 0 {
+        format!("+{}", agent.subagents)
+    } else {
+        String::new()
+    };
+    let open_tasks = if agent.open_tasks > 0 {
+        format!("[{}]", agent.open_tasks)
+    } else {
+        String::new()
+    };
+    (subagents, open_tasks)
+}
+
 impl State {
+    // このフレームのカウンタ列の幅。visible_rows() の結果から測るので、
+    // 絞り込みで消えたペインは勘定に入らない
+    pub(crate) fn counter_column(&self, rows: &[Row<'_>]) -> CounterColumn {
+        let mut column = CounterColumn::default();
+        for row in rows {
+            let Row::Pane { entry, .. } = row else {
+                continue;
+            };
+            let (subagents, open_tasks) = counter_labels(self.agents.get(&entry.pane_id));
+            column.subagents = column.subagents.max(UnicodeWidthStr::width(&*subagents));
+            column.open_tasks = column.open_tasks.max(UnicodeWidthStr::width(&*open_tasks));
+        }
+        column
+    }
+
     // 画面に並ぶ行を上から順に組み立てる。`rows`（画面高）での打ち切りは
     // 呼び出し側の責務 — 行の並び自体は高さに依らないため
     pub(crate) fn visible_rows(&self) -> Vec<Row<'_>> {
@@ -161,17 +248,43 @@ impl State {
                     flat_index: this_index,
                     hit,
                 });
+
+                // cwd はペイン行に混ぜず、続く1行として出す（決定22）。
+                // show_cwd が false でも、cwd に一致した行だけは出す —
+                // 画面に無い文字列でヒットしたように見せないため
+                let cwd_hit = hit.filter(|h| h.field == Field::Cwd);
+                if self.show_cwd || cwd_hit.is_some() {
+                    if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
+                        rows.push(Row::Cwd {
+                            entry,
+                            flat_index: this_index,
+                            cwd,
+                            hit: cwd_hit,
+                        });
+                    }
+                }
             }
         }
         rows
     }
 
     // 画面のこの行に載っているペイン（要件: docs/requirements/click-to-focus/）。
-    // ヘッダ・タブ見出し行・一覧の外は None
+    // ヘッダ・タブ見出し行・一覧の外は None。
+    // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
         match self.visible_rows().get(row)? {
-            Row::Pane { entry, .. } => Some(entry.pane_id),
+            Row::Pane { entry, .. } | Row::Cwd { entry, .. } => Some(entry.pane_id),
             _ => None,
+        }
+    }
+
+    // その行がハイライトされるか。ペイン行と cwd行で同じ判定を使い、
+    // 2行が1つの帯に見えるようにする
+    fn row_is_selected(&self, entry: &Selectable, flat_index: usize) -> bool {
+        match &self.search {
+            // 検索サブモード中にハイライトする行はカーソル（ペインID）で決まる
+            Some(search) => search.cursor == Some(entry.pane_id),
+            None => flat_index == self.selected,
         }
     }
 
@@ -186,7 +299,10 @@ impl State {
             );
             return;
         }
-        for (y, row) in self.visible_rows().into_iter().enumerate() {
+        let all_rows = self.visible_rows();
+        // カウンタ列の幅はフレーム全体で1つ。行ごとに測ると桁が揃わない（決定22）
+        let column = self.counter_column(&all_rows);
+        for (y, row) in all_rows.into_iter().enumerate() {
             if y >= rows {
                 break;
             }
@@ -215,12 +331,18 @@ impl State {
                     flat_index,
                     hit,
                 } => {
-                    // 検索サブモード中にハイライトする行はカーソル（ペインID）で決まる
-                    let is_selected = match &self.search {
-                        Some(search) => search.cursor == Some(entry.pane_id),
-                        None => flat_index == self.selected,
-                    };
-                    let row = self.pane_row(entry, is_selected, hit, cols);
+                    let is_selected = self.row_is_selected(entry, flat_index);
+                    let row = self.pane_row(entry, is_selected, hit, column, cols);
+                    print_text_with_coordinates(row, 0, y, None, None);
+                }
+                Row::Cwd {
+                    entry,
+                    flat_index,
+                    cwd,
+                    hit,
+                } => {
+                    let is_selected = self.row_is_selected(entry, flat_index);
+                    let row = cwd_row(cwd, is_selected, hit, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
             }
@@ -341,15 +463,18 @@ impl State {
         text
     }
 
-    // ペイン行1行ぶんの Text を組み立てる（状態アイコン・カウンタ・cwd・ハイライト込み）。
+    // ペイン行1行ぶんの Text を組み立てる（状態アイコン・ペイン名・カウンタ列・
+    // ハイライト込み）。cwd は別行なのでここには出てこない（決定22）。
     //
-    // 幅が足りないときに削る優先順位は cwd → ペイン名（決定21）。サブエージェント数
-    // `+N`・未完了タスク数 `[M]` は幅を先に確保し、最後まで削らない
+    // レイアウトは `{アイコン} {ペイン名} …余白… {カウンタ列}` で、カウンタ列は
+    // 右端に揃える。ペイン名はカウンタ列を除いた残り幅に収め、名前の長さで
+    // サブエージェント数・未完了タスク数が消えないようにする（決定21）
     pub(crate) fn pane_row(
         &self,
         entry: &Selectable,
         is_selected: bool,
         hit: Option<&Hit>,
+        column: CounterColumn,
         cols: usize,
     ) -> Text {
         let agent = self.agents.get(&entry.pane_id);
@@ -359,76 +484,53 @@ impl State {
         // 状態アイコンの color_range 2..3 をずらさない）
         let prefix = if is_selected { "▌ " } else { "  " };
         let head = format!("{}{} ", prefix, icon); // "▌ {icon} " / "  {icon} "
+        let head_width = UnicodeWidthStr::width(head.as_str());
 
-        let mut counters = String::new();
-        if let Some(a) = agent {
-            if a.subagents > 0 {
-                counters.push_str(&format!(" +{}", a.subagents));
-            }
-            if a.open_tasks > 0 {
-                counters.push_str(&format!(" [{}]", a.open_tasks));
-            }
-        }
+        let (subagents, open_tasks) = counter_labels(agent);
+        let counters = column.render(&subagents, &open_tasks);
+        let counters_width = UnicodeWidthStr::width(counters.as_str());
+        // カウンタ列を持つフレームでは、この行に数字が無くても列ぶんは空けておく。
+        // 空けないと、右端に揃えたはずの桁が行によってずれる
+        let reserved = if counters.is_empty() {
+            head_width
+        } else {
+            head_width + COUNTER_GAP + counters_width
+        };
 
-        // ペイン名はアイコンとカウンタぶんを引いた残り幅に収める。カウンタは
-        // 切り詰めの対象にしない — 名前の長さでサブエージェント数・未完了
-        // タスク数が消えるのを防ぐ（決定21）
-        let reserved =
-            UnicodeWidthStr::width(head.as_str()) + UnicodeWidthStr::width(counters.as_str());
         let title_budget = cols.saturating_sub(reserved);
         let title_original_len = entry.title.chars().count();
-        let title = truncate(&entry.title, title_budget);
-        let title_visible_len = title.chars().count();
+        let (title, title_dropped) = fold_to_width(&entry.title, title_budget);
 
-        let mut label = format!("{}{}{}", head, title, counters);
-
-        // cwd にヒットしたペインは show_cwd が false でも cwd を出す。画面に
-        // 無い文字列でヒットしたように見せないための例外で、この場合だけは
-        // 幅が足りなくても出す。それ以外（show_cwd 設定によるもの）は削る
-        // 優先順位の最下位で、幅が無ければ丸ごと出さない（決定21）
-        let cwd_hit = matches!(hit, Some(h) if h.field == Field::Cwd);
-        let show_cwd_here = self.show_cwd || cwd_hit;
-        let mut cwd_offset = None;
-        if show_cwd_here {
-            if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
-                let fits = UnicodeWidthStr::width(label.as_str())
-                    + 2
-                    + UnicodeWidthStr::width(cwd.as_str())
-                    <= cols;
-                if cwd_hit || fits {
-                    cwd_offset = Some(label.chars().count() + 2);
-                    label.push_str(&format!("  {}", cwd));
-                }
-            }
+        let mut label = format!("{}{}", head, title);
+        if !counters.is_empty() {
+            // ペイン名の長さに関わらず、カウンタ列は右端で揃える
+            let filler =
+                cols.saturating_sub(UnicodeWidthStr::width(label.as_str()) + counters_width);
+            label.push_str(&" ".repeat(filler));
+            label.push_str(&counters);
+            // アイコンとカウンタ列だけで幅を使い切るほど狭いときの保険。
+            // はみ出すと選択背景が端末側で折り返して次の行を汚す
+            label = truncate(&label, cols);
         }
-        let full_len = label.chars().count();
-        // 通常経路（ペイン名・カウンタ）は既に予算内。cwd をヒット表示のため
-        // 強制的に足した場合だけ、ここでまだ幅を超えていることがある
-        let mut label = truncate(&label, cols);
-        // ハイライトする場所が、そのままヒットしたフィールドの提示になる
-        let highlight = hit.and_then(|hit| match hit.field {
-            Field::Title => {
-                // ペイン名は行全体とは別に独自の予算で切り詰め済みなので、
-                // 可視範囲もペイン名自身の切り詰め結果から判定する
-                let limit = colorable_char_limit(title_visible_len, title_original_len);
-                let indices: Vec<usize> = hit
-                    .indices
-                    .iter()
-                    .filter(|&&i| i < limit)
-                    .map(|&i| i + 4) // "▌ {icon} " の4文字ぶん
-                    .collect();
-                Some(indices)
-            }
-            Field::Cwd => {
-                cwd_offset.map(|o| shift_highlight_indices(&hit.indices, o, &label, full_len))
-            }
-            Field::Tab => None, // タブ見出し側で描いている
-        });
         if is_selected {
             // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
             // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない
             label = pad_to_width(label, cols);
         }
+
+        // ハイライトする場所が、そのままヒットしたフィールドの提示になる。
+        // ペイン名は行全体とは別の予算で畳んでいるので、可視範囲も
+        // ペイン名自身の畳んだ結果から判定する
+        let highlight = hit.filter(|h| h.field == Field::Title).map(|hit| {
+            fold_highlight_indices(
+                &hit.indices,
+                &title,
+                title_dropped,
+                title_original_len,
+                head.chars().count(),
+            )
+        });
+
         let mut text = Text::new(&label);
         if let Some(a) = agent {
             // 状態アイコン部分（先頭2..3文字目）に状態色
@@ -443,6 +545,91 @@ impl State {
             text = text.selected().opaque().color_range(2, 0..1);
         }
         text
+    }
+}
+
+// cwd行1行ぶんの Text（決定22）。ペイン行の続きとして読めるよう字下げして dim で出す。
+//
+// パスは末尾のディレクトリ名のほうが識別に効くので、収まらないときは
+// 切り詰め（末尾 `…`）ではなく先頭省略で畳む
+pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usize) -> Text {
+    // 選択中は左端のバーをこの行まで伸ばし、ペイン行と1つの帯に見せる
+    let bar = if is_selected { "▌" } else { " " };
+    let indent = format!("{}{}", bar, " ".repeat(CWD_INDENT.saturating_sub(1)));
+    let (path, dropped) = truncate_start(cwd, cols.saturating_sub(CWD_INDENT));
+
+    // 字下げだけで幅を使い切るほど狭いときの保険。はみ出した行は端末側で
+    // 折り返り、選択背景が次の行を汚す（docs/issues/sidebar-bottom-highlight-glitch.md）
+    let mut label = truncate(&format!("{}{}", indent, path), cols);
+    if is_selected {
+        label = pad_to_width(label, cols);
+    }
+    let mut text = Text::new(&label);
+    let end = label.chars().count();
+    if !is_selected && end > CWD_INDENT {
+        // cwd は主役（ペイン名・カウンタ列）ではないので落として出す。
+        // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる
+        text = text.dim_range(CWD_INDENT..end);
+    }
+
+    if let Some(hit) = hit {
+        let indices = fold_highlight_indices(
+            &hit.indices,
+            &path,
+            dropped,
+            cwd.chars().count(),
+            CWD_INDENT,
+        );
+        if !indices.is_empty() {
+            text = text.color_indices(1, indices);
+        }
+    }
+    if is_selected {
+        text = text.selected().opaque().color_range(2, 0..1);
+    }
+    text
+}
+
+// 中身がパスかどうか。Claude Code はペイン名に cwd をそのまま入れることがあり、
+// その場合は末尾を切ると `/Users/example/develo…` のようにどれも同じ見た目になる
+fn looks_like_path(s: &str) -> bool {
+    s.starts_with('/') || s.starts_with("~/")
+}
+
+// 表示幅 max に畳む（決定22）。パスは先頭省略、それ以外は切り詰め。
+// 返り値は (畳んだ文字列, 先頭で落とした文字数)
+fn fold_to_width(s: &str, max: usize) -> (String, usize) {
+    if looks_like_path(s) {
+        truncate_start(s, max)
+    } else {
+        (truncate(s, max), 0)
+    }
+}
+
+// フィールド内のマッチ位置（char index）を、畳んだあとの行内の位置へ移す。
+// 画面から落ちた位置は捨てる — 見えていない文字にハイライトを置くと、
+// 関係ない文字が光ってヒット箇所の提示にならない
+pub(crate) fn fold_highlight_indices(
+    indices: &[usize],
+    folded: &str,
+    dropped: usize,
+    original_len: usize,
+    offset: usize,
+) -> Vec<usize> {
+    if dropped > 0 {
+        // 先頭省略。残った側は省略記号（1文字）ぶん右へずれる
+        indices
+            .iter()
+            .filter(|&&i| i >= dropped)
+            .map(|&i| i - dropped + offset + 1)
+            .collect()
+    } else {
+        let limit = colorable_char_limit(folded.chars().count(), original_len);
+        indices
+            .iter()
+            .filter(|&&i| i < limit)
+            .map(|&i| i + offset)
+            .collect()
     }
 }
 
@@ -480,6 +667,41 @@ pub(crate) fn pad_to_width(mut s: String, cols: usize) -> String {
     let pad = cols.saturating_sub(UnicodeWidthStr::width(s.as_str()));
     s.push_str(&" ".repeat(pad));
     s
+}
+
+// 左側に空白を足して表示幅 width に揃える（カウンタ列の右揃え用）
+fn pad_left(s: &str, width: usize) -> String {
+    let pad = width.saturating_sub(UnicodeWidthStr::width(s));
+    format!("{}{}", " ".repeat(pad), s)
+}
+
+// 表示セル幅ベースの先頭省略。先頭を落として `…` に畳み、末尾を残す（決定22）。
+// 返り値は (畳んだ文字列, 落とした文字数)
+pub(crate) fn truncate_start(s: &str, max: usize) -> (String, usize) {
+    let total = s.chars().count();
+    // 幅0のときに省略記号だけがはみ出さないようにする
+    if max == 0 {
+        return (String::new(), total);
+    }
+    if UnicodeWidthStr::width(s) <= max {
+        return (s.to_string(), 0);
+    }
+    // 省略記号（幅1）ぶんの余地を残しながら、末尾から幅が max-1 を超える手前まで拾う
+    let limit = max.saturating_sub(1);
+    let mut kept = 0;
+    let mut width = 0;
+    for c in s.chars().rev() {
+        let w = UnicodeWidthChar::width(c).unwrap_or(0);
+        if width + w > limit {
+            break;
+        }
+        width += w;
+        kept += 1;
+    }
+    let dropped = total - kept;
+    let mut out = String::from("…");
+    out.extend(s.chars().skip(dropped));
+    (out, dropped)
 }
 
 // 表示セル幅ベースの切り詰め。全角文字（CJK）は2セル分として数える
