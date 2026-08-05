@@ -6,6 +6,10 @@
 // navモード外でヘッダを出さないのは、セッション名を zellij 本体のトップバーが
 // `Zellij (セッション名)` の形で常時出しており、重複が視認性を下げるため
 //（要件: docs/requirements/sidebar-tree/）。
+//
+// 行が画面高に収まらないときは表示範囲を選択行へ寄せる（縦スクロール。
+// 要件: docs/requirements/sidebar-tree/sidebar-scroll.feature）。ヘッダは
+// 固定で、その下の一覧だけが動く。
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::*;
@@ -29,6 +33,12 @@ pub(crate) enum Row<'a> {
     // 一覧が空であることの通知行（検索の0件・トリアージの対象なし）。
     // 空リストのまま描くと、絞り込みが効いているのか描画が壊れているのか区別できない
     Notice(&'static str),
+    // 表示範囲の外に行があることを示す上下端のあふれマーカー行。
+    // 出さないと、一覧がそこで終わっているのか隠れているのか区別できない
+    Overflow {
+        hidden: usize,
+        above: bool,
+    },
     Tab(&'a TabInfo),
     Pane {
         entry: &'a Selectable,
@@ -301,11 +311,92 @@ impl State {
         rows
     }
 
+    // 画面に実際に載る行。visible_rows() の並びから表示範囲ぶんを切り出し、
+    // 隠れた行があれば上下端にあふれマーカー行を足す。
+    //
+    // `rows` が 0 のときは切り出さない。行クリックの逆引きが最初の描画より前に
+    // 来た場合（State::viewport_rows の初期値）で、スクロールは起きていない
+    pub(crate) fn screen_rows(&self, rows: usize) -> Vec<Row<'_>> {
+        let mut all = self.visible_rows();
+        if rows == 0 || all.len() <= rows {
+            return all;
+        }
+        let pinned = pinned_rows(&all);
+        let area = rows - pinned;
+        let list_len = all.len() - pinned;
+        // 描画とクリックの逆引きで同じ位置を使う。State::scroll は描画時に
+        // 寄せた値だが、そのあと一覧が縮んでいることもあるので clamp は掛け直す
+        let scroll = reconcile_scroll(list_len, area, self.scroll, None);
+        let shown = rows_shown(list_len, area, scroll);
+
+        let list = all.split_off(pinned);
+        let mut screen = all;
+        if scroll > 0 {
+            screen.push(Row::Overflow {
+                hidden: scroll,
+                above: true,
+            });
+        }
+        screen.extend(list.into_iter().skip(scroll).take(shown));
+        let below = list_len - scroll - shown;
+        if below > 0 {
+            screen.push(Row::Overflow {
+                hidden: below,
+                above: false,
+            });
+        }
+        screen
+    }
+
+    // 選択行が visible_rows() のどこにあるか（先頭行, 末尾行）。
+    // ペイン行と cwd行のように複数行が1つの帯になるので範囲で返す
+    fn selected_span(&self, all: &[Row<'_>]) -> Option<(usize, usize)> {
+        let triage_cursor = self.triage_cursor();
+        let mut span: Option<(usize, usize)> = None;
+        for (index, row) in all.iter().enumerate() {
+            let selected = match row {
+                Row::Pane {
+                    entry, flat_index, ..
+                }
+                | Row::Cwd {
+                    entry, flat_index, ..
+                } => self.row_is_selected(entry, *flat_index),
+                Row::Triage { entry, .. } => triage_cursor == Some(entry.pane_id),
+                _ => false,
+            };
+            if selected {
+                span = Some(match span {
+                    Some((first, _)) => (first, index),
+                    None => (index, index),
+                });
+            }
+        }
+        span
+    }
+
+    // 表示範囲を選択行へ寄せ直す。描画のたびに呼ぶ（画面高は描画時にしか
+    // 分からず、行の増減も選択の移動もここで一度に吸収できるため）。
+    //
+    // スクロール位置は選択（決定13で兄弟インスタンスへ配る）と画面高から
+    // 導出されるローカルな表示状態なので、それ自体は配らない
+    pub(crate) fn reconcile_viewport(&mut self, rows: usize) {
+        self.viewport_rows = rows;
+        let (list_len, area, anchor) = {
+            let all = self.visible_rows();
+            let pinned = pinned_rows(&all);
+            let anchor = self
+                .selected_span(&all)
+                .map(|(first, last)| (first - pinned, last - pinned));
+            (all.len() - pinned, rows.saturating_sub(pinned), anchor)
+        };
+        self.scroll = reconcile_scroll(list_len, area, self.scroll, anchor);
+    }
+
     // 画面のこの行に載っているペイン（要件: docs/requirements/click-to-focus/）。
-    // ヘッダ・タブ見出し行・一覧の外は None。
+    // ヘッダ・タブ見出し行・あふれマーカー行・一覧の外は None。
     // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
-        match self.visible_rows().get(row)? {
+        match self.screen_rows(self.viewport_rows).get(row)? {
             Row::Pane { entry, .. } | Row::Cwd { entry, .. } | Row::Triage { entry, .. } => {
                 Some(entry.pane_id)
             }
@@ -343,17 +434,19 @@ impl State {
             );
             return;
         }
-        let all_rows = self.visible_rows();
+        if rows == 0 {
+            return;
+        }
+        // 画面高での打ち切りは screen_rows() が済ませている。ここで改めて
+        // 打ち切ると、あふれマーカー行の勘定と食い違ってクリックが行ずれする
+        let screen = self.screen_rows(rows);
         // カウンタ列の幅はフレーム全体で1つ。行ごとに測ると桁が揃わない（決定22）
-        let column = self.counter_column(&all_rows);
+        let column = self.counter_column(&screen);
         // トリアージ行のタブ名列も同じ理由でフレーム全体で1つ
-        let tab_column = self.triage_tab_column(&all_rows, cols);
+        let tab_column = self.triage_tab_column(&screen, cols);
         // カーソルは一覧から導出されるので、行ごとに引き直さず1度だけ求める
         let triage_cursor = self.triage_cursor();
-        for (y, row) in all_rows.into_iter().enumerate() {
-            if y >= rows {
-                break;
-            }
+        for (y, row) in screen.into_iter().enumerate() {
             match row {
                 Row::Header => {
                     print_text_with_coordinates(self.header_line(cols), 0, y, None, None);
@@ -366,6 +459,15 @@ impl State {
                     let label = format!("  {}", notice);
                     print_text_with_coordinates(
                         compose(&[(&label, Ink::Muted)], cols),
+                        0,
+                        y,
+                        None,
+                        None,
+                    );
+                }
+                Row::Overflow { hidden, above } => {
+                    print_text_with_coordinates(
+                        overflow_row(hidden, above, cols),
                         0,
                         y,
                         None,
@@ -710,6 +812,77 @@ impl State {
         }
         text
     }
+}
+
+// 表示範囲の外に隠れている行があることを示す1行。文言は英語で統一する。
+// 記号はタブ見出し行と同じ三角の系列で、上下どちら側が隠れているかを向きで示す
+fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
+    let marker = if above { "▴" } else { "▾" };
+    let label = format!("  {} {} more", marker, hidden);
+    // 一覧の行そのものではないので、通知行と同じく落として出す
+    compose(&[(&label, Ink::Muted)], content_cols(cols))
+}
+
+// ヘッダのように固定して常に先頭へ出す行数。この下だけがスクロールする。
+// ヘッダを一緒に流すと、検索サブモードでクエリ入力行が画面から消える
+fn pinned_rows(all: &[Row<'_>]) -> usize {
+    usize::from(matches!(all.first(), Some(Row::Header)))
+}
+
+// スクロール位置 `scroll` のとき、一覧を何行ぶん画面に出せるか。
+// あふれマーカー行も画面の行を消費するので、その分を引く
+fn rows_shown(list_len: usize, area: usize, scroll: usize) -> usize {
+    let mut shown = area;
+    if scroll > 0 {
+        shown = shown.saturating_sub(1);
+    }
+    if scroll + shown < list_len {
+        shown = shown.saturating_sub(1);
+    }
+    shown.min(list_len.saturating_sub(scroll))
+}
+
+// 選択行が画面に入るようスクロール位置を寄せ直す
+//（docs/issues/sidebar-vertical-overflow.md）。行番号はいずれも
+// 一覧（固定行を除いた部分）の中で数える。
+//
+// `anchor` は選択行の範囲（ペイン行 + cwd行のように2行にまたがる）。
+// None のときは寄せずに範囲外への行き過ぎだけを直す
+pub(crate) fn reconcile_scroll(
+    list_len: usize,
+    area: usize,
+    scroll: usize,
+    anchor: Option<(usize, usize)>,
+) -> usize {
+    // 全部載るならスクロールしない。ここを通さないと、一覧が減ったときに
+    // 上へ寄ったままの表示が残る
+    if area == 0 || list_len <= area {
+        return 0;
+    }
+    let mut scroll = scroll.min(list_len - 1);
+    // 末尾に余白を作らない位置まで戻す（一覧が縮んだあと）
+    while scroll > 0 && scroll - 1 + rows_shown(list_len, area, scroll - 1) >= list_len {
+        scroll -= 1;
+    }
+    if let Some((first, last)) = anchor {
+        if first < scroll {
+            // 上へ外れているなら選択行を先頭に置く
+            scroll = first;
+        } else {
+            // 下へ外れているぶんだけ送る。マーカー行の有無で収容量が1行変わるので、
+            // 1行ずつ送って入ったかを確かめる
+            while scroll < list_len - 1 && last >= scroll + rows_shown(list_len, area, scroll) {
+                scroll += 1;
+            }
+        }
+    }
+    // 上端マーカーが1行しか隠さないなら、マーカーではなくその行そのものを出す。
+    // どちらも画面の1行を使うので、隠すほうが損（先頭タブの見出し行がこれに当たる）。
+    // 収まる範囲の下端は変わらないので、選択行が押し出されることもない
+    if scroll == 1 {
+        return 0;
+    }
+    scroll
 }
 
 // cwd行1行ぶんの Text（決定22）。ペイン行の続きとして読めるよう字下げして dim で出す。

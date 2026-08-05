@@ -16,8 +16,8 @@
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
 use crate::render::{
-    cwd_row, fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate,
-    truncate_start, CounterColumn, Row,
+    cwd_row, fold_highlight_indices, pad_to_width, reconcile_scroll, shift_highlight_indices,
+    truncate, truncate_start, CounterColumn, Row,
 };
 use std::collections::HashMap;
 
@@ -2004,6 +2004,216 @@ fn render_survives_search_mode() {
     type_query(&mut state, "zzz");
     state.render(40, 20);
     state.render(1, 1);
+}
+
+// --- 縦スクロール（docs/issues/sidebar-vertical-overflow.md） ---
+//
+// 行番号の勘定は「画面高に収まるぶんだけを切り出す」ところに集まっているので、
+// 純粋関数（reconcile_scroll）と、描画・クリックの逆引きが同じ並びを見ているか
+// の両方を見る。
+
+// 画面高8行に対して行が余る状態。visible_rows は
+// ヘッダ1 + タブ見出し1 + ペイン12 = 14行になる
+fn overflowing_state() -> State {
+    let mut state = state_with_panes(12);
+    state.nav_mode = true;
+    state
+}
+
+// 画面のどこかにそのペインの行があるか
+fn on_screen(state: &State, rows: usize, pane_id: u32) -> bool {
+    (0..rows).any(|y| state.pane_at_row(y) == Some(pane_id))
+}
+
+fn overflow_markers(state: &State, rows: usize) -> Vec<(usize, bool)> {
+    state
+        .screen_rows(rows)
+        .iter()
+        .filter_map(|row| match row {
+            Row::Overflow { hidden, above } => Some((*hidden, *above)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn scrolling_keeps_everything_in_place_when_it_all_fits() {
+    let mut state = overflowing_state();
+    state.selected = 11;
+    state.render(40, 32);
+
+    assert_eq!(state.scroll, 0, "全部載るならスクロールしない");
+    assert!(overflow_markers(&state, 40).is_empty());
+    assert_eq!(state.screen_rows(40).len(), 14);
+}
+
+#[test]
+fn the_selection_never_leaves_the_screen() {
+    // 「見えない行へ選択だけが進む」のが元の不具合。上下どちらへ動かしても
+    // 選択行が画面に残ることを、全行ぶん確かめる
+    const ROWS: usize = 8;
+    let mut state = overflowing_state();
+
+    for _ in 0..11 {
+        state.handle_nav_key(key(BareKey::Char('j')));
+        state.render(ROWS, 32);
+        let pane_id = state.selectable[state.selected].pane_id;
+        assert!(
+            on_screen(&state, ROWS, pane_id),
+            "下へ移動中に選択行が画面外へ出た: pane {}",
+            pane_id
+        );
+    }
+    for _ in 0..11 {
+        state.handle_nav_key(key(BareKey::Char('k')));
+        state.render(ROWS, 32);
+        let pane_id = state.selectable[state.selected].pane_id;
+        assert!(
+            on_screen(&state, ROWS, pane_id),
+            "上へ移動中に選択行が画面外へ出た: pane {}",
+            pane_id
+        );
+    }
+    assert_eq!(state.scroll, 0, "先頭まで戻ったらスクロールも戻る");
+}
+
+#[test]
+fn the_cwd_row_stays_with_its_pane_row_at_the_bottom_edge() {
+    // ペイン行だけが入って cwd行が切れると、選択の帯が画面の端で切れて見える
+    const ROWS: usize = 8;
+    let mut state = overflowing_state();
+    state.show_cwd = true;
+    state.pane_cwds.insert(5, "/work/fujin".to_string());
+    state.selected = 4; // pane5
+    state.render(ROWS, 32);
+
+    let screen = state.screen_rows(ROWS);
+    let last_pane = screen
+        .iter()
+        .rposition(|row| matches!(row, Row::Pane { .. }))
+        .expect("ペイン行が1つも無い");
+    assert!(
+        matches!(screen.get(last_pane + 1), Some(Row::Cwd { .. })),
+        "選択行の cwd行まで画面に入っていない"
+    );
+}
+
+#[test]
+fn the_header_stays_pinned_while_the_list_scrolls() {
+    const ROWS: usize = 8;
+    let mut state = overflowing_state();
+    state.selected = 11;
+    state.render(ROWS, 32);
+
+    let screen = state.screen_rows(ROWS);
+    assert!(
+        matches!(screen.first(), Some(Row::Header)),
+        "ヘッダは流さず固定する"
+    );
+    assert_eq!(screen.len(), ROWS, "画面高ぴったりまで使う");
+}
+
+#[test]
+fn overflow_markers_report_the_hidden_rows() {
+    const ROWS: usize = 8;
+    let mut state = overflowing_state();
+
+    // 先頭を選択中: 下だけが隠れる。ヘッダ1 + ペイン6 + 下端マーカー1 = 8行
+    state.selected = 0;
+    state.render(ROWS, 32);
+    assert_eq!(overflow_markers(&state, ROWS), vec![(7, false)]);
+
+    // 末尾を選択中: 上だけが隠れる（タブ見出し行も隠れる側に入る）
+    state.selected = 11;
+    state.render(ROWS, 32);
+    assert_eq!(overflow_markers(&state, ROWS), vec![(7, true)]);
+
+    // 途中まで送ったところ: 上下ともマーカーが出る
+    let mut state = overflowing_state();
+    state.selected = 8;
+    state.render(ROWS, 32);
+    let markers = overflow_markers(&state, ROWS);
+    assert_eq!(markers.len(), 2, "上下ともマーカーが出る: {:?}", markers);
+    assert!(markers[0].1 && !markers[1].1);
+    assert_eq!(
+        markers[0].0 + markers[1].0 + (ROWS - 3),
+        13,
+        "隠れている行数と出ている行数の合計が一覧の行数になる"
+    );
+}
+
+#[test]
+fn clicking_follows_the_scrolled_layout() {
+    // 描画とクリックの逆引きが同じ切り出しを見ていないと行がずれる
+    const ROWS: usize = 8;
+    let mut state = overflowing_state();
+    state.nav_mode = false;
+    state.selected = 11;
+    state.render(ROWS, 32);
+
+    // 0: ヘッダ / 1: 上端マーカー / 2..7: pane7..pane12
+    assert_eq!(state.pane_at_row(1), None, "マーカー行は対象外");
+    assert_eq!(state.pane_at_row(2), Some(7));
+    assert_eq!(state.pane_at_row(7), Some(12));
+    assert_eq!(state.pane_at_row(8), None, "画面の外");
+
+    assert!(state.handle_click(2));
+    assert_eq!(state.selectable[state.selected].pane_id, 7);
+}
+
+#[test]
+fn scroll_stays_within_the_list_when_panes_disappear() {
+    const ROWS: usize = 8;
+    let mut state = overflowing_state();
+    state.selected = 11;
+    state.render(ROWS, 32);
+    assert!(state.scroll > 0);
+
+    // ペインが減って全部載るようになったら、上に寄った表示を残さない
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![terminal_pane(1, "alpha"), terminal_pane(2, "bravo")],
+    )]));
+    state.rebuild_selectable();
+    state.render(ROWS, 32);
+    assert_eq!(state.scroll, 0);
+    assert!(on_screen(&state, ROWS, 1));
+}
+
+#[test]
+fn reconcile_scroll_leaves_a_list_that_fits_alone() {
+    assert_eq!(reconcile_scroll(5, 8, 0, Some((4, 4))), 0);
+    // 一覧が縮んで全部載るようになったら、スクロールは畳む
+    assert_eq!(reconcile_scroll(5, 8, 3, None), 0);
+}
+
+#[test]
+fn reconcile_scroll_pulls_the_selection_into_view() {
+    // 13行を7行に出す。上端・下端のマーカーがそれぞれ1行使う
+    assert_eq!(
+        reconcile_scroll(13, 7, 0, Some((12, 12))),
+        7,
+        "下に外れた選択は最小限だけ送る"
+    );
+    assert_eq!(
+        reconcile_scroll(13, 7, 7, Some((0, 0))),
+        0,
+        "上に外れた選択は先頭に置く"
+    );
+    // 既に見えているなら動かさない
+    assert_eq!(reconcile_scroll(13, 7, 7, Some((10, 10))), 7);
+}
+
+#[test]
+fn reconcile_scroll_does_not_leave_a_gap_at_the_bottom() {
+    // 行き過ぎたスクロール位置は、末尾が下端に来るところまで戻す
+    assert_eq!(reconcile_scroll(13, 7, 12, None), 7);
+}
+
+#[test]
+fn reconcile_scroll_survives_a_screen_with_no_room() {
+    assert_eq!(reconcile_scroll(13, 0, 3, Some((5, 5))), 0);
+    assert_eq!(reconcile_scroll(13, 1, 0, Some((12, 12))), 12);
 }
 
 // --- 行クリック（要件: docs/requirements/click-to-focus/） ---

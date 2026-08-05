@@ -131,6 +131,12 @@ struct State {
     // 状態変化のたびに進む単調増加のカウンタ。トリアージ一覧の tie-break に使う
     //（要件: triage-mode）。値そのものに意味はなく、比べられればよい
     state_seq: u64,
+    // 縦スクロールで一覧が上に隠れている行数。選択と画面高から毎フレーム
+    // 導出されるローカルな表示状態で、兄弟インスタンスへは配らない（決定13の範囲外）
+    scroll: usize,
+    // 直近に描画した画面高。行クリックの逆引き（pane_at_row）が描画と同じ
+    // 表示範囲を再現するために要る。0 は「まだ一度も描いていない」
+    viewport_rows: usize,
 }
 
 register_plugin!(State);
@@ -396,6 +402,9 @@ impl ZellijPlugin for State {
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
+        // 表示範囲の寄せ直しは描画の直前に行う。画面高が分かるのがここだけで、
+        // 行の増減も選択の移動もまとめて吸収できる
+        self.reconcile_viewport(rows);
         self.draw(rows, cols);
     }
 }
