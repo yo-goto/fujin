@@ -67,6 +67,15 @@ const CWD_INDENT: usize = 6;
 // ペイン名とカウンタ列のあいだに最低限空ける幅。
 // 名前と数字がくっつくと、どこまでが名前か読めなくなる
 const COUNTER_GAP: usize = 1;
+// 右端に常に空ける幅。文字がサイドバーの縁に貼り付くと窮屈に見える。
+// 左マージン（選択バーぶんの2セル）と揃えてある
+const RIGHT_MARGIN: usize = 2;
+
+// 文字を置いてよい幅。選択行の背景は右マージンも含めて塗るので、
+// 背景のパディング（pad_to_width）はこれではなく cols を使うこと
+fn content_cols(cols: usize) -> usize {
+    cols.saturating_sub(RIGHT_MARGIN)
+}
 // キー列の幅（説明との間の空白を含む）。説明の開始位置をここで揃える。
 // いちばん長いキー（`j k up down tab`）と、いちばん長い説明（`cancel search`）が
 // 左マージン込みで幅32（決定3）にちょうど収まる値
@@ -355,6 +364,8 @@ impl State {
     // モード名とヘルプ・退出キーだけに絞り、詳細は `?` のヘルプオーバーレイへ
     // 追い出してある。文言は英語で統一する
     pub(crate) fn header_line(&self, cols: usize) -> Text {
+        // ツリーの行と同じく右端は空ける（ヘルプオーバーレイは別の面なので対象外）
+        let cols = content_cols(cols);
         let Some(search) = &self.search else {
             return compose(
                 &[
@@ -426,11 +437,11 @@ impl State {
     }
 
     // タブ見出し行1行ぶんの Text を組み立てる
-    fn tab_heading(&self, tab: &TabInfo, cols: usize) -> Text {
+    pub(crate) fn tab_heading(&self, tab: &TabInfo, cols: usize) -> Text {
         let marker = if tab.active { "▾" } else { "▸" };
         let prefix = format!("{} {} ", marker, tab.position + 1);
         let full_heading = format!("{}{}", prefix, tab.name);
-        let title = truncate(&full_heading, cols);
+        let title = truncate(&full_heading, content_cols(cols));
         let mut text = Text::new(&title);
         if tab.active {
             text = text.color_range(0, ..title.chars().count());
@@ -497,7 +508,9 @@ impl State {
             head_width + COUNTER_GAP + counters_width
         };
 
-        let title_budget = cols.saturating_sub(reserved);
+        // 右マージンぶんは文字を置かない。カウンタ列もそこまでで揃える
+        let inner = content_cols(cols);
+        let title_budget = inner.saturating_sub(reserved);
         let title_original_len = entry.title.chars().count();
         let (title, title_dropped) = fold_to_width(&entry.title, title_budget);
 
@@ -505,12 +518,12 @@ impl State {
         if !counters.is_empty() {
             // ペイン名の長さに関わらず、カウンタ列は右端で揃える
             let filler =
-                cols.saturating_sub(UnicodeWidthStr::width(label.as_str()) + counters_width);
+                inner.saturating_sub(UnicodeWidthStr::width(label.as_str()) + counters_width);
             label.push_str(&" ".repeat(filler));
             label.push_str(&counters);
             // アイコンとカウンタ列だけで幅を使い切るほど狭いときの保険。
             // はみ出すと選択背景が端末側で折り返して次の行を汚す
-            label = truncate(&label, cols);
+            label = truncate(&label, inner);
         }
         if is_selected {
             // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
@@ -556,11 +569,12 @@ pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usi
     // 選択中は左端のバーをこの行まで伸ばし、ペイン行と1つの帯に見せる
     let bar = if is_selected { "▌" } else { " " };
     let indent = format!("{}{}", bar, " ".repeat(CWD_INDENT.saturating_sub(1)));
-    let (path, dropped) = truncate_start(cwd, cols.saturating_sub(CWD_INDENT));
+    let inner = content_cols(cols);
+    let (path, dropped) = truncate_start(cwd, inner.saturating_sub(CWD_INDENT));
 
     // 字下げだけで幅を使い切るほど狭いときの保険。はみ出した行は端末側で
     // 折り返り、選択背景が次の行を汚す（docs/issues/sidebar-bottom-highlight-glitch.md）
-    let mut label = truncate(&format!("{}{}", indent, path), cols);
+    let mut label = truncate(&format!("{}{}", indent, path), inner);
     if is_selected {
         label = pad_to_width(label, cols);
     }

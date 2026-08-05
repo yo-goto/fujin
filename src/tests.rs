@@ -1603,6 +1603,7 @@ fn unknown_pipes_are_ignored() {
 // 消えない。cwd はペイン行に混ぜず、続く cwd行に出す
 
 const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定3）
+const CONTENT: usize = SIDEBAR - 2; // 右マージン2セルを除いた、文字を置ける幅
 
 // 1ペインだけを持つ状態。ペイン名を指定して作る
 fn state_with_one_pane(title: &str) -> State {
@@ -1652,14 +1653,56 @@ fn counters_are_flush_with_the_right_edge() {
     );
     assert_eq!(
         unicode_width::UnicodeWidthStr::width(content),
-        SIDEBAR,
-        "行はサイドバー幅ちょうどに収まる: {}",
+        CONTENT,
+        "右端には常にマージンを空ける: {}",
         content
     );
     assert!(
         content.contains('…'),
         "収まらないぶんはペイン名側を畳む: {}",
         content
+    );
+}
+
+#[test]
+fn every_tree_row_leaves_a_right_margin() {
+    // 文字がサイドバーの縁に貼り付くと窮屈に見える。タブ見出し行・ペイン行・
+    // cwd行のどれも、収まらないときは右マージンの手前で畳む
+    let mut state = state_with_one_pane("要件定義とドキュメント整理タスクの続き");
+    state.tabs = vec![TabInfo {
+        position: 0,
+        name: "とても長い名前のタブがここにある".to_string(),
+        active: true,
+        ..Default::default()
+    }];
+    state.show_cwd = true;
+    state.pane_cwds.insert(
+        1,
+        "/Users/example/development/oss/zellij-plugins/fujin".to_string(),
+    );
+    repeat_status(&mut state, 1, "SubagentStart", 2);
+
+    let rows = state.visible_rows();
+    let column = state.counter_column(&rows);
+    for row in &rows {
+        let line = match row {
+            Row::Tab(tab) => state.tab_heading(tab, SIDEBAR),
+            Row::Pane { entry, hit, .. } => state.pane_row(entry, false, *hit, column, SIDEBAR),
+            Row::Cwd { cwd, hit, .. } => cwd_row(cwd, false, *hit, SIDEBAR),
+            _ => continue,
+        };
+        assert!(
+            unicode_width::UnicodeWidthStr::width(line.content()) <= CONTENT,
+            "右端にマージンが残っていない: {:?}",
+            line.content()
+        );
+    }
+
+    // 選択行の背景だけは右マージンも塗る。塗らないと帯が途中で切れて見える
+    let selected = state.pane_row(&state.selectable[0], true, None, column, SIDEBAR);
+    assert_eq!(
+        unicode_width::UnicodeWidthStr::width(selected.content()),
+        SIDEBAR
     );
 }
 
@@ -1681,8 +1724,8 @@ fn the_counter_column_is_shared_by_every_row() {
     let second = state.pane_row(&state.selectable[1], false, None, column, SIDEBAR);
 
     // 列幅は `+12`（3）と `[3]`（3）、あいだの空白1つで計7セル
-    assert_eq!(column_at(first.content(), "+12"), SIDEBAR - 7);
-    assert_eq!(column_at(second.content(), "[3]"), SIDEBAR - 3);
+    assert_eq!(column_at(first.content(), "+12"), CONTENT - 7);
+    assert_eq!(column_at(second.content(), "[3]"), CONTENT - 3);
     assert!(
         !second.content().contains('+'),
         "サブエージェント数を持たない行は、その位置を空けたままにする: {}",
@@ -1706,7 +1749,7 @@ fn the_counter_column_costs_nothing_when_nobody_has_counters() {
     let content = text.content();
     assert!(content.starts_with("    abcdefghij"), "{}", content);
     assert!(content.ends_with('…'), "{}", content);
-    assert_eq!(unicode_width::UnicodeWidthStr::width(content), SIDEBAR);
+    assert_eq!(unicode_width::UnicodeWidthStr::width(content), CONTENT);
 }
 
 #[test]
@@ -1729,7 +1772,7 @@ fn a_pane_name_that_is_a_path_keeps_its_tail() {
         content
     );
     assert!(content.contains('…'), "{}", content);
-    assert_eq!(unicode_width::UnicodeWidthStr::width(content), SIDEBAR);
+    assert_eq!(unicode_width::UnicodeWidthStr::width(content), CONTENT);
 }
 
 // --- cwd行（決定22） ---
@@ -1831,7 +1874,7 @@ fn the_cwd_row_keeps_the_tail_of_the_path() {
         "字下げして続きに見せる: {}",
         content
     );
-    assert!(unicode_width::UnicodeWidthStr::width(content) <= SIDEBAR);
+    assert!(unicode_width::UnicodeWidthStr::width(content) <= CONTENT);
 }
 
 #[test]
