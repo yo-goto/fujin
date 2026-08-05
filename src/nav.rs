@@ -297,11 +297,13 @@ impl State {
         }
     }
 
-    // サイドバーの行を左クリックしたときのジャンプ
+    // 行クリックでのフォーカス移動
     //（要件: docs/requirements/click-to-focus/）。戻り値は再描画するか。
     //
     // 引数の `line` は描画時のy座標そのもの（zellij は isize で渡してくる）。
-    // 行→ペインの対応は render 側のレイアウトから引く
+    // 行→ペインの対応は render 側のレイアウトから引く。
+    // サイドバーは set_selectable(false) のままだが、マウスイベントの配送は
+    // selectable にもフォーカスにも縛られない（実測。決定6・16と衝突しない）
     pub(crate) fn handle_click(&mut self, line: isize) -> bool {
         // 負の行はサイドバーの外
         let Ok(row) = usize::try_from(line) else {
@@ -313,7 +315,7 @@ impl State {
         };
         // navモード中にマウスが届いた場合も Enter と同じ扱いにする（v1の要件は
         // 通常時のクリックのみだが、横取りを残したままフォーカスだけ動かすと
-        // ジャンプ先で j/k を食われ続けるため、取り残しを作らない側に倒す）
+        // 移動先で j/k を食われ続けるため、取り残しを作らない側に倒す）
         if self.nav_mode {
             self.exit_nav_mode();
         }

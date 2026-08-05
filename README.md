@@ -26,8 +26,9 @@ oversee at a glance. **Zellij, plus eyes for your agents.**
 - **Overview** — every tab and pane in the session, always visible in the sidebar
 - **State at a glance** — an icon tells you whether each agent is working,
   waiting on you, or finished
-- **Jump** — reach any pane with a couple of keystrokes while your focus stays
-  in your working pane (with fuzzy search over pane name, tab name, and cwd)
+- **Jump** — reach any pane with a couple of keystrokes or a single click, while
+  your focus stays in your working pane (with fuzzy search over pane name, tab
+  name, and cwd)
 
 ## Status icons
 
@@ -249,6 +250,16 @@ Register `extras/claude-hooks/fujin-hook.sh` as a hook. Add it to `hooks` in
 
 Everything works while your focus stays in your working pane — you never need to
 focus the sidebar itself (in fact it's excluded from focus cycling entirely).
+
+### Click to jump
+
+Left-clicking a pane row in the sidebar jumps to that pane, with no mode to
+enter. A pane in another tab brings that tab along; a floating pane brings up
+the floating layer. Clicking a tab heading, or the empty space below the list,
+does nothing.
+
+If nothing happens, check that zellij's `mouse_mode` is still enabled in
+`~/.config/zellij/config.kdl` (it is on by default).
 
 ### Nav mode
 

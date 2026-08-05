@@ -13,7 +13,7 @@
 //
 // モジュール構成:
 // - agent  — フックイベントの解釈とエージェント状態の遷移
-// - nav    — navモード（決定12）と検索サブモードのキー操作
+// - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
 // - render — サイドバーの描画
 // - sync   — インスタンス間の状態同期（決定13）
@@ -162,7 +162,7 @@ impl ZellijPlugin for State {
             EventType::PermissionRequestResult,
             EventType::Visible,
             EventType::InterceptedKeyPress,
-            // ペイン行のクリックでのジャンプ（要件: docs/requirements/click-to-focus/）
+            // 行クリックでのフォーカス移動（要件: docs/requirements/click-to-focus/）
             EventType::Mouse,
             // プラグイン終了・リロード時に横取りを解除する保険
             EventType::BeforeClose,
