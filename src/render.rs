@@ -23,7 +23,7 @@ pub(crate) enum Row<'a> {
     Header,
     // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
     // 開いている間はサイドバー全体がこの行だけになる
-    Help(&'a str),
+    Help(&'a HelpRow),
     // 検索が0件のときの通知行
     NoMatch,
     Tab(&'a TabInfo),
@@ -33,6 +33,76 @@ pub(crate) enum Row<'a> {
         flat_index: usize,
         hit: Option<&'a Hit>,
     },
+}
+
+// ヘルプオーバーレイの行の種類（中身は nav::help_lines() が持つ）。
+// 整形（キー列の幅・左マージン）と配色はこちら側で決める
+pub(crate) enum HelpRow {
+    // モード名とその添え字。例: ("[NAV]", "keys")
+    Title(&'static str, &'static str),
+    // キーと、それが何をするか
+    Entry(&'static str, &'static str),
+    Blank,
+    // 操作の説明ではない補足。例: "press any key to close"
+    Note(&'static str),
+}
+
+// 行の左に空ける余白。文字を左端に貼り付けると窮屈に見える
+const HELP_INDENT: usize = 2;
+// キー列の幅（説明との間の空白を含む）。説明の開始位置をここで揃える。
+// いちばん長いキー（`j k up down tab`）と、いちばん長い説明（`cancel search`）が
+// 左マージン込みで幅32（決定3）にちょうど収まる値
+const HELP_KEY_COLUMN: usize = 17;
+
+// 文字に与える意味。zellij のテーマ側の色をそのまま借りる（決定11と同じ方針で、
+// 色そのものを設定項目にはしない）
+#[derive(Clone, Copy)]
+enum Ink {
+    // 既定の文字色。読ませたい本文
+    Plain,
+    // モード名。ヘッダの `[NAV]` と同じ強調色に揃える
+    Tag,
+    // キーそのもの。zellij 本体の status-bar がキーを強調するのに倣う
+    Key,
+    // 添え物（`:help` の label 部分・補足行）。落として主役を目立たせる
+    Muted,
+}
+
+// 意味付きの断片を1行に組み立てる。
+//
+// 色の指定は文字位置で行うため、文言を直すたびに位置を数え直すことになる。
+// 断片の並びから位置を計算させて、その手間と数え間違いを無くす
+fn compose(segments: &[(&str, Ink)], cols: usize) -> Text {
+    let mut line = String::new();
+    let mut spans = Vec::with_capacity(segments.len());
+    for (fragment, ink) in segments {
+        let start = line.chars().count();
+        line.push_str(fragment);
+        spans.push((start, line.chars().count(), *ink));
+    }
+    let full_len = line.chars().count();
+    let line = truncate(&line, cols);
+    // 切り詰められた行の末尾は … なので、そこには色を乗せない
+    let visible = line.chars().count();
+    let limit = if visible < full_len {
+        visible.saturating_sub(1)
+    } else {
+        visible
+    };
+    let mut text = Text::new(&line);
+    for (start, end, ink) in spans {
+        let end = end.min(limit);
+        if start >= end {
+            continue;
+        }
+        text = match ink {
+            Ink::Plain => text,
+            Ink::Tag => text.color_range(3, start..end),
+            Ink::Key => text.color_range(2, start..end),
+            Ink::Muted => text.dim_range(start..end),
+        };
+    }
+    text
 }
 
 impl State {
@@ -45,7 +115,7 @@ impl State {
         }
         // ヘルプオーバーレイはサイドバー全体を覆う。ツリーも一緒には出さない
         if self.help_overlay {
-            return self.help_lines().iter().map(|l| Row::Help(l)).collect();
+            return self.help_lines().iter().map(Row::Help).collect();
         }
         // ヘッダ: 検索中はクエリ入力行、navモード中はモード名。通常表示では出さない
         if self.search.is_some() || self.nav_mode {
@@ -126,26 +196,20 @@ impl State {
             }
             match row {
                 Row::Header => {
-                    let header = self.header_line(cols);
+                    print_text_with_coordinates(self.header_line(cols), 0, y, None, None);
+                }
+                Row::Help(row) => {
+                    print_text_with_coordinates(self.help_line(row, cols), 0, y, None, None);
+                }
+                Row::NoMatch => {
+                    // 操作の対象ではない通知なので、一覧の行より落として出す
                     print_text_with_coordinates(
-                        Text::new(&header).color_range(3, ..header.chars().count()),
+                        compose(&[("  一致なし", Ink::Muted)], cols),
                         0,
                         y,
                         None,
                         None,
                     );
-                }
-                Row::Help(line) => {
-                    let line = truncate(line, cols);
-                    let mut text = Text::new(&line);
-                    // 見出し行だけ色を乗せて、キー一覧との区切りを付ける
-                    if y == 0 {
-                        text = text.color_range(3, ..line.chars().count());
-                    }
-                    print_text_with_coordinates(text, 0, y, None, None);
-                }
-                Row::NoMatch => {
-                    print_text_with_coordinates(Text::new("  一致なし"), 0, y, None, None);
                 }
                 Row::Tab(tab) => {
                     print_text_with_coordinates(self.tab_heading(tab, cols), 0, y, None, None);
@@ -167,26 +231,76 @@ impl State {
         }
     }
 
-    // ヘッダ1行の文字列（要件: docs/requirements/nav-mode/ の操作ヒント）。
+    // ヘッダ1行（要件: docs/requirements/nav-mode/ の操作ヒント）。
     //
     // サイドバー幅は32文字（決定3）で全キーの説明は載らないので、常時出すのは
     // モード名とヘルプ・退出キーだけに絞り、詳細は `?` のヘルプオーバーレイへ
     // 追い出してある。文言は英語で統一する
-    pub(crate) fn header_line(&self, cols: usize) -> String {
+    pub(crate) fn header_line(&self, cols: usize) -> Text {
         let Some(search) = &self.search else {
-            return truncate("[NAV]  ?:help  esc:exit", cols);
+            return compose(
+                &[
+                    ("[NAV]", Ink::Tag),
+                    ("  ", Ink::Plain),
+                    ("?", Ink::Key),
+                    (":help", Ink::Muted),
+                    ("  ", Ink::Plain),
+                    ("esc", Ink::Key),
+                    (":exit", Ink::Muted),
+                ],
+                cols,
+            );
         };
         // 検索中はクエリ入力行が主役。ヒントは右端へ寄せ、クエリが伸びて
         // ぶつかるところまで来たら入力中の文字列のほうを優先して落とす
-        let query = format!("/{}▏", search.query);
-        let hint = "?:help";
+        let query = format!("{}▏", search.query);
+        let hint_width = "?:help".chars().count();
         let pad = cols
-            .saturating_sub(query.chars().count())
-            .saturating_sub(hint.chars().count());
-        if pad == 0 {
-            return truncate(&query, cols);
+            .saturating_sub(query.chars().count() + 1) // 先頭の `/` のぶん
+            .saturating_sub(hint_width);
+        let mut segments = vec![("/", Ink::Tag), (query.as_str(), Ink::Plain)];
+        let spacer = " ".repeat(pad);
+        if pad > 0 {
+            segments.push((spacer.as_str(), Ink::Plain));
+            segments.push(("?", Ink::Key));
+            segments.push((":help", Ink::Muted));
         }
-        format!("{}{}{}", query, " ".repeat(pad), hint)
+        compose(&segments, cols)
+    }
+
+    // ヘルプオーバーレイの1行。左マージンは描画位置（x）ではなく行の中に
+    // 持たせる — 画面座標を行ごとに変えると、行の並びと描画がずれやすい
+    pub(crate) fn help_line(&self, row: &HelpRow, cols: usize) -> Text {
+        let indent = " ".repeat(HELP_INDENT);
+        match row {
+            HelpRow::Title(tag, rest) => compose(
+                &[
+                    (&indent, Ink::Plain),
+                    (tag, Ink::Tag),
+                    (" ", Ink::Plain),
+                    (rest, Ink::Muted),
+                ],
+                cols,
+            ),
+            HelpRow::Entry(keys, description) => {
+                // キー列は幅を固定して説明の開始位置を揃える。キーが長すぎて
+                // はみ出す場合は空白1文字だけ空けて続ける（列は崩れるが、
+                // 説明が消えるよりはよい）
+                let pad = HELP_KEY_COLUMN.saturating_sub(keys.chars().count()).max(1);
+                let gap = " ".repeat(pad);
+                compose(
+                    &[
+                        (&indent, Ink::Plain),
+                        (keys, Ink::Key),
+                        (&gap, Ink::Plain),
+                        (description, Ink::Plain),
+                    ],
+                    cols,
+                )
+            }
+            HelpRow::Blank => Text::new(""),
+            HelpRow::Note(note) => compose(&[(&indent, Ink::Plain), (note, Ink::Muted)], cols),
+        }
     }
 
     // タブ見出し1行ぶんの Text を組み立てる

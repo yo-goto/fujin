@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use zellij_tile::prelude::*;
 
+use crate::render::HelpRow;
 use crate::search::{match_pane, Hit};
 use crate::{Selectable, State};
 
@@ -356,36 +357,40 @@ impl State {
     }
 
     // ヘルプオーバーレイに出すキー一覧（要件: nav-mode-hints）。
-    // 表示中のモードで内容を出し分ける。文言は英語で統一する
-    pub(crate) fn help_lines(&self) -> &'static [&'static str] {
+    // 表示中のモードで内容を出し分ける。文言は英語で統一する。
+    //
+    // 整形と配色は render 側の責務なので、ここは「どのキーに何が割り当たって
+    // いるか」だけを持つ。矢印など幅の曖昧な文字は使わない — サイドバーの
+    // 幅計算が文字数ベース（v1）なので、キー列の位置がずれるため
+    pub(crate) fn help_lines(&self) -> &'static [HelpRow] {
+        use HelpRow::{Blank, Entry, Note, Title};
         if self.search.is_some() {
             &[
-                "[SEARCH] keys",
-                "",
-                "type          filter panes",
-                "backspace     delete char",
-                "up/down tab   move cursor",
-                "shift+tab     move back",
-                "enter         jump & exit",
-                "esc           cancel search",
-                "?             this help",
-                "",
-                "press any key to close",
+                Title("[SEARCH]", "keys"),
+                Blank,
+                Entry("type", "filter panes"),
+                Entry("backspace", "delete char"),
+                Entry("up down tab", "move cursor"),
+                Entry("shift+tab", "move back"),
+                Entry("enter", "jump & exit"),
+                Entry("esc", "cancel search"),
+                Entry("?", "this help"),
+                Blank,
+                Note("press any key to close"),
             ]
         } else {
             &[
-                "[NAV] keys",
-                "",
-                "j k up down   move",
-                "tab           move down",
-                "g G           top / bottom",
-                "1-9           jump to n",
-                "enter l space jump & exit",
-                "/             search",
-                "?             this help",
-                "esc q         exit",
-                "",
-                "press any key to close",
+                Title("[NAV]", "keys"),
+                Blank,
+                Entry("j k up down tab", "move"),
+                Entry("g G", "top / bottom"),
+                Entry("1-9", "jump to n"),
+                Entry("enter l space", "jump & exit"),
+                Entry("/", "search"),
+                Entry("?", "this help"),
+                Entry("esc q", "exit"),
+                Blank,
+                Note("press any key to close"),
             ]
         }
     }

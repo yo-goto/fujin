@@ -544,6 +544,7 @@ fn the_nav_header_shows_the_help_and_exit_hints() {
     state.nav_mode = true;
 
     let header = state.header_line(32);
+    let header = header.content();
     assert!(header.contains("[NAV]"), "{}", header);
     assert!(header.contains("?:help"), "{}", header);
     assert!(header.contains("esc:exit"), "{}", header);
@@ -557,6 +558,7 @@ fn the_search_header_keeps_the_help_hint_beside_the_query() {
     type_query(&mut state, "alp");
 
     let header = state.header_line(32);
+    let header = header.content();
     assert!(header.starts_with("/alp"), "{}", header);
     assert!(header.contains("?:help"), "{}", header);
     assert!(header.chars().count() <= 32);
@@ -570,6 +572,7 @@ fn a_long_query_wins_over_the_help_hint() {
 
     // 幅12にはヒントを置く余地が無い。入力中のクエリのほうを残す
     let header = state.header_line(12);
+    let header = header.content();
     assert!(!header.contains("?:help"), "{}", header);
     assert!(header.chars().count() <= 12);
 }
@@ -609,14 +612,56 @@ fn the_help_overlay_covers_the_whole_sidebar() {
 
 #[test]
 fn the_help_lines_fit_the_sidebar_width() {
+    // 幅32（決定3）に収まらないと、キー列か説明のどちらかが … で消える
     let mut state = searchable_state();
-    for line in state.help_lines() {
-        assert!(line.chars().count() <= 32, "navモード: {}", line);
+    for row in state.help_lines() {
+        let line = state.help_line(row, 32);
+        assert!(
+            !line.content().contains('…'),
+            "navモード: {}",
+            line.content()
+        );
     }
     state.handle_nav_key(key(BareKey::Char('/')));
-    for line in state.help_lines() {
-        assert!(line.chars().count() <= 32, "検索サブモード: {}", line);
+    for row in state.help_lines() {
+        let line = state.help_line(row, 32);
+        assert!(
+            !line.content().contains('…'),
+            "検索サブモード: {}",
+            line.content()
+        );
     }
+}
+
+#[test]
+fn the_help_entries_line_up_under_a_left_margin() {
+    let state = state_with_panes(2);
+    // 左端に貼り付けず余白を空ける。説明の開始位置は行をまたいで揃える
+    let lines: Vec<String> = state
+        .help_lines()
+        .iter()
+        .map(|row| state.help_line(row, 32).content().to_string())
+        .collect();
+    let entries: Vec<&String> = lines.iter().filter(|l| l.contains("  ")).collect();
+    assert!(!entries.is_empty());
+    for line in &lines {
+        if line.is_empty() {
+            continue;
+        }
+        assert!(line.starts_with("  "), "左マージンが無い: {}", line);
+    }
+    let jump = lines
+        .iter()
+        .find(|l| l.contains("jump & exit"))
+        .expect("ジャンプの行がある");
+    let search = lines.iter().find(|l| l.contains("search")).unwrap();
+    assert_eq!(
+        jump.find("jump & exit"),
+        search.find("search"),
+        "説明の開始位置が揃っている: {:?} / {:?}",
+        jump,
+        search
+    );
 }
 
 #[test]
@@ -656,9 +701,13 @@ fn the_help_overlay_opens_from_the_search_submode_too() {
         Some("alp"),
         "? はクエリに入らない"
     );
+    let title = state
+        .help_lines()
+        .first()
+        .map(|row| state.help_line(row, 32));
     assert_eq!(
-        state.help_lines().first().copied(),
-        Some("[SEARCH] keys"),
+        title.as_ref().map(|t| t.content()),
+        Some("  [SEARCH] keys"),
         "検索サブモードのキーを出す"
     );
 
