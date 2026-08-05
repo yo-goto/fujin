@@ -7,6 +7,7 @@
 // `Zellij (セッション名)` の形で常時出しており、重複が視認性を下げるため
 //（要件: docs/requirements/sidebar-tree/）。
 
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::*;
 
 use crate::search::{Field, Hit};
@@ -388,8 +389,7 @@ impl State {
         if is_selected {
             // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
             // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない
-            let pad = cols.saturating_sub(label.chars().count());
-            label.push_str(&" ".repeat(pad));
+            label = pad_to_width(label, cols);
         }
         let mut text = Text::new(&label);
         if let Some(a) = agent {
@@ -430,16 +430,37 @@ pub(crate) fn shift_highlight_indices(
         .collect()
 }
 
-// 文字数ベースの単純切り詰め（v1: CJK幅は考慮しない）
+// 表示幅が cols に達するまで右側を空白で埋める。
+// 全角文字（2セル）が混ざるので表示幅で数える — 文字数で数えると実際の
+// セル幅を超えてパディングしてしまい、選択背景が端末側で折り返されて
+// 次の行にはみ出す（docs/issues/sidebar-bottom-highlight-glitch.md）
+pub(crate) fn pad_to_width(mut s: String, cols: usize) -> String {
+    let pad = cols.saturating_sub(UnicodeWidthStr::width(s.as_str()));
+    s.push_str(&" ".repeat(pad));
+    s
+}
+
+// 表示セル幅ベースの切り詰め。全角文字（CJK）は2セル分として数える
 pub(crate) fn truncate(s: &str, max: usize) -> String {
     // 幅0のときに省略記号だけがはみ出さないようにする
     if max == 0 {
         return String::new();
     }
-    if s.chars().count() <= max {
+    if UnicodeWidthStr::width(s) <= max {
         return s.to_string();
     }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    // 省略記号（幅1）ぶんの余地を残しながら、幅が max-1 を超える手前まで詰める
+    let limit = max.saturating_sub(1);
+    let mut out = String::new();
+    let mut width = 0;
+    for c in s.chars() {
+        let w = UnicodeWidthChar::width(c).unwrap_or(0);
+        if width + w > limit {
+            break;
+        }
+        width += w;
+        out.push(c);
+    }
     out.push('…');
     out
 }

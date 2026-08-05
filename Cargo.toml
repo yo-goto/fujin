@@ -6,6 +6,7 @@ description = "Zellij plugin for herding multiple agent workspaces (panes/tabs/s
 license = "MIT"
 
 [dependencies]
+unicode-width = "0.2.2"
 zellij-tile = "0.44.3"
 
 [lints.rust]

@@ -15,7 +15,7 @@
 
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
-use crate::render::{shift_highlight_indices, truncate, Row};
+use crate::render::{pad_to_width, shift_highlight_indices, truncate, Row};
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -107,15 +107,42 @@ fn truncate_appends_ellipsis_within_budget() {
 }
 
 #[test]
-fn truncate_counts_chars_not_bytes() {
-    assert_eq!(truncate("日本語テスト", 6), "日本語テスト");
-    assert_eq!(truncate("日本語テスト", 3), "日本…");
+fn truncate_counts_display_width_not_chars() {
+    // 全角文字（CJK）は2セル分として数える。6文字でも表示幅は12あるので、
+    // 文字数ベースだった旧実装ではここが誤って「そのまま返す」になっていた
+    // （docs/issues/sidebar-bottom-highlight-glitch.md）
+    assert_eq!(truncate("日本語テスト", 12), "日本語テスト");
+    assert_eq!(truncate("日本語テスト", 6), "日本…");
 }
 
 #[test]
 fn truncate_with_zero_width_is_empty() {
     // 省略記号1文字だけがはみ出すとサイドバー幅を壊す
     assert_eq!(truncate("abc", 0), "");
+}
+
+// --- pad_to_width ---
+
+#[test]
+fn pad_to_width_fills_with_spaces_up_to_the_column_count() {
+    assert_eq!(pad_to_width("abc".to_string(), 5), "abc  ");
+}
+
+#[test]
+fn pad_to_width_counts_cjk_chars_as_two_cells() {
+    // 全角文字混じりのラベルを文字数でパディングすると表示幅が cols を
+    // 超えてしまい、選択背景が端末側で折り返されて次の行にはみ出す
+    // （docs/issues/sidebar-bottom-highlight-glitch.md）。
+    // 「日本語」は3文字・表示幅6なので、cols=10 なら空白4個で埋まるのが正しい
+    let padded = pad_to_width("日本語".to_string(), 10);
+    assert_eq!(padded, "日本語    ");
+    assert_eq!(unicode_width::UnicodeWidthStr::width(padded.as_str()), 10);
+}
+
+#[test]
+fn pad_to_width_does_not_underflow_when_already_wide_enough() {
+    // 表示幅がすでに cols 以上のときは空白を足さない（saturating_sub）
+    assert_eq!(pad_to_width("日本語テスト".to_string(), 3), "日本語テスト");
 }
 
 // --- AgentState ---
