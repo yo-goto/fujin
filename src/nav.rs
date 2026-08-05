@@ -68,6 +68,8 @@ impl State {
         // 検索サブモードごと抜ける場合はクエリも破棄する。
         // 次回の入場は常に空クエリから始まる
         self.search = None;
+        // トリアージモードも navモードの内側の表示なので、一緒に畳む
+        self.triage = None;
         clear_key_presses_intercepts();
         // 召喚インスタンスは用が済んだら自分で退場する（決定16）。
         // 残すと作業ペインに重なり続ける。次の入場でまた呼べばよい
@@ -139,6 +141,10 @@ impl State {
         if self.search.is_some() {
             return self.handle_search_key(key);
         }
+        // トリアージモードも同様に専用ハンドラへ（要件: triage-mode）
+        if self.triage.is_some() {
+            return self.handle_triage_key(key);
+        }
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す
         if has_hard_modifier(&key) {
@@ -148,6 +154,9 @@ impl State {
         match key.bare_key {
             // 検索サブモードへ（要件: docs/requirements/search-explorer/）
             BareKey::Char('/') => self.enter_search(),
+            // トリアージモードへ（要件: docs/requirements/triage-mode/）。
+            // `p` は priority の頭文字で、navモード内で未使用だった
+            BareKey::Char('p') => self.enter_triage(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
@@ -263,12 +272,7 @@ impl State {
         };
         let mut hits: BTreeMap<u32, Hit> = BTreeMap::new();
         for entry in &self.selectable {
-            let tab_name = self
-                .tabs
-                .iter()
-                .find(|t| t.position == entry.tab_position)
-                .map(|t| t.name.as_str())
-                .unwrap_or("");
+            let tab_name = self.tab_name(entry.tab_position);
             let cwd = self.pane_cwds.get(&entry.pane_id).map(String::as_str);
             if let Some(hit) = match_pane(&search.query, &entry.title, tab_name, cwd) {
                 hits.insert(entry.pane_id, hit);
@@ -366,7 +370,9 @@ impl State {
     // 幅計算が文字数ベース（v1）なので、キー列の位置がずれるため
     pub(crate) fn help_lines(&self) -> &'static [HelpRow] {
         use HelpRow::{Blank, Entry, Note, Title};
-        if self.search.is_some() {
+        if self.triage.is_some() {
+            self.triage_help_lines()
+        } else if self.search.is_some() {
             &[
                 Title("[SEARCH]", "keys"),
                 Blank,
@@ -389,6 +395,7 @@ impl State {
                 Entry("1-9", "jump to n"),
                 Entry("enter l space", "jump & exit"),
                 Entry("/", "search"),
+                Entry("p", "triage"),
                 Entry("?", "this help"),
                 Entry("esc q", "exit"),
                 Blank,
@@ -428,11 +435,13 @@ impl State {
         if self.search.is_some() {
             self.refilter();
         }
+        // トリアージ一覧はここで引き直さない。毎フレーム組み直すうえ、
+        // カーソルも参照のたびに畳んでいる（triage::triage_cursor）
     }
 }
 
 // Shift 以外の修飾キー（Ctrl / Alt / Super）が付いているか。
 // 安全弁（決定12）の判定条件で、Shift だけは印字可能文字の一部として素通しする
-fn has_hard_modifier(key: &KeyWithModifier) -> bool {
+pub(crate) fn has_hard_modifier(key: &KeyWithModifier) -> bool {
     key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift)
 }

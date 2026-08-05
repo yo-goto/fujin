@@ -51,6 +51,19 @@ impl AgentState {
         }
     }
 
+    // トリアージモードの優先度階層（要件: docs/requirements/triage-mode/）。
+    // 小さいほど緊急。`idle`（既読）はトリアージ一覧に出さないので None を返す
+    pub(crate) fn triage_rank(&self) -> Option<u8> {
+        match self {
+            // 放置すると誰にも気づかれないまま止まり続けるので最上位
+            AgentState::Error => Some(0),
+            AgentState::Blocked => Some(1),
+            AgentState::Working => Some(2),
+            AgentState::Done => Some(3),
+            AgentState::Idle => None,
+        }
+    }
+
     // Textのcolor_rangeレベル（テーマの強調色 0-3）
     pub(crate) fn color(&self) -> usize {
         match self {
@@ -76,6 +89,10 @@ pub(crate) struct AgentInfo {
     pub(crate) turn_ended: bool,
     // blocked時の通知メッセージ等
     pub(crate) detail: Option<String>,
+    // 直近にエージェント状態が変わったときのシーケンス番号（要件: triage-mode）。
+    // トリアージ一覧の同一階層内で「どちらが後に変わったか」だけを比べるための値で、
+    // 壁時計は使わない — pipe が受信順に処理されるという既存の前提だけで足りる
+    pub(crate) state_change_seq: u64,
 }
 
 impl AgentInfo {
@@ -136,6 +153,10 @@ impl State {
         if let Some(cwd) = &payload.cwd {
             self.pane_cwds.insert(payload.pane_id, cwd.clone());
         }
+        // シーケンス番号を振るのは**エージェント状態が実際に変わったとき**だけ。
+        // カウンタだけが動くイベント（TaskCreated 等）で番号を進めると、
+        // トリアージ一覧の同一階層内が「直近の状態変化順」でなくなる
+        let before = self.agents.get(&payload.pane_id).map(|a| a.state);
         let entry = self.agents.entry(payload.pane_id).or_default();
         entry.agent = payload.agent;
         match payload.event.as_str() {
@@ -180,6 +201,20 @@ impl State {
             other => {
                 eprintln!("fujin: unknown event: {}", other);
             }
+        }
+        if self.agents.get(&payload.pane_id).map(|a| a.state) != before {
+            self.bump_state_seq(payload.pane_id);
+        }
+    }
+
+    // 状態が変わったペインに新しいシーケンス番号を振る。
+    // 既読化（mark_read）では振らない — 戻る先は `idle` で、トリアージ一覧から
+    // 消える状態なので、順序の比較材料としては使われない
+    fn bump_state_seq(&mut self, pane_id: u32) {
+        self.state_seq += 1;
+        let seq = self.state_seq;
+        if let Some(entry) = self.agents.get_mut(&pane_id) {
+            entry.state_change_seq = seq;
         }
     }
 

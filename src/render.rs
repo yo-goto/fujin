@@ -26,14 +26,21 @@ pub(crate) enum Row<'a> {
     // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
     // 開いている間はサイドバー全体がこの行だけになる
     Help(&'a HelpRow),
-    // 検索が0件のときの通知行
-    NoMatch,
+    // 一覧が空であることの通知行（検索の0件・トリアージの対象なし）。
+    // 空リストのまま描くと、絞り込みが効いているのか描画が壊れているのか区別できない
+    Notice(&'static str),
     Tab(&'a TabInfo),
     Pane {
         entry: &'a Selectable,
         // 非検索時の選択判定に使うフラットな通し番号（self.selected と突き合わせる）
         flat_index: usize,
         hit: Option<&'a Hit>,
+    },
+    // トリアージ一覧の1行（要件: docs/requirements/triage-mode/）。
+    // タブ見出し行を持たないフラットな並びなので、所属タブ名を行に併記する
+    Triage {
+        entry: &'a Selectable,
+        tab_name: &'a str,
     },
     // 直前のペイン行の cwd（決定22）。ペイン行と同じペインを指すので、
     // 選択のハイライトも行クリックもペイン行と同じ扱いにする
@@ -64,9 +71,12 @@ const HELP_INDENT: usize = 2;
 // cwd行の字下げ。ペイン名の開始位置（4セル）よりさらに右へ寄せて、
 // 隣のペイン行ではなく「上のペイン行の続き」として読ませる
 const CWD_INDENT: usize = 6;
-// ペイン名とカウンタ列のあいだに最低限空ける幅。
-// 名前と数字がくっつくと、どこまでが名前か読めなくなる
-const COUNTER_GAP: usize = 1;
+// ペイン名と右寄せの列（カウンタ列・トリアージ行のタブ名列）のあいだに
+// 最低限空ける幅。名前と列がくっつくと、どこまでが名前か読めなくなる
+const COLUMN_GAP: usize = 1;
+// トリアージ行のタブ名列に使ってよい幅の割合（内容幅の 1/N）。
+// タブ名が長くてもペイン名を潰さないための上限
+const TRIAGE_TAB_SHARE: usize = 3;
 // 右端に常に空ける幅。文字がサイドバーの縁に貼り付くと窮屈に見える。
 // 左マージン（選択バーぶんの2セル）と揃えてある
 const RIGHT_MARGIN: usize = 2;
@@ -212,11 +222,26 @@ impl State {
         // 通常表示ではブランディング文言。**常時1行を確保する** — モードの
         // 入退場でヘッダの有無が切り替わると、ツリー全体が1行分上下にずれる
         rows.push(Row::Header);
+        // トリアージモード中はツリー表示を隠し、一覧だけを出す（要件: triage-mode）
+        if self.triage.is_some() {
+            let entries = self.triage_entries();
+            if entries.is_empty() {
+                rows.push(Row::Notice("対象なし"));
+                return rows;
+            }
+            for entry in entries {
+                rows.push(Row::Triage {
+                    entry,
+                    tab_name: self.tab_name(entry.tab_position),
+                });
+            }
+            return rows;
+        }
         if let Some(search) = &self.search {
             // 0件は空リストではなく明示する。絞り込みが効いているのか
             // 描画が壊れているのか区別できないため
             if search.hits.is_empty() {
-                rows.push(Row::NoMatch);
+                rows.push(Row::Notice("一致なし"));
                 return rows;
             }
         }
@@ -281,9 +306,20 @@ impl State {
     // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
         match self.visible_rows().get(row)? {
-            Row::Pane { entry, .. } | Row::Cwd { entry, .. } => Some(entry.pane_id),
+            Row::Pane { entry, .. } | Row::Cwd { entry, .. } | Row::Triage { entry, .. } => {
+                Some(entry.pane_id)
+            }
             _ => None,
         }
+    }
+
+    // タブ位置に対応するタブ名。一覧が古くて引けないときは空文字
+    pub(crate) fn tab_name(&self, position: usize) -> &str {
+        self.tabs
+            .iter()
+            .find(|t| t.position == position)
+            .map(|t| t.name.as_str())
+            .unwrap_or("")
     }
 
     // その行がハイライトされるか。ペイン行と cwd行で同じ判定を使い、
@@ -310,6 +346,10 @@ impl State {
         let all_rows = self.visible_rows();
         // カウンタ列の幅はフレーム全体で1つ。行ごとに測ると桁が揃わない（決定22）
         let column = self.counter_column(&all_rows);
+        // トリアージ行のタブ名列も同じ理由でフレーム全体で1つ
+        let tab_column = self.triage_tab_column(&all_rows, cols);
+        // カーソルは一覧から導出されるので、行ごとに引き直さず1度だけ求める
+        let triage_cursor = self.triage_cursor();
         for (y, row) in all_rows.into_iter().enumerate() {
             if y >= rows {
                 break;
@@ -321,10 +361,11 @@ impl State {
                 Row::Help(row) => {
                     print_text_with_coordinates(self.help_line(row, cols), 0, y, None, None);
                 }
-                Row::NoMatch => {
+                Row::Notice(notice) => {
                     // 操作の対象ではない通知なので、一覧の行より落として出す
+                    let label = format!("  {}", notice);
                     print_text_with_coordinates(
-                        compose(&[("  一致なし", Ink::Muted)], cols),
+                        compose(&[(&label, Ink::Muted)], cols),
                         0,
                         y,
                         None,
@@ -341,6 +382,11 @@ impl State {
                 } => {
                     let is_selected = self.row_is_selected(entry, flat_index);
                     let row = self.pane_row(entry, is_selected, hit, column, cols);
+                    print_text_with_coordinates(row, 0, y, None, None);
+                }
+                Row::Triage { entry, tab_name } => {
+                    let is_selected = triage_cursor == Some(entry.pane_id);
+                    let row = self.triage_row(entry, tab_name, is_selected, tab_column, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Cwd {
@@ -369,6 +415,22 @@ impl State {
         // 角括弧でも囲まない — `[NAV]` と同じ見た目だとモードの一種に誤読される
         if self.search.is_none() && !self.nav_mode {
             return compose(&[("> fujin", Ink::Muted)], cols);
+        }
+        // トリアージモード中はモード名を差し替える。Esc の行き先が navモードの
+        // ツリー表示（退場ではない）なので、操作ヒントも `exit` ではなく `back`
+        if self.triage.is_some() {
+            return compose(
+                &[
+                    ("[TRIAGE]", Ink::Tag),
+                    ("  ", Ink::Plain),
+                    ("?", Ink::Key),
+                    (":help", Ink::Muted),
+                    ("  ", Ink::Plain),
+                    ("esc", Ink::Key),
+                    (":back", Ink::Muted),
+                ],
+                cols,
+            );
         }
         let Some(search) = &self.search else {
             return compose(
@@ -509,7 +571,7 @@ impl State {
         let reserved = if counters.is_empty() {
             head_width
         } else {
-            head_width + COUNTER_GAP + counters_width
+            head_width + COLUMN_GAP + counters_width
         };
 
         // 右マージンぶんは文字を置かない。カウンタ列もそこまでで揃える
@@ -559,6 +621,91 @@ impl State {
         }
         if is_selected {
             // opaque を付けないと背景が透けて選択色が沈む
+            text = text.selected().opaque().color_range(2, 0..1);
+        }
+        text
+    }
+
+    // トリアージ行のタブ名列の幅（要件: docs/requirements/triage-mode/）。
+    // カウンタ列（決定22）と同じくフレーム内の実測最大で決めて、行をまたいで
+    // タブ名の開始位置を揃える
+    pub(crate) fn triage_tab_column(&self, rows: &[Row<'_>], cols: usize) -> usize {
+        let mut width = 0;
+        for row in rows {
+            if let Row::Triage { tab_name, .. } = row {
+                width = width.max(UnicodeWidthStr::width(*tab_name));
+            }
+        }
+        width.min(content_cols(cols) / TRIAGE_TAB_SHARE)
+    }
+
+    // トリアージ一覧の1行ぶんの Text（要件: docs/requirements/triage-mode/）。
+    //
+    // レイアウトは `{アイコン} {ペイン名} …余白… {タブ名}` で、ペイン行の
+    // カウンタ列（決定22）の位置にタブ名を置いた形。状態アイコンは通常表示と
+    // 同じものを使う。
+    //
+    // カウンタ列は出さない — サイドバー幅32（決定3）にタブ名と両方は載らず、
+    // トリアージが答えるのは「今どれに手を入れるか」なので、タブの壁を無視した
+    // 一覧で迷子にならないためのタブ名を優先する。cwd行も同じ理由で出さない
+    pub(crate) fn triage_row(
+        &self,
+        entry: &Selectable,
+        tab_name: &str,
+        is_selected: bool,
+        tab_column: usize,
+        cols: usize,
+    ) -> Text {
+        let agent = self.agents.get(&entry.pane_id);
+        let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
+        // 選択行の左端バーはペイン行と同じ（幅2固定で、状態アイコンの
+        // color_range 2..3 をずらさない）
+        let prefix = if is_selected { "▌ " } else { "  " };
+        let head = format!("{}{} ", prefix, icon);
+        let head_width = UnicodeWidthStr::width(head.as_str());
+
+        let tab = truncate(tab_name, tab_column);
+        let tab_width = UnicodeWidthStr::width(tab.as_str());
+        let inner = content_cols(cols);
+        // タブ名を持たない行があっても列ぶんは空けておく（桁が行ごとにずれないため）
+        let reserved = if tab.is_empty() {
+            head_width
+        } else {
+            head_width + COLUMN_GAP + tab_column
+        };
+        let (title, _) = fold_to_width(&entry.title, inner.saturating_sub(reserved));
+
+        let mut label = format!("{}{}", head, title);
+        let mut tab_span = None;
+        if !tab.is_empty() {
+            let filler = inner.saturating_sub(UnicodeWidthStr::width(label.as_str()) + tab_width);
+            label.push_str(&" ".repeat(filler));
+            let start = label.chars().count();
+            label.push_str(&tab);
+            let end = label.chars().count();
+            // アイコンとタブ名だけで幅を使い切るほど狭いときの保険。はみ出すと
+            // 選択背景が端末側で折り返して次の行を汚す
+            let fitted = truncate(&label, inner);
+            // 切り詰められたらタブ名の位置が確定しないので dim は諦める
+            if fitted.chars().count() == end {
+                tab_span = Some((start, end));
+            }
+            label = fitted;
+        }
+        if is_selected {
+            label = pad_to_width(label, cols);
+        }
+
+        let mut text = Text::new(&label);
+        if let Some(a) = agent {
+            text = text.color_range(a.state.color(), 2..3);
+        }
+        // タブ名は主役（状態アイコン・ペイン名）ではないので落として出す。
+        // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる（cwd行と同じ）
+        if let (Some((start, end)), false) = (tab_span, is_selected) {
+            text = text.dim_range(start..end);
+        }
+        if is_selected {
             text = text.selected().opaque().color_range(2, 0..1);
         }
         text

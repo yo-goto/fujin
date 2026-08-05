@@ -91,14 +91,18 @@ impl State {
                 .map(|s| s.as_str())
                 .unwrap_or("");
             out.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 pane_id,
                 info.state.as_str(),
                 info.subagents,
                 info.open_tasks,
                 info.agent,
                 cwd,
-                info.turn_ended as u8
+                info.turn_ended as u8,
+                // シーケンス番号も運ぶ。無いと、後から起動したインスタンスの
+                // トリアージ一覧で同一階層内の並びが総崩れになる（全員0で
+                // ツリー順に潰れる）
+                info.state_change_seq
             ));
         }
         out
@@ -121,6 +125,10 @@ impl State {
             };
             let cwd = fields.next();
             let turn_ended = fields.next() == Some("1");
+            let state_change_seq = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            // 自分のカウンタを配られた最大値まで進めておく。以降に自分が振る
+            // 番号が取り込んだものより古くなると、順序が逆転する
+            self.state_seq = self.state_seq.max(state_change_seq);
             self.agents.insert(
                 pane_id,
                 AgentInfo {
@@ -130,6 +138,7 @@ impl State {
                     open_tasks: open_tasks.parse().unwrap_or(0),
                     turn_ended,
                     detail: None,
+                    state_change_seq,
                 },
             );
             if let Some(cwd) = cwd.filter(|c| !c.is_empty()) {

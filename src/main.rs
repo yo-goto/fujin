@@ -15,6 +15,7 @@
 // - agent  — フックイベントの解釈とエージェント状態の遷移
 // - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
+// - triage — トリアージモード（navモードの内側の優先度順一覧）
 // - render — サイドバーの描画
 // - sync   — インスタンス間の状態同期（決定13）
 // - summon — フローティングでの臨時召喚（決定16）
@@ -25,6 +26,7 @@ mod render;
 mod search;
 mod summon;
 mod sync;
+mod triage;
 
 #[cfg(test)]
 mod tests;
@@ -35,6 +37,7 @@ use zellij_tile::prelude::*;
 
 use agent::{AgentInfo, StatusPayload};
 use nav::SearchState;
+use triage::TriageState;
 
 // --- ワイヤプロトコル（pipe名） ---
 
@@ -123,6 +126,11 @@ struct State {
     // 検索サブモード中か否かは is_some() で表す。
     // フラグとクエリが食い違う状態を作らせない
     search: Option<SearchState>,
+    // トリアージモード中か否かも同じく is_some() で表す（要件: triage-mode）
+    triage: Option<TriageState>,
+    // 状態変化のたびに進む単調増加のカウンタ。トリアージ一覧の tie-break に使う
+    //（要件: triage-mode）。値そのものに意味はなく、比べられればよい
+    state_seq: u64,
 }
 
 register_plugin!(State);
