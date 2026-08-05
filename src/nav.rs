@@ -19,10 +19,10 @@ pub(crate) struct SearchState {
     pub(crate) query: String,
     // ペインID -> ヒット情報。ツリー順は selectable 側が持つので順序は持たない
     pub(crate) hits: BTreeMap<u32, Hit>,
-    // 結果内の選択（ペインID）。インデックスで持つと rebuild_selectable() を
-    // またいだときに別の行を指す（決定13が禁じた罠のローカル版）
+    // 絞り込み結果内のカーソル（ペインID）。インデックスで持つと
+    // rebuild_selectable() をまたいだときに別の行を指す（決定13が禁じた罠のローカル版）
     pub(crate) cursor: Option<u32>,
-    // 検索に入る前の選択（Esc で戻すため）
+    // 検索サブモードに入る前の選択（Esc で戻すため）
     pub(crate) saved: Option<u32>,
 }
 
@@ -69,7 +69,7 @@ impl State {
         // 次回の入場は常に空クエリから始まる
         self.search = None;
         clear_key_presses_intercepts();
-        // 臨時召喚されたインスタンスは用が済んだら自分で退場する（決定16）。
+        // 召喚インスタンスは用が済んだら自分で退場する（決定16）。
         // 残すと作業ペインに重なり続ける。次の入場でまた呼べばよい
         //（召喚から入場まで実測16ms）
         if self.summoned {
@@ -79,7 +79,7 @@ impl State {
         }
     }
 
-    // ジャンプを伴わない離脱（Esc / q / 未定義キー、および navモード中に実フォーカスが
+    // ジャンプを伴わない退場（Esc / q / 未定義キー、および navモード中に実フォーカスが
     // 動いたとき）。navモード外のハイライトは常に実フォーカスと一致するので、
     // 探索で動かした選択はここで戻す（要件: focus-sync）。探索位置そのものは
     // exit_nav_mode() が控えていて、フォーカスが動かないまま入り直せば復元される
@@ -92,7 +92,7 @@ impl State {
         }
     }
 
-    // ペインIDで選択行を移す。戻り値は選択が動いたか。
+    // ペインIDで選択を移す。戻り値は選択が動いたか。
     // インデックスではなくペインIDを入口にするのは決定13と同じ理由で、
     // 一覧が古いインスタンスでも同じ行を指せるようにするため
     pub(crate) fn select_pane_id(&mut self, pane_id: u32) -> bool {
@@ -102,6 +102,18 @@ impl State {
         let changed = self.selected != index;
         self.selected = index;
         changed
+    }
+
+    // 選択を1行下へ。末尾で止まる（pipe とキー操作の両方から使う）
+    pub(crate) fn select_next(&mut self) {
+        if self.selected + 1 < self.selectable.len() {
+            self.selected += 1;
+        }
+    }
+
+    // 選択を1行上へ。先頭で止まる
+    pub(crate) fn select_previous(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
     }
 
     // モード中のキー解釈。戻り値は再描画するか
@@ -136,14 +148,8 @@ impl State {
         match key.bare_key {
             // 検索サブモードへ（要件: docs/requirements/search-explorer/）
             BareKey::Char('/') => self.enter_search(),
-            BareKey::Down | BareKey::Tab | BareKey::Char('j') => {
-                if self.selected + 1 < self.selectable.len() {
-                    self.selected += 1;
-                }
-            }
-            BareKey::Up | BareKey::Char('k') => {
-                self.selected = self.selected.saturating_sub(1);
-            }
+            BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
+            BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
             BareKey::Char('G') => {
                 self.selected = self.selectable.len().saturating_sub(1);
@@ -162,7 +168,7 @@ impl State {
                 self.exit_nav_mode();
                 self.focus_selected();
             }
-            // Esc / q は明示的な離脱。それ以外の未定義キーでも抜ける:
+            // Esc / q は明示的な退場。それ以外の未定義キーでも抜ける:
             // 万一プラグインが応答不能になってもキー入力が取り残されないため
             _ => self.leave_nav_mode(),
         }
@@ -171,11 +177,11 @@ impl State {
         true
     }
 
-    // 検索中のキー解釈。navモードの安全弁（決定12）を検索用に引き直したもの。
-    // 印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる
+    // 検索サブモード中のキー解釈。navモードの安全弁（決定12）を検索サブモード用に
+    // 引き直したもの。印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる
     fn handle_search_key(&mut self, key: KeyWithModifier) -> bool {
         // Shift だけは素通し（Shift付き印字可能文字と Shift+Tab のため）。
-        // それ以外の修飾キーは安全弁 — 検索だけでなく navモードごと抜ける
+        // それ以外の修飾キーは安全弁 — 検索サブモードだけでなく navモードごと抜ける
         if has_hard_modifier(&key) {
             self.leave_nav_mode();
             return true;
@@ -202,7 +208,7 @@ impl State {
                 }
                 self.refilter();
             }
-            // 未定義キーは navモードごと離脱（安全弁は最上位まで効かせる）
+            // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
             _ => self.leave_nav_mode(),
         }
         // 検索中の移動・入力では broadcast_selection() を呼ばない。
@@ -215,15 +221,15 @@ impl State {
     fn enter_search(&mut self) {
         let saved = self.selectable.get(self.selected).map(|e| e.pane_id);
         self.search = Some(SearchState {
-            query: String::new(),
-            hits: BTreeMap::new(),
             cursor: saved,
             saved,
+            ..SearchState::default()
         });
         self.refilter();
     }
 
-    // Esc の1段目。クエリを破棄し、選択を検索前に戻して navモードに留まる
+    // Esc の1段目。クエリを破棄し、検索サブモードに入る前の選択へ戻して
+    // navモードに留まる
     fn exit_search(&mut self) {
         let Some(search) = self.search.take() else {
             return;
@@ -255,9 +261,6 @@ impl State {
         let Some(search) = &self.search else {
             return;
         };
-        // self.search を可変借用したまま selectable / tabs を読めないので、
-        // ローカルに組み立ててから代入する
-        let query = search.query.clone();
         let mut hits: BTreeMap<u32, Hit> = BTreeMap::new();
         for entry in &self.selectable {
             let tab_name = self
@@ -267,16 +270,14 @@ impl State {
                 .map(|t| t.name.as_str())
                 .unwrap_or("");
             let cwd = self.pane_cwds.get(&entry.pane_id).map(String::as_str);
-            if let Some(hit) = match_pane(&query, &entry.title, tab_name, cwd) {
+            if let Some(hit) = match_pane(&search.query, &entry.title, tab_name, cwd) {
                 hits.insert(entry.pane_id, hit);
             }
         }
-        // カーソルの追従はペインIDで行う。結果に残っていれば維持し、
+        // カーソルの追従はペインIDで行う。絞り込み結果に残っていれば維持し、
         // 消えていればツリー順の先頭ヒットへ寄せる。0件なら None
-        let cursor = self
-            .search
-            .as_ref()
-            .and_then(|s| s.cursor)
+        let cursor = search
+            .cursor
             .filter(|id| hits.contains_key(id))
             .or_else(|| {
                 self.selectable
@@ -284,36 +285,37 @@ impl State {
                     .map(|e| e.pane_id)
                     .find(|id| hits.contains_key(id))
             });
+        // 組み立ては不変借用で済ませ、最後にまとめて書き戻す
         if let Some(search) = &mut self.search {
             search.hits = hits;
             search.cursor = cursor;
         }
     }
 
-    // 検索結果内のカーソル移動。ツリー順で前後へ動かし、端で止まる
+    // 絞り込み結果内のカーソル移動。ツリー順で前後へ動かし、端で止まる
     fn move_search_cursor(&mut self, forward: bool) {
         let Some(search) = &self.search else {
             return;
         };
-        let results: Vec<u32> = self
+        let hit_ids: Vec<u32> = self
             .selectable
             .iter()
             .map(|e| e.pane_id)
             .filter(|id| search.hits.contains_key(id))
             .collect();
-        if results.is_empty() {
+        if hit_ids.is_empty() {
             return;
         }
         let current = search
             .cursor
-            .and_then(|c| results.iter().position(|&id| id == c));
+            .and_then(|c| hit_ids.iter().position(|&id| id == c));
         let next = match current {
-            Some(i) if forward => (i + 1).min(results.len() - 1),
+            Some(i) if forward => (i + 1).min(hit_ids.len() - 1),
             Some(i) => i.saturating_sub(1),
             None => 0,
         };
         if let Some(search) = &mut self.search {
-            search.cursor = Some(results[next]);
+            search.cursor = Some(hit_ids[next]);
         }
     }
 
@@ -333,8 +335,8 @@ impl State {
         let Some(pane_id) = self.pane_at_row(row) else {
             return false;
         };
-        // navモード中にマウスが届いた場合も Enter と同じ扱いにする（v1の要件は
-        // 通常時のクリックのみだが、横取りを残したままフォーカスだけ動かすと
+        // navモード中にマウスが届いた場合も Enter と同じ扱いにする（v1 の要件は
+        // navモード外の行クリックのみだが、横取りを残したままフォーカスだけ動かすと
         // 移動先で j/k を食われ続けるため、取り残しを作らない側に倒す）
         if self.nav_mode {
             self.exit_nav_mode();
@@ -350,7 +352,7 @@ impl State {
             // 第2引数 should_float_if_hidden はターゲットに合わせて切り替える。
             // false のままだと**フローティング層が隠れているタブのフローティング
             // ペインにジャンプできない**（タブ切り替えすら起きず無反応）。
-            // かといって常に true にすると、今度は**フローティング表示中に
+            // かといって常に true にすると、今度は**フローティング層を表示中に
             // タイルペインへ戻れなくなる**。どちらも実測で確認済み
             focus_pane_with_id(PaneId::Terminal(entry.pane_id), entry.is_floating, false);
         }

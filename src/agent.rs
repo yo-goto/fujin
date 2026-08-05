@@ -1,7 +1,9 @@
 // エージェント状態の管理。
 //
-// 各ペインで動くエージェント（AIセッション等）はフックから STATUS_PIPE 経由で
-// イベントを送ってくる。ここではペイロードの解釈と、状態遷移・既読化・破棄を扱う。
+// 各ペインで動くエージェントはフックから STATUS_PIPE 経由でイベントを
+// 送ってくる。ここではペイロードの解釈と、状態遷移・既読化・破棄を扱う。
+
+use std::collections::BTreeSet;
 
 use zellij_tile::prelude::*;
 
@@ -194,7 +196,7 @@ impl State {
             if pane.is_plugin || pane.is_suppressed || !pane.is_focused {
                 continue;
             }
-            // フローティング表示中はフローティング層のフォーカスのみ有効
+            // フローティング層を表示中は、その層のフォーカスのみ有効
             if pane.is_floating != active_tab.are_floating_panes_visible {
                 continue;
             }
@@ -206,7 +208,8 @@ impl State {
         }
         // 非可視インスタンスには PaneUpdate が届かず、状態はイベント駆動なので
         // 見逃した変化は永久にずれたままになる（実測: サイドバー3つのセッションで
-        // クリアを実行したのは1つだけ）。観測できた可視インスタンスから他へ伝える
+        // クリアを実行したのは1つだけ）。観測できた可視インスタンスから
+        // 兄弟インスタンスへ配る
         self.broadcast_read_clears(&cleared);
     }
 
@@ -215,7 +218,7 @@ impl State {
         let Some(manifest) = &self.panes else {
             return;
         };
-        let live: Vec<u32> = manifest
+        let live: BTreeSet<u32> = manifest
             .panes
             .values()
             .flatten()

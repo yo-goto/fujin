@@ -48,17 +48,17 @@ const NAV_GO_PIPE: &str = "fujin_go";
 const NAV_MODE_PIPE: &str = "fujin_mode";
 // インスタンス間の状態同期（決定13）
 const SYNC_STATE_PIPE: &str = "fujin_sync_state";
-// 既読クリアの他インスタンスへの伝播（決定13）
+// 既読クリアの兄弟インスタンスへの配布（決定13）
 const READ_CLEAR_PIPE: &str = "fujin_read";
-// 選択位置の他インスタンスへの伝播（決定13）
+// 選択ペインIDの兄弟インスタンスへの配布（決定13）
 const SELECTION_PIPE: &str = "fujin_selection";
-// 取り残された臨時召喚の強制掃除（決定16）。navモードへ入れないまま
-// 取り残された召喚はキーを横取りしておらず Esc が届かない。zellij 側にも
+// 取り残された召喚インスタンスの強制掃除（決定16）。navモードへ入れないまま
+// 取り残された召喚インスタンスはキーを横取りしておらず Esc が届かない。zellij 側にも
 // ペインIDを指定して閉じる手段が無い（`close-pane` はフォーカス中のみ、
 // fujin は unselectable でフォーカスできない）ため、逃げ道を用意しておく
 const DISMISS_PIPE: &str = "fujin_dismiss";
 
-// 臨時召喚されたインスタンスに渡す configuration キー（決定16）。
+// 召喚インスタンスに渡す configuration キー（決定16）。
 // "true" で起動したインスタンスは、準備でき次第 navモードへ入る
 const SUMMONED_CONFIG_KEY: &str = "summoned";
 
@@ -112,7 +112,7 @@ struct State {
     selection_at_nav_exit: Option<u32>,
     // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
     known_siblings: BTreeSet<u32>,
-    // 臨時召喚された（フローティングの）インスタンスか（決定16）
+    // 召喚インスタンス（フローティング）か（決定16）
     summoned: bool,
     // 準備が整い次第 navモードへ入る予約。召喚直後は権限も一覧も未取得で、
     // その時点で入場しても選択対象が空なので、揃うまで待ってから入る
@@ -152,7 +152,7 @@ impl ZellijPlugin for State {
             PermissionType::ReadCliPipes,
             // navモードでキーを横取りするため（決定12）
             PermissionType::InterceptInput,
-            // 他インスタンスとの状態同期のため（決定13）
+            // 兄弟インスタンスとの状態同期のため（決定13）
             PermissionType::MessageAndLaunchOtherPlugins,
             // フローティングでの臨時召喚のため（決定16）。
             // OpenPluginPaneFloating はこれを要求し（MessageAndLaunchOtherPlugins
@@ -180,9 +180,9 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
                 if self.permissions_granted {
-                    // フローティングで起動されていたら臨時サイドバーとして自覚する
+                    // フローティングで起動されていたら召喚インスタンスとして自覚する
                     //（決定16。下の set_selectable の分岐に効くので、ここより前に）
-                    self.adopt_floating_as_temporary();
+                    self.adopt_floating_as_summoned();
                     // フォーカス巡回にサイドバーが混ざらないようにする（決定6）。
                     //
                     // **臨時召喚は例外**（決定16）。unselectable なペインは
@@ -273,7 +273,7 @@ impl ZellijPlugin for State {
                 | SELECTION_PIPE
                 | DISMISS_PIPE
         );
-        // CLIパイプは即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
+        // CLI pipe は即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
         // フックのレイテンシに直結する（実測でroute.rsのタイムアウトを確認済み）
         if is_ours && matches!(pipe_message.source, PipeSource::Cli(_)) {
             unblock_cli_pipe_input(&pipe_message.name);
@@ -296,7 +296,7 @@ impl ZellijPlugin for State {
                 if !self.refresh_focus() {
                     return false;
                 }
-                self.selected = self.selected.saturating_sub(1);
+                self.select_previous();
                 self.broadcast_selection();
                 true
             }
@@ -304,9 +304,7 @@ impl ZellijPlugin for State {
                 if !self.refresh_focus() {
                     return false;
                 }
-                if self.selected + 1 < self.selectable.len() {
-                    self.selected += 1;
-                }
+                self.select_next();
                 self.broadcast_selection();
                 true
             }
@@ -318,8 +316,8 @@ impl ZellijPlugin for State {
                 false
             }
             DISMISS_PIPE => {
-                // 召喚された本人は自分で退場し、常駐インスタンスは
-                // 取り残された召喚を代わりに閉じる（決定16）
+                // 召喚された本人は自分で退場し、常駐サイドバーは
+                // 取り残された召喚インスタンスを代わりに閉じる（決定16）
                 if self.summoned {
                     self.exit_nav_mode();
                 } else {
@@ -365,9 +363,9 @@ impl ZellijPlugin for State {
                 // キーの横取りは権威インスタンス1つだけが行う。全員が
                 // intercept_key_presses() を呼ぶと誰が受け取るか不定になる。
                 //
-                // なお臨時召喚されたインスタンスにはこの pipe が届かない。
+                // なお召喚インスタンスにはこの pipe が届かない。
                 // キーバインドの `MessagePlugin` はURL一致で配送されるが、
-                // 召喚は configuration に `summoned=true` を持つため一致しない
+                // 召喚インスタンスは configuration に `summoned=true` を持つため一致しない
                 //（実測: 受信ログが一切出ない）。トグルは本人ではなく
                 // 召喚役が担う（決定16）
                 // refresh_focus() が入場直前の実フォーカスを取り込むので、
@@ -423,7 +421,7 @@ impl State {
         let focused = match focused_pane {
             PaneId::Terminal(id) => Some(id),
             // プラグインペインは selectable に無い。ただし諦めるのではなく
-            // 一覧から作業ペインを拾い直す（臨時サイドバー自身がフォーカスを
+            // 一覧から作業ペインを拾い直す（召喚インスタンス自身がフォーカスを
             // 持つ場合がこれ。下記参照）
             PaneId::Plugin(_) => self.focused_terminal_in_tab(focused_tab),
         };
@@ -440,7 +438,7 @@ impl State {
         // navモード退場時の「動いたか」の比較材料になる
         self.focused_pane = focused;
         if interrupted {
-            // ハイライトも実フォーカスへ揃う（離脱後は navモード外なので）
+            // ハイライトも実フォーカスへ揃う（退場後は navモード外なので）
             self.leave_nav_mode();
         } else if let Some(pane_id) = follow {
             if self.select_pane_id(pane_id) {
@@ -453,7 +451,7 @@ impl State {
     // 選択を引き直す先（要件: docs/requirements/focus-sync/）。
     // `force` は可視化直後など、キャッシュを信用できないときに立てる
     pub(crate) fn focus_to_follow(&self, focused: Option<u32>, force: bool) -> Option<u32> {
-        // navモード中の選択はユーザーの探索カーソルなので追従させない
+        // navモード中の選択はユーザーの探索位置なので追従させない
         if self.nav_mode {
             return None;
         }
@@ -470,7 +468,7 @@ impl State {
     // 指定タブでフォーカス中のターミナルペイン（要件: focus-sync）。
     //
     // `get_focused_pane_info()` がプラグインペインを返したときの受け皿。
-    // 臨時召喚・コールドスタートの臨時サイドバー（決定16）は**自分が
+    // 召喚インスタンス（臨時召喚・コールドスタートの両経路。決定16）は**自分が
     // フローティング層のフォーカスを持つ**ため、問い合わせでは作業ペインが
     // 分からず、追従も入場時の初期選択も効かなくなる（実測）。
     //

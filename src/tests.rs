@@ -43,7 +43,7 @@ fn plugin_pane(id: u32, url: &str) -> PaneInfo {
     }
 }
 
-// 臨時召喚されたインスタンス（決定16）。常駐との違いはフローティングかどうか
+// 召喚インスタンス（決定16）。常駐との違いはフローティングかどうか
 fn floating_plugin_pane(id: u32, url: &str) -> PaneInfo {
     PaneInfo {
         is_floating: true,
@@ -641,7 +641,7 @@ fn a_long_query_wins_over_the_help_hint() {
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "0123456789");
 
-    // 幅12にはヒントを置く余地が無い。入力中のクエリのほうを残す
+    // 幅12には操作ヒントを置く余地が無い。入力中のクエリのほうを残す
     let header = state.header_line(12);
     let header = header.content();
     assert!(!header.contains("?:help"), "{}", header);
@@ -651,7 +651,7 @@ fn a_long_query_wins_over_the_help_hint() {
 #[test]
 fn a_full_width_query_does_not_push_the_hint_off_the_edge() {
     // 右寄せの余白は表示セル幅で数える。文字数で数えると全角のクエリで
-    // ヒントが端からはみ出す（docs/concept/ui-design.md のレイアウト規則）
+    // 操作ヒントが端からはみ出す（docs/concept/ui-design.md のレイアウト規則）
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "日本語のペイン名");
@@ -799,13 +799,13 @@ fn the_help_overlay_opens_from_the_search_submode_too() {
     );
 
     // 閉じたら開く前の表示（検索サブモード）に戻る。Esc も閉じるだけで、
-    // 検索の取り消しにはならない
+    // 検索サブモードの取り消しにはならない
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.help_overlay);
     assert_eq!(
         state.search.as_ref().map(|s| s.query.as_str()),
         Some("alp"),
-        "検索は中断されない"
+        "検索サブモードは中断されない"
     );
 }
 
@@ -923,7 +923,7 @@ fn focus_follows_only_when_it_moved() {
     // プラグインペインへのフォーカスは selectable に無いので対象外
     assert_eq!(state.focus_to_follow(None, false), None);
 
-    // navモード中の選択は探索カーソルなので追従させない
+    // navモード中の選択は探索位置なので追従させない
     state.nav_mode = true;
     assert_eq!(state.focus_to_follow(Some(2), false), None);
 }
@@ -967,7 +967,7 @@ fn a_focus_move_during_nav_mode_leaves_the_mode() {
 
 #[test]
 fn the_focused_terminal_comes_from_the_tiled_layer() {
-    // 臨時サイドバー（フローティング）は自分がフローティング層のフォーカスを
+    // 召喚インスタンス（フローティング）は自分がフローティング層のフォーカスを
     // 持つので、問い合わせでは作業ペインが分からない。PaneInfo.is_focused は
     // レイヤごとなので、タイル層のフォーカスを一覧から拾い直す
     let focused_terminal = PaneInfo {
@@ -1074,7 +1074,7 @@ fn slash_enters_search_with_an_empty_query_matching_everything() {
     state.handle_nav_key(key(BareKey::Char('/')));
 
     let search = state.search.as_ref().unwrap();
-    assert!(state.nav_mode, "検索はnavモードの内側");
+    assert!(state.nav_mode, "検索サブモードはnavモードの内側");
     assert_eq!(search.query, "");
     assert_eq!(search.hits.len(), 3, "空クエリは全件一致");
     assert_eq!(search.cursor, Some(1), "カーソルは検索前の選択から始まる");
@@ -1084,10 +1084,10 @@ fn slash_enters_search_with_an_empty_query_matching_everything() {
 fn printable_chars_feed_the_query_not_the_selection() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
-    // navモードでは j は移動キーだが、検索中はクエリになる
+    // navモードでは j は移動キーだが、検索サブモード中はクエリになる
     state.handle_nav_key(key(BareKey::Char('j')));
     assert_eq!(state.search.as_ref().unwrap().query, "j");
-    assert_eq!(state.selected, 0, "選択行は動かない");
+    assert_eq!(state.selected, 0, "選択は動かない");
 }
 
 #[test]
@@ -1176,9 +1176,12 @@ fn esc_is_two_staged_and_does_not_close_a_summoned_instance() {
     // 1段目: クエリ破棄のみ。召喚インスタンスでも navモードに留まる
     state.handle_nav_key(key(BareKey::Esc));
     assert!(state.search.is_none());
-    assert!(state.nav_mode, "検索のEscでnavモードごと抜けてはいけない");
+    assert!(
+        state.nav_mode,
+        "検索サブモードのEscでnavモードごと抜けてはいけない"
+    );
 
-    // 2段目: navモードから離脱（召喚ならここで自分を閉じる）
+    // 2段目: navモードから退場（召喚インスタンスならここで自分を閉じる）
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.nav_mode);
 }
@@ -1191,7 +1194,7 @@ fn esc_restores_the_selection_saved_on_entry() {
     state.handle_nav_key(key(BareKey::Down));
     state.handle_nav_key(key(BareKey::Down));
 
-    // 検索中に先頭へペインが増えてインデックスがずれても、ペインIDで戻す
+    // 検索サブモード中に先頭へペインが増えてインデックスがずれても、ペインIDで戻す
     state.panes = Some(manifest(vec![
         (
             0,
@@ -1297,7 +1300,7 @@ fn the_cursor_falls_back_to_the_first_hit_when_its_pane_closes() {
     assert_eq!(
         state.search.as_ref().unwrap().cursor,
         Some(1),
-        "消えたら結果の先頭へ寄せる"
+        "消えたら絞り込み結果の先頭へ寄せる"
     );
 }
 
@@ -1631,13 +1634,13 @@ fn render_survives_search_mode() {
     state.render(1, 1);
 }
 
-// --- ペイン行のクリック（要件: docs/requirements/click-to-focus/） ---
+// --- 行クリック（要件: docs/requirements/click-to-focus/） ---
 //
 // 実際にフォーカスが移るかはホスト側の仕事（focus_pane_with_id はスタブで
 // 何もしない）なので、ここでは「どの行がどのペインに対応するか」と
 // クリックが選択・モードに与える影響を見る。
 
-// 通常表示（navモード外）の searchable_state。行の並びは
+// navモード外の searchable_state。行の並びは
 // 0: tab1見出し / 1: alpha / 2: bravo / 3: tab2見出し / 4: charlie
 fn clickable_state() -> State {
     let mut state = searchable_state();
@@ -1701,7 +1704,7 @@ fn clicking_follows_the_filtered_layout_while_searching() {
     assert!(state.handle_click(2));
     assert_eq!(state.selectable[state.selected].pane_id, 1);
     assert!(!state.nav_mode);
-    assert!(state.search.is_none(), "検索も一緒に畳む");
+    assert!(state.search.is_none(), "検索サブモードも一緒に畳む");
 }
 
 #[test]

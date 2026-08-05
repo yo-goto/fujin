@@ -1,9 +1,9 @@
 // サイドバーの描画。
 //
-// レイアウト: navモード名・検索クエリのヘッダ1行（通常表示のときは無し）に
-// 続けて、タブ見出し > 配下のペイン行 をタブ順で縦に並べる。
+// レイアウト: navモード名・検索クエリのヘッダ1行（navモード外のときは無し）に
+// 続けて、タブ見出し行 > 配下のペイン行 をタブ順で縦に並べる。
 //
-// 通常表示でヘッダを出さないのは、セッション名を zellij 本体のトップバーが
+// navモード外でヘッダを出さないのは、セッション名を zellij 本体のトップバーが
 // `Zellij (セッション名)` の形で常時出しており、重複が視認性を下げるため
 //（要件: docs/requirements/sidebar-tree/）。
 
@@ -83,13 +83,7 @@ fn compose(segments: &[(&str, Ink)], cols: usize) -> Text {
     }
     let full_len = line.chars().count();
     let line = truncate(&line, cols);
-    // 切り詰められた行の末尾は … なので、そこには色を乗せない
-    let visible = line.chars().count();
-    let limit = if visible < full_len {
-        visible.saturating_sub(1)
-    } else {
-        visible
-    };
+    let limit = colorable_char_limit(line.chars().count(), full_len);
     let mut text = Text::new(&line);
     for (start, end, ink) in spans {
         let end = end.min(limit);
@@ -118,7 +112,8 @@ impl State {
         if self.help_overlay {
             return self.help_lines().iter().map(Row::Help).collect();
         }
-        // ヘッダ: 検索中はクエリ入力行、navモード中はモード名。通常表示では出さない
+        // ヘッダ: 検索サブモード中はクエリ入力行、navモード中はモード名。
+        // navモード外では出さない
         if self.search.is_some() || self.nav_mode {
             rows.push(Row::Header);
         }
@@ -172,7 +167,7 @@ impl State {
     }
 
     // 画面のこの行に載っているペイン（要件: docs/requirements/click-to-focus/）。
-    // ヘッダ・タブ見出し・一覧の外は None
+    // ヘッダ・タブ見出し行・一覧の外は None
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
         match self.visible_rows().get(row)? {
             Row::Pane { entry, .. } => Some(entry.pane_id),
@@ -220,7 +215,7 @@ impl State {
                     flat_index,
                     hit,
                 } => {
-                    // 検索中の選択は結果内カーソル（ペインID）で決まる
+                    // 検索サブモード中にハイライトする行はカーソル（ペインID）で決まる
                     let is_selected = match &self.search {
                         Some(search) => search.cursor == Some(entry.pane_id),
                         None => flat_index == self.selected,
@@ -252,11 +247,11 @@ impl State {
                 cols,
             );
         };
-        // 検索中はクエリ入力行が主役。ヒントは右端へ寄せ、クエリが伸びて
-        // ぶつかるところまで来たら入力中の文字列のほうを優先して落とす
+        // 検索サブモード中はクエリ入力行が主役。操作ヒントは右端へ寄せ、クエリが
+        // 伸びてぶつかるところまで来たら入力中の文字列のほうを優先して落とす
         let query = format!("{}▏", search.query);
         // 余白は表示セル幅で数える。クエリに全角文字が入ると文字数とセル数が
-        // ずれ、ヒントが右端からはみ出す
+        // ずれ、操作ヒントが右端からはみ出す
         let hint_width = UnicodeWidthStr::width("?:help");
         let pad = cols
             .saturating_sub(UnicodeWidthStr::width(query.as_str()) + 1) // 先頭の `/` のぶん
@@ -308,7 +303,7 @@ impl State {
         }
     }
 
-    // タブ見出し1行ぶんの Text を組み立てる
+    // タブ見出し行1行ぶんの Text を組み立てる
     fn tab_heading(&self, tab: &TabInfo, cols: usize) -> Text {
         let marker = if tab.active { "▾" } else { "▸" };
         let prefix = format!("{} {} ", marker, tab.position + 1);
@@ -346,7 +341,7 @@ impl State {
         text
     }
 
-    // ペイン1行ぶんの Text を組み立てる（アイコン・カウンタ・cwd・ハイライト込み）
+    // ペイン行1行ぶんの Text を組み立てる（状態アイコン・カウンタ・cwd・ハイライト込み）
     fn pane_row(
         &self,
         entry: &Selectable,
@@ -358,7 +353,7 @@ impl State {
         let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
         // 選択行は左端にバーを立てる。テーマの選択色が沈む配色でも
         // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
-        // アイコンの color_range 2..3 をずらさない）
+        // 状態アイコンの color_range 2..3 をずらさない）
         let prefix = if is_selected { "▌ " } else { "  " };
         let mut label = format!("{}{} {}", prefix, icon, entry.title);
         if let Some(a) = agent {
@@ -397,7 +392,7 @@ impl State {
         }
         let mut text = Text::new(&label);
         if let Some(a) = agent {
-            // アイコン部分（先頭2..3文字目）に状態色
+            // 状態アイコン部分（先頭2..3文字目）に状態色
             text = text.color_range(a.state.color(), 2..3);
         }
         if let Some(indices) = highlight.filter(|i| !i.is_empty()) {
@@ -412,6 +407,16 @@ impl State {
     }
 }
 
+// 切り詰め後の行で色を乗せてよい文字数の上限。
+// 切り詰められた行の末尾は … なので、そこには色を乗せない
+fn colorable_char_limit(visible: usize, original_len: usize) -> usize {
+    if visible < original_len {
+        visible.saturating_sub(1)
+    } else {
+        visible
+    }
+}
+
 // マッチ位置（フィールド内の char index）を行ラベル内の位置へずらし、
 // truncate() で切られて画面に無い位置を捨てる
 pub(crate) fn shift_highlight_indices(
@@ -420,13 +425,7 @@ pub(crate) fn shift_highlight_indices(
     truncated: &str,
     original_len: usize,
 ) -> Vec<usize> {
-    let visible = truncated.chars().count();
-    // 切り詰められた行の末尾は … なので、そこには色を乗せない
-    let limit = if visible < original_len {
-        visible.saturating_sub(1)
-    } else {
-        visible
-    };
+    let limit = colorable_char_limit(truncated.chars().count(), original_len);
     indices
         .iter()
         .map(|i| i + offset)

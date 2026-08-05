@@ -43,14 +43,11 @@ impl State {
         // 載らない。凍った一覧で判定すると新規タブへ重ねて召喚してしまうため、
         // 毎回サーバに問い合わせ直す。重い問い合わせだが、増殖して消せない事故
         //（決定16で一度実際に壊した経路）の方がコストが高い
-        let manifest = match query_pane_manifest().or_else(|| self.panes.clone()) {
-            Some(manifest) => manifest,
-            None => {
-                // 問い合わせが落ちたときだけ凍った一覧に頼る（それも無ければここ）。
-                // 諦めると「Ctrl+y が無反応」に逆戻りするので、経路自体は残す
-                eprintln!("fujin: summon skipped (no pane manifest)");
-                return;
-            }
+        // 問い合わせが落ちたときだけ凍った一覧に頼る（それも無ければ諦める）。
+        // 完全に諦めると「入場キーが無反応」に逆戻りするので、経路自体は残す
+        let Some(manifest) = query_pane_manifest().or_else(|| self.panes.clone()) else {
+            eprintln!("fujin: summon skipped (no pane manifest)");
+            return;
         };
         // 自分が前に召喚したものがまだ生きていれば、**同じキーで引っ込める**
         //（トグル・決定16）。召喚された本人はこの pipe を受け取れないので、
@@ -124,7 +121,7 @@ impl State {
         }
     }
 
-    // 自分がフローティングで起動されていたら、臨時サイドバーとして自覚する
+    // 自分がフローティングで起動されていたら、召喚インスタンスとして自覚する
     //（要件: docs/requirements/summon/cold-start.feature）。
     //
     // セッションに fujin が1つも居ないと、入場pipe（`MessagePlugin`）の宛先が
@@ -136,7 +133,7 @@ impl State {
     //
     // **フローティング = 臨時、タイル = 常駐**（決定5）で区別する。常駐サイドバーを
     // 誤って閉じてしまわないよう、判定はこの1点だけに絞る
-    pub(crate) fn adopt_floating_as_temporary(&mut self) {
+    pub(crate) fn adopt_floating_as_summoned(&mut self) {
         // 決定16の召喚は configuration で最初から自覚している
         if self.summoned {
             return;
@@ -152,7 +149,7 @@ impl State {
         if !info.is_floating {
             return;
         }
-        eprintln!("fujin: adopting floating instance as a temporary sidebar");
+        eprintln!("fujin: adopting floating instance as a summoned instance");
         self.summoned = true;
         self.pending_nav_entry = true;
         // 開いたときの座標は zellij 既定のカスケード配置なので、常駐サイドバーと
@@ -230,7 +227,7 @@ impl State {
         false
     }
 
-    // 召喚されたインスタンスの入場。入場pipeは自分の起動前に流れているので
+    // 召喚インスタンスの入場。入場pipeは自分の起動前に流れているので
     // 受け取れない。権限と一覧が揃ってから入る（空のまま入ると j/k が効かない）
     pub(crate) fn enter_nav_mode_if_pending(&mut self) {
         if !self.pending_nav_entry {
@@ -252,7 +249,7 @@ impl State {
         }
     }
 
-    // 取り残された臨時召喚を閉じる（決定16の掃除の逃げ道）。判定材料は
+    // 取り残された召喚インスタンスを閉じる（決定16の掃除の逃げ道）。判定材料は
     // 「同じURLのプラグイン」かつ「フローティング」だけに絞る（常駐サイドバーは
     // タイル・決定5）。召喚側が発行したIDを覚えておく手もあるが、覚えている
     // 本人がリロードや再起動で記憶を失うと届かなくなる

@@ -8,10 +8,12 @@
 // 逆（新入りが要求を投げる）にしてはいけない。宛先をURLで指定する
 // `MessageToPlugin::with_plugin_url` は、起動中のインスタンスに配送されず
 // **新しいプラグインを起動しようとする**（cwd/config まで一致を要求するため、
-// レイアウト由来のインスタンスにマッチしない）。実測でも
+// 常駐サイドバーにマッチしない）。実測でも
 // `wasm_bridge.rs:1897 Failed to load plugin` が出て、実セッションなら
 // タブを作るたびに迷子のサイドバーペインが増えるところだった。
 // 宛先をプラグインIDで直接指定すれば起動は起こらない。
+
+use std::collections::BTreeSet;
 
 use zellij_tile::prelude::*;
 
@@ -56,19 +58,15 @@ impl State {
         ) else {
             return;
         };
-        let siblings: Vec<u32> = manifest
+        let siblings: BTreeSet<u32> = manifest
             .panes
             .values()
             .flatten()
             .filter(|p| p.is_plugin && p.id != own_id && p.plugin_url.as_deref() == Some(own_url))
             .map(|p| p.id)
             .collect();
-        let newcomers: Vec<u32> = siblings
-            .iter()
-            .copied()
-            .filter(|id| !self.known_siblings.contains(id))
-            .collect();
-        self.known_siblings = siblings.into_iter().collect();
+        let newcomers: Vec<u32> = siblings.difference(&self.known_siblings).copied().collect();
+        self.known_siblings = siblings;
         if self.agents.is_empty() {
             return;
         }
@@ -144,8 +142,9 @@ impl State {
         eprintln!("fujin: synced {} agents from peer", self.agents.len());
     }
 
-    // 選択位置を兄弟へ配る。navモード中の移動は横取り中の1インスタンスにしか
-    // 起きないため、これがないとタブごとに違う行が光る
+    // 選択を兄弟インスタンスへ配る（運搬形式は選択ペインID）。navモード中の
+    // 移動は横取り中の1インスタンスにしか起きないため、これがないと
+    // タブごとに違う行が光る
     pub(crate) fn broadcast_selection(&self) {
         let Some(entry) = self.selectable.get(self.selected) else {
             return;
