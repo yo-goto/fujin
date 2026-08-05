@@ -16,6 +16,7 @@
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
 use crate::render::{pad_to_width, shift_highlight_indices, truncate, Row};
+use crate::search::{Field, Hit};
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -1591,6 +1592,86 @@ fn sync_pipe_only_fills_an_empty_state() {
 fn unknown_pipes_are_ignored() {
     let mut state = State::default();
     assert!(!state.pipe(pipe_message("some_other_plugin", "payload")));
+}
+
+// --- ペイン行の折り合い優先順位（決定21） ---
+//
+// 幅が足りないとき削る優先順位は cwd → ペイン名。サブエージェント数 `+N`・
+// 未完了タスク数 `[M]` は最後まで残す
+
+#[test]
+fn counters_survive_when_the_pane_title_is_long() {
+    let mut state = state_with_panes(0);
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![terminal_pane(1, "要件定義とドキュメント整理タスクの続き")],
+    )]));
+    state.rebuild_selectable();
+    state.apply_status(status(1, "SubagentStart"));
+    state.apply_status(status(1, "SubagentStart"));
+    state.apply_status(status(1, "TaskCreated"));
+    state.apply_status(status(1, "TaskCreated"));
+    state.apply_status(status(1, "TaskCreated"));
+
+    let entry = &state.selectable[0];
+    let text = state.pane_row(entry, false, None, 32);
+    let content = text.content();
+    assert!(content.contains("+2"), "{}", content);
+    assert!(content.contains("[3]"), "{}", content);
+    assert!(
+        unicode_width::UnicodeWidthStr::width(content) <= 32,
+        "{}",
+        content
+    );
+}
+
+#[test]
+fn cwd_is_dropped_before_the_title_when_space_is_tight() {
+    let mut state = state_with_panes(0);
+    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, "claude-worker")])]));
+    state.rebuild_selectable();
+    state.show_cwd = true;
+    state.pane_cwds.insert(
+        1,
+        "/very/long/nested/path/that/does/not/fit/here".to_string(),
+    );
+
+    let entry = &state.selectable[0];
+    let text = state.pane_row(entry, false, None, 32);
+    let content = text.content();
+    assert!(content.contains("claude-worker"), "{}", content);
+    assert!(
+        !content.contains("/very/long"),
+        "幅が足りないcwdは丸ごと落ちる（中間切り詰めはしない）: {}",
+        content
+    );
+}
+
+#[test]
+fn cwd_search_hit_is_shown_even_when_space_is_tight() {
+    // show_cwd=false でも cwd ヒットは画面に無い文字列に見えないよう出す
+    // （既存挙動）。決定21の優先順位（cwdを先に落とす）はこの例外には適用しない
+    let mut state = state_with_panes(0);
+    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, "claude-worker")])]));
+    state.rebuild_selectable();
+    state.pane_cwds.insert(
+        1,
+        "/very/long/nested/path/that/does/not/fit/here".to_string(),
+    );
+
+    let hit = Hit {
+        score: 0,
+        field: Field::Cwd,
+        indices: vec![0],
+    };
+    let entry = &state.selectable[0];
+    let text = state.pane_row(entry, false, Some(&hit), 32);
+    let content = text.content();
+    assert!(
+        content.contains("/very/long"),
+        "cwdヒット時は幅が厳しくても出す: {}",
+        content
+    );
 }
 
 // --- render（描画パスが panic しないこと） ---

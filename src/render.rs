@@ -341,8 +341,11 @@ impl State {
         text
     }
 
-    // ペイン行1行ぶんの Text を組み立てる（状態アイコン・カウンタ・cwd・ハイライト込み）
-    fn pane_row(
+    // ペイン行1行ぶんの Text を組み立てる（状態アイコン・カウンタ・cwd・ハイライト込み）。
+    //
+    // 幅が足りないときに削る優先順位は cwd → ペイン名（決定21）。サブエージェント数
+    // `+N`・未完了タスク数 `[M]` は幅を先に確保し、最後まで削らない
+    pub(crate) fn pane_row(
         &self,
         entry: &Selectable,
         is_selected: bool,
@@ -355,35 +358,71 @@ impl State {
         // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
         // 状態アイコンの color_range 2..3 をずらさない）
         let prefix = if is_selected { "▌ " } else { "  " };
-        let mut label = format!("{}{} {}", prefix, icon, entry.title);
+        let head = format!("{}{} ", prefix, icon); // "▌ {icon} " / "  {icon} "
+
+        let mut counters = String::new();
         if let Some(a) = agent {
             if a.subagents > 0 {
-                label.push_str(&format!(" +{}", a.subagents));
+                counters.push_str(&format!(" +{}", a.subagents));
             }
             if a.open_tasks > 0 {
-                label.push_str(&format!(" [{}]", a.open_tasks));
+                counters.push_str(&format!(" [{}]", a.open_tasks));
             }
         }
-        // cwd にヒットしたペインは show_cwd が false でも cwd を出す。
-        // 画面に無い文字列でヒットしたように見せないため
-        let show_cwd_here = self.show_cwd || matches!(hit, Some(h) if h.field == Field::Cwd);
+
+        // ペイン名はアイコンとカウンタぶんを引いた残り幅に収める。カウンタは
+        // 切り詰めの対象にしない — 名前の長さでサブエージェント数・未完了
+        // タスク数が消えるのを防ぐ（決定21）
+        let reserved =
+            UnicodeWidthStr::width(head.as_str()) + UnicodeWidthStr::width(counters.as_str());
+        let title_budget = cols.saturating_sub(reserved);
+        let title_original_len = entry.title.chars().count();
+        let title = truncate(&entry.title, title_budget);
+        let title_visible_len = title.chars().count();
+
+        let mut label = format!("{}{}{}", head, title, counters);
+
+        // cwd にヒットしたペインは show_cwd が false でも cwd を出す。画面に
+        // 無い文字列でヒットしたように見せないための例外で、この場合だけは
+        // 幅が足りなくても出す。それ以外（show_cwd 設定によるもの）は削る
+        // 優先順位の最下位で、幅が無ければ丸ごと出さない（決定21）
+        let cwd_hit = matches!(hit, Some(h) if h.field == Field::Cwd);
+        let show_cwd_here = self.show_cwd || cwd_hit;
         let mut cwd_offset = None;
         if show_cwd_here {
             if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
-                cwd_offset = Some(label.chars().count() + 2);
-                label.push_str(&format!("  {}", cwd));
+                let fits = UnicodeWidthStr::width(label.as_str())
+                    + 2
+                    + UnicodeWidthStr::width(cwd.as_str())
+                    <= cols;
+                if cwd_hit || fits {
+                    cwd_offset = Some(label.chars().count() + 2);
+                    label.push_str(&format!("  {}", cwd));
+                }
             }
         }
         let full_len = label.chars().count();
+        // 通常経路（ペイン名・カウンタ）は既に予算内。cwd をヒット表示のため
+        // 強制的に足した場合だけ、ここでまだ幅を超えていることがある
         let mut label = truncate(&label, cols);
         // ハイライトする場所が、そのままヒットしたフィールドの提示になる
-        let highlight = hit.and_then(|hit| {
-            let offset = match hit.field {
-                Field::Title => Some(4), // "▌ {icon} " の4文字ぶん
-                Field::Cwd => cwd_offset,
-                Field::Tab => None, // タブ見出し側で描いている
-            };
-            offset.map(|o| shift_highlight_indices(&hit.indices, o, &label, full_len))
+        let highlight = hit.and_then(|hit| match hit.field {
+            Field::Title => {
+                // ペイン名は行全体とは別に独自の予算で切り詰め済みなので、
+                // 可視範囲もペイン名自身の切り詰め結果から判定する
+                let limit = colorable_char_limit(title_visible_len, title_original_len);
+                let indices: Vec<usize> = hit
+                    .indices
+                    .iter()
+                    .filter(|&&i| i < limit)
+                    .map(|&i| i + 4) // "▌ {icon} " の4文字ぶん
+                    .collect();
+                Some(indices)
+            }
+            Field::Cwd => {
+                cwd_offset.map(|o| shift_highlight_indices(&hit.indices, o, &label, full_len))
+            }
+            Field::Tab => None, // タブ見出し側で描いている
         });
         if is_selected {
             // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
