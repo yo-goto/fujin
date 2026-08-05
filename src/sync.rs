@@ -93,13 +93,14 @@ impl State {
                 .map(|s| s.as_str())
                 .unwrap_or("");
             out.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 pane_id,
                 info.state.as_str(),
                 info.subagents,
                 info.open_tasks,
                 info.agent,
-                cwd
+                cwd,
+                info.turn_ended as u8
             ));
         }
         out
@@ -120,6 +121,8 @@ impl State {
             let Ok(pane_id) = pane_id.parse::<u32>() else {
                 continue;
             };
+            let cwd = fields.next();
+            let turn_ended = fields.next() == Some("1");
             self.agents.insert(
                 pane_id,
                 AgentInfo {
@@ -127,10 +130,11 @@ impl State {
                     agent: agent.to_string(),
                     subagents: subagents.parse().unwrap_or(0),
                     open_tasks: open_tasks.parse().unwrap_or(0),
+                    turn_ended,
                     detail: None,
                 },
             );
-            if let Some(cwd) = fields.next().filter(|c| !c.is_empty()) {
+            if let Some(cwd) = cwd.filter(|c| !c.is_empty()) {
                 self.pane_cwds.insert(pane_id, cwd.to_string());
             }
         }

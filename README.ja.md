@@ -302,10 +302,10 @@ navモード中に `/` を押すとヘッダがクエリ入力行（`/…▏`）
 | `SessionStart` | idle（登録・カウンタリセット） |
 | `UserPromptSubmit` | working |
 | `Notification` | blocked（メッセージ保持） |
-| `Stop` | done（サブエージェント数を0に） |
+| `Stop` | done（バックグラウンドのサブエージェントが残っている間は working のまま） |
 | `StopFailure` / `PostToolUseFailure` | error |
 | `SessionEnd` | 登録解除 |
-| `SubagentStart` / `SubagentStop` | サブエージェント数 ±1 |
+| `SubagentStart` / `SubagentStop` | サブエージェント数 ±1（`Stop` 後に最後の1つが終わったら done） |
 | `TaskCreated` / `TaskCompleted` | 未完了タスク数 ±1 |
 
 ## 設定

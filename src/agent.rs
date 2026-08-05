@@ -65,10 +65,13 @@ impl AgentState {
 pub(crate) struct AgentInfo {
     pub(crate) state: AgentState,
     pub(crate) agent: String,
-    // 稼働中サブエージェント数（SubagentStart/Stopで増減、Stopで0リセット）
+    // 稼働中サブエージェント数（SubagentStart/Stopで増減）
     pub(crate) subagents: usize,
     // 未完了タスク数（TaskCreated/Completedで増減）
     pub(crate) open_tasks: usize,
+    // ターン終了済みか。バックグラウンドのサブエージェントは Stop より後まで
+    // 走るので、最後の SubagentStop で done にしてよいかの判定に要る
+    pub(crate) turn_ended: bool,
     // blocked時の通知メッセージ等
     pub(crate) detail: Option<String>,
 }
@@ -138,23 +141,38 @@ impl State {
                 entry.state = AgentState::Idle;
                 entry.subagents = 0;
                 entry.open_tasks = 0;
+                entry.turn_ended = false;
             }
-            "UserPromptSubmit" => entry.state = AgentState::Working,
+            "UserPromptSubmit" => {
+                entry.state = AgentState::Working;
+                entry.turn_ended = false;
+            }
             "Notification" => {
                 entry.state = AgentState::Blocked;
                 entry.detail = payload.detail;
             }
             "Stop" => {
-                entry.state = AgentState::Done;
-                // ターン終了時点でサブエージェントは全て終わっている
-                entry.subagents = 0;
+                entry.turn_ended = true;
+                // バックグラウンドで起動したサブエージェントはターンを待たせないので、
+                // Stop の時点でまだ走っていることがある（実測トレース:
+                // SubagentStart → Stop → …数十秒後… → SubagentStop）。
+                // 走っている間は working のままにする
+                if entry.subagents == 0 {
+                    entry.state = AgentState::Done;
+                }
             }
             "StopFailure" | "PostToolUseFailure" => entry.state = AgentState::Error,
             "SessionEnd" => {
                 self.agents.remove(&payload.pane_id);
             }
             "SubagentStart" => entry.subagents += 1,
-            "SubagentStop" => entry.subagents = entry.subagents.saturating_sub(1),
+            "SubagentStop" => {
+                entry.subagents = entry.subagents.saturating_sub(1);
+                // ターンが終わった後に残っていた最後の1つが終わったら done
+                if entry.subagents == 0 && entry.turn_ended && entry.state == AgentState::Working {
+                    entry.state = AgentState::Done;
+                }
+            }
             "TaskCreated" => entry.open_tasks += 1,
             "TaskCompleted" => entry.open_tasks = entry.open_tasks.saturating_sub(1),
             other => {
