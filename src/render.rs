@@ -208,11 +208,10 @@ impl State {
         if self.help_overlay {
             return self.help_lines().iter().map(Row::Help).collect();
         }
-        // ヘッダ: 検索サブモード中はクエリ入力行、navモード中はモード名。
-        // navモード外では出さない
-        if self.search.is_some() || self.nav_mode {
-            rows.push(Row::Header);
-        }
+        // ヘッダ: 検索サブモード中はクエリ入力行、navモード中はモード名、
+        // 通常表示ではブランディング文言。**常時1行を確保する** — モードの
+        // 入退場でヘッダの有無が切り替わると、ツリー全体が1行分上下にずれる
+        rows.push(Row::Header);
         if let Some(search) = &self.search {
             // 0件は空リストではなく明示する。絞り込みが効いているのか
             // 描画が壊れているのか区別できないため
@@ -366,6 +365,11 @@ impl State {
     pub(crate) fn header_line(&self, cols: usize) -> Text {
         // ツリーの行と同じく右端は空ける（ヘルプオーバーレイは別の面なので対象外）
         let cols = content_cols(cols);
+        // 通常表示はブランディング文言。dim にしてモード名の強調色と区別し、
+        // 角括弧でも囲まない — `[NAV]` と同じ見た目だとモードの一種に誤読される
+        if self.search.is_none() && !self.nav_mode {
+            return compose(&[("> fujin", Ink::Muted)], cols);
+        }
         let Some(search) = &self.search else {
             return compose(
                 &[

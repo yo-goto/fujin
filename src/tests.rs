@@ -613,6 +613,36 @@ fn nav_leaves_on_undefined_keys() {
 // サイドバー幅は32文字（決定3）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 
 #[test]
+fn the_plain_header_shows_the_branding_line() {
+    // 通常表示のヘッダはブランディング文言。モード名と誤読されないよう
+    // 角括弧では囲まない（docs/concept/ui-design.md の「ヘッダ」）
+    let state = state_with_panes(2);
+    assert!(!state.nav_mode);
+
+    let header = state.header_line(32);
+    let header = header.content();
+    assert_eq!(header, "> fujin");
+}
+
+#[test]
+fn the_header_keeps_its_row_across_the_nav_mode_boundary() {
+    // navモードの入退場でヘッダの有無が切り替わると、ツリー全体が1行分
+    // 上下にずれる（要件: sidebar-tree.feature）
+    let mut state = searchable_state();
+    state.nav_mode = false;
+    let plain = {
+        let rows = state.visible_rows();
+        assert!(matches!(rows[0], Row::Header), "通常表示にもヘッダがある");
+        rows.len()
+    };
+
+    state.nav_mode = true;
+    let nav = state.visible_rows();
+    assert!(matches!(nav[0], Row::Header));
+    assert_eq!(nav.len(), plain, "行数が変わらない");
+}
+
+#[test]
 fn the_nav_header_shows_the_help_and_exit_hints() {
     let mut state = state_with_panes(2);
     state.nav_mode = true;
@@ -1786,11 +1816,11 @@ fn the_cwd_is_rendered_as_its_own_row() {
         .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
 
     let rows = state.visible_rows();
-    // 0: tab1見出し / 1: ペイン行 / 2: cwd行
-    assert!(matches!(rows[1], Row::Pane { .. }));
-    assert!(matches!(rows[2], Row::Cwd { .. }));
+    // 0: ヘッダ / 1: tab1見出し / 2: ペイン行 / 3: cwd行
+    assert!(matches!(rows[2], Row::Pane { .. }));
+    assert!(matches!(rows[3], Row::Cwd { .. }));
     assert_eq!(
-        state.pane_at_row(2),
+        state.pane_at_row(3),
         Some(1),
         "cwd行のクリックも同じペインに当たる（要件: click-to-focus）"
     );
@@ -1816,7 +1846,7 @@ fn a_pane_without_a_cwd_gets_no_extra_row() {
     state.show_cwd = true;
 
     let rows = state.visible_rows();
-    assert_eq!(rows.len(), 2, "タブ見出し行とペイン行だけ");
+    assert_eq!(rows.len(), 3, "ヘッダ・タブ見出し行・ペイン行だけ");
 }
 
 #[test]
@@ -1972,8 +2002,8 @@ fn render_survives_search_mode() {
 // 何もしない）なので、ここでは「どの行がどのペインに対応するか」と
 // クリックが選択・モードに与える影響を見る。
 
-// navモード外の searchable_state。行の並びは
-// 0: tab1見出し / 1: alpha / 2: bravo / 3: tab2見出し / 4: charlie
+// navモード外の searchable_state。ヘッダは常時1行あるので、行の並びは
+// 0: ヘッダ / 1: tab1見出し / 2: alpha / 3: bravo / 4: tab2見出し / 5: charlie
 fn clickable_state() -> State {
     let mut state = searchable_state();
     state.nav_mode = false;
@@ -1984,11 +2014,11 @@ fn clickable_state() -> State {
 fn clicking_a_pane_row_selects_that_pane() {
     let mut state = clickable_state();
 
-    assert!(state.handle_click(2));
+    assert!(state.handle_click(3));
     assert_eq!(state.selectable[state.selected].pane_id, 2);
 
     // タブをまたいだ行も同じように引ける
-    assert!(state.handle_click(4));
+    assert!(state.handle_click(5));
     assert_eq!(state.selectable[state.selected].pane_id, 3);
 }
 
@@ -1997,8 +2027,9 @@ fn clicking_a_tab_heading_does_nothing() {
     let mut state = clickable_state();
     state.selected = 1;
 
-    assert!(!state.handle_click(0));
-    assert!(!state.handle_click(3));
+    assert!(!state.handle_click(0), "ヘッダ行も対象外");
+    assert!(!state.handle_click(1));
+    assert!(!state.handle_click(4));
     assert_eq!(state.selected, 1, "選択は動かない");
 }
 
@@ -2008,7 +2039,7 @@ fn clicking_outside_the_list_does_nothing() {
     state.selected = 1;
 
     // 一覧より下の余白
-    assert!(!state.handle_click(5));
+    assert!(!state.handle_click(6));
     assert!(!state.handle_click(99));
     // 負の行（サイドバーの外）
     assert!(!state.handle_click(-1));
@@ -2018,7 +2049,7 @@ fn clicking_outside_the_list_does_nothing() {
 #[test]
 fn clicking_in_nav_mode_jumps_and_leaves_the_mode() {
     let mut state = searchable_state(); // nav_mode = true
-                                        // navモードではヘッダが1行入るぶん、行がひとつ下へずれる
+                                        // ヘッダが1行入るぶん、ツリーはひとつ下から始まる
     assert!(state.handle_click(3));
 
     assert_eq!(state.selectable[state.selected].pane_id, 2);
