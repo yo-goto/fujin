@@ -10,7 +10,10 @@ jump to them with global keybindings.
 
 The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" /
 "to arrange a formation" — treating your panes as a formation to arrange and
-oversee at a glance. **Zellij, plus eyes for your agents.**
+oversee at a glance. To English speakers, `fujin` also reads as 風神 (*fūjin*),
+the Japanese god of wind — pairing the stillness of forming up with the motion
+of wind sweeping across your panes to watch over them. **Zellij, plus eyes
+for your agents.**
 
 ```text
 ▸ 1 scheme
