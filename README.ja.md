@@ -153,9 +153,19 @@ zellij本体の `Ctrl+p` → pane モードと同じ操作感です。`config.kd
 
 ```kdl
 bind "Ctrl y" {
-    MessagePlugin "fujin" { name "fujin_mode"; }
+    MessagePlugin "fujin" {
+        name "fujin_mode"
+        floating true
+    }
 }
 ```
+
+**`floating true` は必ず書いてください。** セッションに fujin が1つも居ないとき
+（レイアウトを使わずに作ったセッションなど）、この pipe には宛先が無いので zellij 自身が
+fujin を新規起動します。既定ではタイルで開くため作業ペインを分割して右側に出てしまい、
+プラグイン側からは直せません。`floating true` があればフローティングで開き、fujin が
+自分で常駐サイドバーと同じ左端・幅32へ整えます（`Esc` やジャンプで閉じます）。
+既に fujin が起動しているときの配送には影響しません。
 
 `Ctrl+y` は zellij デフォルトと衝突しない空きキーです。埋まっていれば任意に変更してかまいません
 （既定で使用済みなのは `p`/`t`/`n`/`h`/`s`/`o`/`q`/`g`）。

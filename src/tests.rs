@@ -624,6 +624,108 @@ fn select_pane_id_ignores_unknown_panes() {
 }
 
 #[test]
+fn focus_follows_only_when_it_moved() {
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+
+    assert_eq!(state.focus_to_follow(Some(2), false), Some(2));
+    // 動いていないフォーカスで引き直すと、fujin_up / fujin_down で動かした
+    // 選択がペイン名の変化のたびに巻き戻る
+    assert_eq!(state.focus_to_follow(Some(1), false), None);
+    // プラグインペインへのフォーカスは selectable に無いので対象外
+    assert_eq!(state.focus_to_follow(None, false), None);
+
+    // navモード中の選択は探索カーソルなので追従させない
+    state.nav_mode = true;
+    assert_eq!(state.focus_to_follow(Some(2), false), None);
+}
+
+#[test]
+fn a_newly_visible_instance_re_reads_the_focus() {
+    // 非可視の間は PaneUpdate が届かずキャッシュが凍る。タブを切り替えて
+    // 戻ると「フォーカスは動いていない」と誤判定し、その間に決定13の同期で
+    // 受け取った別タブの選択が残ったままになる（実測での症状）
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+
+    assert_eq!(state.focus_to_follow(Some(1), true), Some(1));
+    // 可視化の合図でも、navモード中とプラグインペインは対象外のまま
+    assert_eq!(state.focus_to_follow(None, true), None);
+    state.nav_mode = true;
+    assert_eq!(state.focus_to_follow(Some(1), true), None);
+}
+
+#[test]
+fn a_focus_move_during_nav_mode_leaves_the_mode() {
+    // マウスでペインを選ぶとキー横取り中でもフォーカスが動く。抜けないと
+    // クリックした先で j/k がサイドバー操作として食われ続ける
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+
+    // refresh_focus() はホスト問い合わせを含むのでここでは呼べない。
+    // 「フォーカスが動いた」と観測した後の処理だけを再現する
+    state.focused_pane = Some(3);
+    state.leave_nav_mode();
+
+    assert!(!state.nav_mode);
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 3,
+        "ハイライトは新しい実フォーカスへ揃う"
+    );
+}
+
+#[test]
+fn the_focused_terminal_comes_from_the_tiled_layer() {
+    // 臨時サイドバー（フローティング）は自分がフローティング層のフォーカスを
+    // 持つので、問い合わせでは作業ペインが分からない。PaneInfo.is_focused は
+    // レイヤごとなので、タイル層のフォーカスを一覧から拾い直す
+    let focused_terminal = PaneInfo {
+        is_focused: true,
+        ..terminal_pane(2, "pane2")
+    };
+    let focused_floating_sidebar = PaneInfo {
+        is_focused: true,
+        ..floating_plugin_pane(9, "fujin.wasm")
+    };
+    let state = State {
+        panes: Some(manifest(vec![(
+            0,
+            vec![
+                terminal_pane(1, "pane1"),
+                focused_terminal,
+                focused_floating_sidebar,
+            ],
+        )])),
+        ..Default::default()
+    };
+
+    assert_eq!(state.focused_terminal_in_tab(0), Some(2));
+    assert_eq!(state.focused_terminal_in_tab(1), None, "存在しないタブ");
+}
+
+#[test]
+fn a_focused_floating_terminal_is_used_when_no_tile_is_focused() {
+    // フローティングのターミナルで作業していた場合の受け皿
+    let focused_floating_terminal = PaneInfo {
+        is_focused: true,
+        is_floating: true,
+        ..terminal_pane(3, "floating")
+    };
+    let state = State {
+        panes: Some(manifest(vec![(
+            0,
+            vec![terminal_pane(1, "pane1"), focused_floating_terminal],
+        )])),
+        ..Default::default()
+    };
+
+    assert_eq!(state.focused_terminal_in_tab(0), Some(3));
+}
+
+#[test]
 fn owns_tab_only_matches_the_tab_holding_this_instance() {
     // 権威判定（決定14）の材料。フォーカス中のタブに自分が居るかだけを見る
     let state = State {

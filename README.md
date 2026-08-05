@@ -163,9 +163,20 @@ entry key**; the keys inside the mode are interpreted by the plugin itself:
 
 ```kdl
 bind "Ctrl y" {
-    MessagePlugin "fujin" { name "fujin_mode"; }
+    MessagePlugin "fujin" {
+        name "fujin_mode"
+        floating true
+    }
 }
 ```
+
+**Keep `floating true`.** When a session has no fujin instance at all (a session
+created without the layout, for example), this pipe has no recipient, so zellij
+launches fujin itself. By default it opens tiled — splitting your working pane
+and landing on the right at an arbitrary width — and the plugin cannot fix that
+from the inside. With `floating true` it opens floating, and fujin moves itself
+to the same left edge and width as the resident sidebar (closing on `Esc` or on
+a jump). It has no effect when fujin is already running.
 
 `Ctrl+y` is unused by zellij's defaults; feel free to pick something else if
 it's taken (`p`/`t`/`n`/`h`/`s`/`o`/`q`/`g` are already spoken for by default).

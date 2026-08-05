@@ -124,6 +124,45 @@ impl State {
         }
     }
 
+    // 自分がフローティングで起動されていたら、臨時サイドバーとして自覚する
+    //（要件: docs/requirements/summon/cold-start.feature）。
+    //
+    // セッションに fujin が1つも居ないと、入場pipe（`MessagePlugin`）の宛先が
+    // 存在せず **zellij 自身がプラグインを起動する**。キーバインドに
+    // `floating true` を書いておけばフローティングで開くので、それを掴まえて
+    // 常駐と同じ左端のサイドバーに整え、決定16の召喚と同じ後始末をさせる。
+    // `floating true` が無いと右側にタイルで開くが、タイルの配置と幅を
+    // プラグイン側から作り直す手段は無いので、そちらは要件の対象外。
+    //
+    // **フローティング = 臨時、タイル = 常駐**（決定5）で区別する。常駐サイドバーを
+    // 誤って閉じてしまわないよう、判定はこの1点だけに絞る
+    pub(crate) fn adopt_floating_as_temporary(&mut self) {
+        // 決定16の召喚は configuration で最初から自覚している
+        if self.summoned {
+            return;
+        }
+        let Some(own_id) = self.own_plugin_id else {
+            return;
+        };
+        // 一覧は当てにできない（この時点では PaneUpdate が来ていない）。
+        // `get_pane_info()` はサーバへの問い合わせなので可視性にも依らない
+        let Some(info) = get_pane_info(PaneId::Plugin(own_id)) else {
+            return;
+        };
+        if !info.is_floating {
+            return;
+        }
+        eprintln!("fujin: adopting floating instance as a temporary sidebar");
+        self.summoned = true;
+        self.pending_nav_entry = true;
+        // 開いたときの座標は zellij 既定のカスケード配置なので、常駐サイドバーと
+        // 同じ位置・幅に置き直す（召喚経路と同じ手当て。summon_coordinates 参照）
+        change_floating_panes_coordinates(vec![(
+            PaneId::Plugin(own_id),
+            Self::summon_coordinates(),
+        )]);
+    }
+
     // 召喚するフローティングの配置。常駐サイドバーと同じ見た目・同じ位置。
     //
     // ピン留めは必須。タブのフローティングは既定で非表示状態のため、普通に

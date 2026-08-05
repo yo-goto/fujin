@@ -75,14 +75,16 @@ impl State {
         }
     }
 
-    // ジャンプを伴わない離脱（Esc / q / 未定義キー）。navモード外のハイライトは
-    // 常に実フォーカスと一致するので、探索で動かした選択はここで戻す
-    //（要件: focus-sync）。探索位置そのものは exit_nav_mode() が控えていて、
-    // フォーカスが動かないまま入り直せば復元される
-    fn leave_nav_mode(&mut self) {
+    // ジャンプを伴わない離脱（Esc / q / 未定義キー、および navモード中に実フォーカスが
+    // 動いたとき）。navモード外のハイライトは常に実フォーカスと一致するので、
+    // 探索で動かした選択はここで戻す（要件: focus-sync）。探索位置そのものは
+    // exit_nav_mode() が控えていて、フォーカスが動かないまま入り直せば復元される
+    pub(crate) fn leave_nav_mode(&mut self) {
         self.exit_nav_mode();
         if let Some(focused) = self.focused_pane {
-            self.select_pane_id(focused);
+            if self.select_pane_id(focused) {
+                self.broadcast_selection();
+            }
         }
     }
 

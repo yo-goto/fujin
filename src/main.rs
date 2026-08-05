@@ -96,6 +96,13 @@ struct State {
     // ここに畳んでおき、navモードの入退場はこの値だけを見る（問い合わせ系の
     // ホスト関数はテストから呼べないため、判定ロジックを切り離しておく）
     focused_pane: Option<u32>,
+    // 前面に出たあと、まだ実フォーカスを取り直せていない（要件: focus-sync）。
+    // 非可視の間は PaneUpdate が届かず上の キャッシュが凍るため、タブを
+    // 切り替えて戻ってきたときに「フォーカスは動いていない」と誤判定して
+    // 追従を取りこぼす。可視化を合図に、キャッシュと同じフォーカスでも
+    // 引き直させる。問い合わせがまだ古いタブを返す場合に備えて、
+    // 引き直せるまで次のイベントへ持ち越す
+    pending_focus_resync: bool,
     // navモードを抜けたときのフォーカスと選択（要件: focus-sync）。
     // 次の入場で選択の初期値を決めるのに使う
     focus_at_nav_exit: Option<u32>,
@@ -168,6 +175,9 @@ impl ZellijPlugin for State {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
                 if self.permissions_granted {
+                    // フローティングで起動されていたら臨時サイドバーとして自覚する
+                    //（決定16。下の set_selectable の分岐に効くので、ここより前に）
+                    self.adopt_floating_as_temporary();
                     // フォーカス巡回にサイドバーが混ざらないようにする（決定6）。
                     //
                     // **臨時召喚は例外**（決定16）。unselectable なペインは
@@ -191,6 +201,12 @@ impl ZellijPlugin for State {
             }
             Event::Visible(visible) => {
                 self.visible = visible;
+                if visible {
+                    // タブ切り替えで前面に出た合図。非可視の間に凍ったキャッシュを
+                    // 信用せず、実フォーカスから選択を引き直す（要件: focus-sync）
+                    self.pending_focus_resync = true;
+                    self.refresh_focus();
+                }
                 visible
             }
             Event::TabUpdate(tabs) => {
@@ -398,25 +414,75 @@ impl State {
         }
         let focused = match focused_pane {
             PaneId::Terminal(id) => Some(id),
-            // プラグインペインは selectable に無いので追従対象外
-            PaneId::Plugin(_) => None,
+            // プラグインペインは selectable に無い。ただし諦めるのではなく
+            // 一覧から作業ペインを拾い直す（臨時サイドバー自身がフォーカスを
+            // 持つ場合がこれ。下記参照）
+            PaneId::Plugin(_) => self.focused_terminal_in_tab(focused_tab),
         };
-        // **フォーカスが動いたときだけ**引き直す。PaneUpdate はペイン名の変化
-        // でも飛んでくるので、毎回引き直すと fujin_up / fujin_down で動かした
-        // 選択が勝手に戻ってしまう
-        if focused != self.focused_pane {
-            self.focused_pane = focused;
-            // navモード中の選択はユーザーの探索カーソルなので追従させない
-            //（フォーカスの記録だけは続ける。退場時の比較材料になる）
-            if !self.nav_mode {
-                if let Some(pane_id) = focused {
-                    if self.select_pane_id(pane_id) {
-                        self.broadcast_selection();
-                    }
-                }
+        // 可視化直後の1回は、キャッシュと同じフォーカスでも引き直す
+        let force = std::mem::take(&mut self.pending_focus_resync);
+        let follow = self.focus_to_follow(focused, force);
+        // navモード中に実フォーカスが動いた＝ユーザーは探索をやめて作業に
+        // 戻ったとみなす（要件: nav-mode / focus-sync）。navモード中のキーは
+        // 横取りしているので、これが起きる主な経路はマウスでのペイン選択。
+        // 横取りを解かないと、クリックした先で j/k がサイドバー操作として
+        // 食われ続ける
+        let interrupted = self.nav_mode && focused.is_some() && focused != self.focused_pane;
+        // フォーカスの記録は追従しない場合（navモード中など）も続ける。
+        // navモード退場時の「動いたか」の比較材料になる
+        self.focused_pane = focused;
+        if interrupted {
+            // ハイライトも実フォーカスへ揃う（離脱後は navモード外なので）
+            self.leave_nav_mode();
+        } else if let Some(pane_id) = follow {
+            if self.select_pane_id(pane_id) {
+                self.broadcast_selection();
             }
         }
         true
+    }
+
+    // 選択を引き直す先（要件: docs/requirements/focus-sync/）。
+    // `force` は可視化直後など、キャッシュを信用できないときに立てる
+    pub(crate) fn focus_to_follow(&self, focused: Option<u32>, force: bool) -> Option<u32> {
+        // navモード中の選択はユーザーの探索カーソルなので追従させない
+        if self.nav_mode {
+            return None;
+        }
+        let pane_id = focused?;
+        // **フォーカスが動いたときだけ**引き直す。PaneUpdate はペイン名の変化
+        // でも飛んでくるので、毎回引き直すと fujin_up / fujin_down で動かした
+        // 選択が勝手に戻ってしまう
+        if !force && focused == self.focused_pane {
+            return None;
+        }
+        Some(pane_id)
+    }
+
+    // 指定タブでフォーカス中のターミナルペイン（要件: focus-sync）。
+    //
+    // `get_focused_pane_info()` がプラグインペインを返したときの受け皿。
+    // 臨時召喚・コールドスタートの臨時サイドバー（決定16）は**自分が
+    // フローティング層のフォーカスを持つ**ため、問い合わせでは作業ペインが
+    // 分からず、追従も入場時の初期選択も効かなくなる（実測）。
+    //
+    // `PaneInfo.is_focused` は**レイヤごと**の意味（`data.rs:2302`
+    // "focused in its layer"）なので、フローティングが前面にあってもタイル層の
+    // フォーカスは一覧に残っている。作業ペインは通常タイルなのでそちらを優先し、
+    // 無ければフローティングのターミナルを拾う
+    pub(crate) fn focused_terminal_in_tab(&self, tab_position: usize) -> Option<u32> {
+        let panes = self.panes.as_ref()?.panes.get(&tab_position)?;
+        let mut floating = None;
+        for pane in panes {
+            if pane.is_plugin || pane.is_suppressed || !pane.is_focused {
+                continue;
+            }
+            if !pane.is_floating {
+                return Some(pane.id);
+            }
+            floating = Some(pane.id);
+        }
+        floating
     }
 
     // 自分のプラグインペインが指定タブに居るか。
