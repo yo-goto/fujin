@@ -255,9 +255,11 @@ impl State {
         // 検索中はクエリ入力行が主役。ヒントは右端へ寄せ、クエリが伸びて
         // ぶつかるところまで来たら入力中の文字列のほうを優先して落とす
         let query = format!("{}▏", search.query);
-        let hint_width = "?:help".chars().count();
+        // 余白は表示セル幅で数える。クエリに全角文字が入ると文字数とセル数が
+        // ずれ、ヒントが右端からはみ出す
+        let hint_width = UnicodeWidthStr::width("?:help");
         let pad = cols
-            .saturating_sub(query.chars().count() + 1) // 先頭の `/` のぶん
+            .saturating_sub(UnicodeWidthStr::width(query.as_str()) + 1) // 先頭の `/` のぶん
             .saturating_sub(hint_width);
         let mut segments = vec![("/", Ink::Tag), (query.as_str(), Ink::Plain)];
         let spacer = " ".repeat(pad);
@@ -287,7 +289,9 @@ impl State {
                 // キー列は幅を固定して説明の開始位置を揃える。キーが長すぎて
                 // はみ出す場合は空白1文字だけ空けて続ける（列は崩れるが、
                 // 説明が消えるよりはよい）
-                let pad = HELP_KEY_COLUMN.saturating_sub(keys.chars().count()).max(1);
+                let pad = HELP_KEY_COLUMN
+                    .saturating_sub(UnicodeWidthStr::width(*keys))
+                    .max(1);
                 let gap = " ".repeat(pad);
                 compose(
                     &[

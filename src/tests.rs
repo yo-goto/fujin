@@ -605,6 +605,22 @@ fn a_long_query_wins_over_the_help_hint() {
 }
 
 #[test]
+fn a_full_width_query_does_not_push_the_hint_off_the_edge() {
+    // 右寄せの余白は表示セル幅で数える。文字数で数えると全角のクエリで
+    // ヒントが端からはみ出す（docs/concept/ui-design.md のレイアウト規則）
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "日本語のペイン名");
+
+    let header = state.header_line(32);
+    assert!(
+        unicode_width::UnicodeWidthStr::width(header.content()) <= 32,
+        "{}",
+        header.content()
+    );
+}
+
+#[test]
 fn question_mark_opens_the_help_overlay() {
     for key in [
         KeyWithModifier::new(BareKey::Char('?')),
