@@ -33,10 +33,9 @@ jump to them with global keybindings.
 
 ## Status icons
 
-Every pane row carries a one-character state icon, and each state has its own
-color. **The legend lives in the plugin**: press `?` in nav mode and it sits
-right under the key list, so you can read it where you need it instead of
-coming back here.
+Every pane row starts with a one-character state icon, and each state has its
+own color. **The legend lives in the plugin**: press `?` in nav mode and it
+sits right under the key list, so you never have to come back here to read it.
 
 Two counters may follow the pane name: `+N` for active subagents, `[N]` for
 incomplete tasks.
@@ -317,8 +316,9 @@ ordinary shell pane won't match on cwd.
 
 The sidebar is 32 columns wide, which is not enough to spell out every key, so
 the always-visible hints are limited to `?:help` and `esc:exit` in the header.
-Pressing `?` replaces the whole sidebar with the key list; any key closes it and
-brings back whatever was on screen before (nav mode or the search sub-mode). The
+Pressing `?` keeps the header and footer in place and replaces the tree with the
+key list plus the status icon legend; any key closes it and brings back whatever
+was on screen before (nav mode or the search sub-mode). The
 key you press to close is not acted on, so press it again afterwards if you meant
 it as a command. Nav mode stays active the whole time.
 
