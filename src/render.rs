@@ -322,9 +322,11 @@ impl State {
 
                 // cwd はペイン行に混ぜず、続く1行として出す（決定22）。
                 // show_cwd が false でも、cwd に一致した行だけは出す —
-                // 画面に無い文字列でヒットしたように見せないため
+                // 画面に無い文字列でヒットしたように見せないため。
+                // ただしペイン名フォールバック中の行では出さない。ペイン名の位置に
+                // 既に同じパスが出ており、2行並べても情報が増えない（決定26）
                 let cwd_hit = hit.filter(|h| h.field == Field::Cwd);
-                if self.show_cwd || cwd_hit.is_some() {
+                if (self.show_cwd || cwd_hit.is_some()) && self.title_fallback(entry).is_none() {
                     if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
                         rows.push(Row::Cwd {
                             entry,
@@ -707,6 +709,26 @@ impl State {
         text
     }
 
+    // ペイン行に出す名前（決定26）。ペイン名が空のときだけ cwd を代わりに出す。
+    //
+    // claude は終了時に空文字のタイトルを OSC で送り、zellij 側にそれを戻す経路が
+    // 無いため、エージェントを落とした瞬間にペイン名が空のまま残る
+    // （docs/issues/pane-title-blank-on-exit.md）。前回の名前を保持すると死んだ
+    // エージェントが動いているように見えるので、いまそこに何があるかが分かる cwd へ落とす
+    pub(crate) fn display_title<'a>(&'a self, entry: &'a Selectable) -> &'a str {
+        self.title_fallback(entry).unwrap_or(&entry.title)
+    }
+
+    // ペイン名フォールバックが効いているならその cwd。空でないペイン名はそのまま
+    // 出すし（決定19）、cwd を持たないペインは空欄のままにする
+    fn title_fallback(&self, entry: &Selectable) -> Option<&str> {
+        if entry.title.trim().is_empty() {
+            self.pane_cwds.get(&entry.pane_id).map(String::as_str)
+        } else {
+            None
+        }
+    }
+
     // ペイン行1行ぶんの Text を組み立てる（状態アイコン・ペイン名・カウンタ列・
     // ハイライト込み）。cwd は別行なのでここには出てこない（決定22）。
     //
@@ -744,8 +766,10 @@ impl State {
         // 右マージンぶんは文字を置かない。カウンタ列もそこまでで揃える
         let inner = content_cols(cols);
         let title_budget = inner.saturating_sub(reserved);
-        let title_original_len = entry.title.chars().count();
-        let (title, title_dropped) = fold_to_width(&entry.title, title_budget);
+        let fallback = self.title_fallback(entry);
+        let source = fallback.unwrap_or(&entry.title);
+        let title_original_len = source.chars().count();
+        let (title, title_dropped) = fold_to_width(source, title_budget);
 
         let mut label = format!("{}{}", head, title);
         if !counters.is_empty() {
@@ -766,8 +790,15 @@ impl State {
 
         // ハイライトする場所が、そのままヒットしたフィールドの提示になる。
         // ペイン名は行全体とは別の予算で畳んでいるので、可視範囲も
-        // ペイン名自身の畳んだ結果から判定する
-        let highlight = hit.filter(|h| h.field == Field::Title).map(|hit| {
+        // ペイン名自身の畳んだ結果から判定する。
+        // ペイン名フォールバック中はこの位置に出ているのが cwd なので、
+        // 拾うヒットも cwd のものに切り替える（決定26）
+        let field = if fallback.is_some() {
+            Field::Cwd
+        } else {
+            Field::Title
+        };
+        let highlight = hit.filter(|h| h.field == field).map(|hit| {
             fold_highlight_indices(
                 &hit.indices,
                 &title,
@@ -840,7 +871,8 @@ impl State {
         } else {
             head_width + COLUMN_GAP + tab_column
         };
-        let (title, _) = fold_to_width(&entry.title, inner.saturating_sub(reserved));
+        // ペイン行と同じく、ペイン名が空なら cwd を代わりに出す（決定26）
+        let (title, _) = fold_to_width(self.display_title(entry), inner.saturating_sub(reserved));
 
         let mut label = format!("{}{}", head, title);
         let mut tab_span = None;

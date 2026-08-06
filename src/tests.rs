@@ -2135,6 +2135,142 @@ fn the_cwd_row_keeps_the_tail_of_the_path() {
     assert!(unicode_width::UnicodeWidthStr::width(content) <= CONTENT);
 }
 
+// --- ペイン名フォールバック（決定26） ---
+//
+// claude は終了時に空のタイトルを OSC で送るため、エージェントを落とした瞬間に
+// ペイン名が空のまま残る（docs/issues/pane-title-blank-on-exit.md）
+
+#[test]
+fn an_empty_pane_name_falls_back_to_the_cwd() {
+    let mut state = state_with_one_pane("");
+    state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    assert!(
+        text.content().contains("fujin"),
+        "ペイン名の位置に cwd を出す: {}",
+        text.content()
+    );
+}
+
+#[test]
+fn a_pane_name_that_is_only_spaces_falls_back_too() {
+    let mut state = state_with_one_pane("   ");
+    state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    assert!(text.content().contains("fujin"), "{}", text.content());
+}
+
+#[test]
+fn a_non_empty_pane_name_is_left_alone() {
+    // 決定19（生のペイン名をそのまま出す）は空でないときは変わらない
+    let mut state = state_with_one_pane("claude-worker");
+    state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    let content = text.content();
+    assert!(content.contains("claude-worker"), "{}", content);
+    assert!(
+        !content.contains("fujin"),
+        "cwd で上書きしない: {}",
+        content
+    );
+}
+
+#[test]
+fn an_empty_pane_name_without_a_cwd_stays_blank() {
+    // 落とす先が無いペインは空欄のまま。名前を捏造しない
+    let state = state_with_one_pane("");
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        SIDEBAR,
+    );
+    assert_eq!(text.content().trim(), "", "{}", text.content());
+}
+
+#[test]
+fn the_cwd_row_is_dropped_while_the_pane_name_falls_back() {
+    // 同じパスが2行並んでも情報が増えない
+    let mut state = state_with_one_pane("");
+    state.show_cwd = true;
+    state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
+
+    let rows = state.visible_rows();
+    assert!(
+        !rows.iter().any(|r| matches!(r, Row::Cwd { .. })),
+        "cwd行は出さない"
+    );
+    assert_eq!(
+        rows.len(),
+        HEADER_ROWS + 2,
+        "ヘッダ・タブ見出し行・ペイン行だけ"
+    );
+}
+
+#[test]
+fn a_falling_back_pane_row_still_matches_on_the_cwd() {
+    // 生のペイン名は空なので、当たるのは cwd。ハイライトはペイン名の位置に
+    // 出ている cwd 側へ載るため、ここでも cwd行は足さない
+    let mut state = state_with_one_pane("");
+    state.nav_mode = true;
+    state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "fujin");
+
+    let rows = state.visible_rows();
+    assert!(
+        rows.iter().any(|r| matches!(r, Row::Pane { .. })),
+        "cwd 一致でペイン行が残る"
+    );
+    assert!(!rows.iter().any(|r| matches!(r, Row::Cwd { .. })));
+    // ハイライト位置の算出（畳んだ cwd への index 付け替え）を通す
+    state.render(SIDEBAR, 10);
+}
+
+#[test]
+fn triage_rows_fall_back_to_the_cwd_too() {
+    let mut state = state_with_one_pane("");
+    state.nav_mode = true;
+    set_agent_state(&mut state, 1, AgentState::Blocked);
+    state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
+    state.handle_nav_key(key(BareKey::Char('p')));
+
+    let rows = state.visible_rows();
+    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
+        panic!("トリアージ行が無い: {}", rows.len());
+    };
+    let text = state.triage_row(entry, tab_name, false, tab_column, SIDEBAR);
+    assert!(
+        text.content().contains("fujin"),
+        "トリアージ行でも cwd へ落とす: {}",
+        text.content()
+    );
+}
+
 #[test]
 fn the_cwd_row_survives_a_sidebar_narrower_than_its_indent() {
     // 字下げより狭い幅でも算術が破綻しない
