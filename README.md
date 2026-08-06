@@ -196,10 +196,10 @@ See [Usage](#usage) for what the mode does.
 If you'd rather move with a single keystroke:
 
 ```kdl
-bind "Alt Up" {
+bind "Alt u" {
     MessagePlugin "fujin" { name "fujin_up"; }
 }
-bind "Alt Down" {
+bind "Alt d" {
     MessagePlugin "fujin" { name "fujin_down"; }
 }
 bind "Alt g" {

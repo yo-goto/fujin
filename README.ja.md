@@ -184,10 +184,10 @@ bind "Ctrl y" {
 1打鍵で動かしたい場合はこちらです:
 
 ```kdl
-bind "Alt Up" {
+bind "Alt u" {
     MessagePlugin "fujin" { name "fujin_up"; }
 }
-bind "Alt Down" {
+bind "Alt d" {
     MessagePlugin "fujin" { name "fujin_down"; }
 }
 bind "Alt g" {
