@@ -1,7 +1,8 @@
 // サイドバーの描画。
 //
 // レイアウト（決定27）: 境界線 → ヘッダー(1行) → 境界線 → ツリー(可変) →
-// 境界線 → フッター(1行) の5要素からなる固定枠。要件は
+// 境界線 → フッター(1行) の5要素からなる固定枠（最下部にもう1行、zellij 本体の
+// status-bar と離すための余白が付く）。要件は
 // docs/requirements/sidebar-tree/sidebar-header.feature（ヘッダー・枠構造）と
 // sidebar-footer.feature（フッター）。ツリーの中身はタブ見出し行 > 配下の
 // ペイン行 をタブ順で縦に並べたもの。
@@ -37,9 +38,10 @@ pub(crate) enum Row<'a> {
     Divider,
     // フッター。いまの状態で使えるコマンドを1行で出す。空にはならない
     Footer,
-    // ツリーが画面高に届かないときの余白。下の枠を最下部へ押し下げるために
-    // 高さだけを占め、何も描かない（要件: sidebar-footer.feature の
-    // 「フッタの高さと位置はモードによらず常に同じ」）
+    // 高さだけを占めて何も描かない行。2箇所で使う:
+    //  - ツリーが画面高に届かないときの埋め草（下の枠を最下部へ押し下げる。
+    //    要件: sidebar-footer.feature の「フッタの高さと位置はモードによらず常に同じ」）
+    //  - フッターと zellij 本体の status-bar のあいだに空ける最下部の1行
     Blank,
     // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
     // 開いている間は content（ツリー）がこの行に置き換わる。枠は出したまま
@@ -96,8 +98,12 @@ const HELP_INDENT: usize = 2;
 const HEADER_INDENT: usize = 2;
 // 枠のうち、ツリーの上に固定される行数（境界線・ヘッダー・境界線）
 const FRAME_TOP: usize = 3;
-// 枠のうち、ツリーの下に固定される行数（境界線・フッター）
-const FRAME_BOTTOM: usize = 2;
+// 枠のうち、ツリーの下に固定される行数（境界線・フッター・余白）。
+//
+// 最下部に空行を1つ噛ませるのは、サイドバーのすぐ下が zellij 本体の
+// status-bar だから。詰めて置くとフッターの文字が status-bar に貼り付いて
+// 読みにくい（右端に2セル空けるのと同じ理由を、下端にも効かせる）
+const FRAME_BOTTOM: usize = 3;
 // cwd行の字下げ。ペイン名の開始位置（4セル）よりさらに右へ寄せて、
 // 隣のペイン行ではなく「上のペイン行の続き」として読ませる
 const CWD_INDENT: usize = 6;
@@ -268,6 +274,8 @@ impl State {
         rows.extend(content);
         rows.push(Row::Divider);
         rows.push(Row::Footer);
+        // status-bar との間に空ける1行（FRAME_BOTTOM のコメント参照）
+        rows.push(Row::Blank);
         rows
     }
 

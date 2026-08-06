@@ -856,8 +856,12 @@ fn assert_frame(rows: &[Row<'_>], label: &str) {
     );
     assert!(
         matches!(
-            (&rows[rows.len() - 2], &rows[rows.len() - 1]),
-            (Row::Divider, Row::Footer)
+            (
+                &rows[rows.len() - 3],
+                &rows[rows.len() - 2],
+                &rows[rows.len() - 1]
+            ),
+            (Row::Divider, Row::Footer, Row::Blank)
         ),
         "{} で下の枠が崩れた",
         label
@@ -2049,8 +2053,8 @@ const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定3）
                            // ツリーの上に常時居る枠（境界線・ヘッダー・境界線）。ツリーの行番号は
                            // すべてこの下から数える（要件: sidebar-header.feature）
 const HEADER_ROWS: usize = 3;
-// ツリーの下に常時居る枠（境界線・フッター。要件: sidebar-footer.feature）
-const FOOTER_ROWS: usize = 2;
+// ツリーの下に常時居る枠（境界線・フッター・status-bar と離すための余白）
+const FOOTER_ROWS: usize = 3;
 const CONTENT: usize = SIDEBAR - 2; // 右マージン2セルを除いた、文字を置ける幅
 
 // 1ペインだけを持つ状態。ペイン名を指定して作る
@@ -2594,9 +2598,10 @@ fn scrolling_keeps_everything_in_place_when_it_all_fits() {
     assert!(overflow_markers(&state, 40).is_empty());
     let screen = state.screen_rows(40);
     assert_eq!(screen.len(), 40, "画面高ぶんを返す（余りは空行）");
+    // 空行は埋め草と最下部の余白なので、中身の行数からは外して数える
     assert_eq!(
         screen.iter().filter(|r| !matches!(r, Row::Blank)).count(),
-        HEADER_ROWS + 13 + FOOTER_ROWS,
+        HEADER_ROWS + 13 + (FOOTER_ROWS - 1),
         "中身の行数は変わらない"
     );
 }
@@ -2605,8 +2610,8 @@ fn scrolling_keeps_everything_in_place_when_it_all_fits() {
 fn the_selection_never_leaves_the_screen() {
     // 「見えない行へ選択だけが進む」のが元の不具合。上下どちらへ動かしても
     // 選択行が画面に残ることを、全行ぶん確かめる
-    // 枠5行 + 一覧5行。枠が2行増えたぶん、旧テストの8行から引き上げてある
-    const ROWS: usize = 10;
+    // 枠6行 + 一覧5行。枠が増えたぶん、旧テストの8行から引き上げてある
+    const ROWS: usize = 11;
     let mut state = overflowing_state();
 
     for _ in 0..11 {
@@ -2635,8 +2640,8 @@ fn the_selection_never_leaves_the_screen() {
 #[test]
 fn the_cwd_row_stays_with_its_pane_row_at_the_bottom_edge() {
     // ペイン行だけが入って cwd行が切れると、選択の帯が画面の端で切れて見える
-    // 枠5行 + 一覧5行。枠が2行増えたぶん、旧テストの8行から引き上げてある
-    const ROWS: usize = 10;
+    // 枠6行 + 一覧5行。枠が増えたぶん、旧テストの8行から引き上げてある
+    const ROWS: usize = 11;
     let mut state = overflowing_state();
     state.show_cwd = true;
     state.pane_cwds.insert(5, "/work/fujin".to_string());
@@ -2670,7 +2675,7 @@ fn the_footer_sits_at_the_bottom_edge_even_when_the_tree_is_short() {
     );
     // 空行はクリックの対象にならない（要件: click-to-focus と食い違わせない）
     assert_eq!(state.pane_at_row(HEADER_ROWS + 3), None);
-    assert_eq!(state.pane_at_row(19), None, "フッターも対象外");
+    assert_eq!(state.pane_at_row(19), None, "最下部の余白も対象外");
 }
 
 #[test]
@@ -2709,8 +2714,8 @@ fn the_overflow_marker_sits_in_the_tab_heading_column() {
 
 #[test]
 fn overflow_markers_report_the_hidden_rows() {
-    // 枠5行 + 一覧5行。枠が2行増えたぶん、旧テストの8行から引き上げてある
-    const ROWS: usize = 10;
+    // 枠6行 + 一覧5行。枠が増えたぶん、旧テストの8行から引き上げてある
+    const ROWS: usize = 11;
     let mut state = overflowing_state();
 
     // 先頭を選択中: 下だけが隠れる。ヘッダ3 + タブ見出し1 + ペイン3 + 下端マーカー1 = 8行
@@ -2740,8 +2745,8 @@ fn overflow_markers_report_the_hidden_rows() {
 #[test]
 fn clicking_follows_the_scrolled_layout() {
     // 描画とクリックの逆引きが同じ切り出しを見ていないと行がずれる
-    // 枠5行 + 一覧5行。枠が2行増えたぶん、旧テストの8行から引き上げてある
-    const ROWS: usize = 10;
+    // 枠6行 + 一覧5行。枠が増えたぶん、旧テストの8行から引き上げてある
+    const ROWS: usize = 11;
     let mut state = overflowing_state();
     state.nav_mode = false;
     state.selected = 11;
@@ -2759,8 +2764,8 @@ fn clicking_follows_the_scrolled_layout() {
 
 #[test]
 fn scroll_stays_within_the_list_when_panes_disappear() {
-    // 枠5行 + 一覧5行。枠が2行増えたぶん、旧テストの8行から引き上げてある
-    const ROWS: usize = 10;
+    // 枠6行 + 一覧5行。枠が増えたぶん、旧テストの8行から引き上げてある
+    const ROWS: usize = 11;
     let mut state = overflowing_state();
     state.selected = 11;
     state.render(ROWS, 32);
