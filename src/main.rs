@@ -33,7 +33,8 @@ mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zellij_tile::prelude::actions::Action;
+use std::str::FromStr;
+
 use zellij_tile::prelude::*;
 
 use agent::{AgentInfo, StatusPayload};
@@ -66,16 +67,21 @@ const DISMISS_PIPE: &str = "fujin_dismiss";
 // "true" で起動したインスタンスは、準備でき次第 navモードへ入る
 const SUMMONED_CONFIG_KEY: &str = "summoned";
 
-// 非フォーカス時のフッターに出す direct-keys のヒント（決定27。要件:
+// 非フォーカス時のフッターに出す direct-keys のヒント（決定27・決定28。要件:
 // docs/requirements/sidebar-tree/sidebar-footer.feature）。
-// `(pipe名, 動作の説明, 幅が足りないときの代替表記)` で、配列の順がそのまま表示順。
+// `(configuration キー, 動作の説明, 幅が足りないときの代替表記)` で、
+// 配列の順がそのまま表示順。
+//
+// キーの実体は configuration から受け取る。zellij 0.44.3 のプラグインAPIは
+// `Action::KeybindPipe` の中身（どの pipe 宛てか）を捨てて渡すため、実際の
+// 割り当てから解決する当初案は実装できなかった（決定28）。
 //
 // 矢印は「東アジア文字幅が曖昧な記号をキー表記に使わない」というUI規則の例外で、
 // 幅28セルに3項目が収まらないときだけ使う（`jump` に対応する矢印は無い）
 pub(crate) const DIRECT_KEY_HINTS: [(&str, &str, Option<&str>); 3] = [
-    (NAV_UP_PIPE, "up", Some("↑")),
-    (NAV_DOWN_PIPE, "down", Some("↓")),
-    (NAV_GO_PIPE, "jump", None),
+    ("up_key", "up", Some("↑")),
+    ("down_key", "down", Some("↓")),
+    ("go_key", "jump", None),
 ];
 
 // サイドバーに並べる選択対象（ターミナルペイン1つぶん）
@@ -150,9 +156,9 @@ struct State {
     // 直近に描画した画面高。行クリックの逆引き（pane_at_row）が描画と同じ
     // 表示範囲を再現するために要る。0 は「まだ一度も描いていない」
     viewport_rows: usize,
-    // direct-keys方式（決定6）の pipe名 -> 実際に割り当てられている物理キーの表記。
-    // フッターのヒントに使う（決定27）。Event::InitialKeybinds から解決するので、
-    // 割り当てが無い pipe はキーを持たない
+    // direct-keys方式（決定6）の configuration キー -> 画面に出すキー表記。
+    // フッターのヒントに使う（決定27・決定28）。書かれていない項目は持たない
+    // ＝ヒントからその項目だけが省かれる
     direct_keys: BTreeMap<String, String>,
 }
 
@@ -164,6 +170,7 @@ impl ZellijPlugin for State {
             .get("show_cwd")
             .map(|v| v == "true")
             .unwrap_or(false);
+        self.adopt_direct_key_hints(&configuration);
         // 別インスタンスに召喚されたフローティングなら、入場pipeを取り逃している。
         // 押し直させずに済むよう、準備でき次第こちらから navモードへ入る（決定16）
         self.summoned = configuration
@@ -200,9 +207,6 @@ impl ZellijPlugin for State {
             EventType::Mouse,
             // プラグイン終了・リロード時に横取りを解除する保険
             EventType::BeforeClose,
-            // フッターに出す direct-keys のヒントを実際の割り当てから解決する
-            //（決定27。要件: sidebar-footer）
-            EventType::InitialKeybinds,
         ]);
         // 注意: set_selectable(false) はここでは呼ばない。呼ぶと権限承認
         // プロンプトにフォーカスできず承認不能になる。
@@ -270,9 +274,6 @@ impl ZellijPlugin for State {
                 self.enter_nav_mode_if_pending();
                 true
             }
-            // 起動時と設定変更（reconfigure / rebind_keys）のたびに、物理キーと
-            // アクションの全対応表が届く。フッターのヒントはここからしか作れない
-            Event::InitialKeybinds(keybinds) => self.learn_direct_keys(&keybinds),
             Event::BeforeClose => {
                 // 横取りしたままプラグインが消えるとキー入力が戻らなくなる。
                 // exit_nav_mode() は使わない。閉じられている最中に自分を
@@ -531,45 +532,28 @@ impl State {
         floating
     }
 
-    // フッターに出す direct-keys のヒントを、実際の割り当てから解決する
-    //（決定27。要件: sidebar-footer）。戻り値は表示が変わるか。
+    // フッターに出す direct-keys のヒントを configuration から取り込む
+    //（決定28。要件: sidebar-footer）。
     //
     // ユーザーは config.kdl で任意の物理キーに `fujin_up` 等を割り当てる方式なので
-    //（決定6）、プラグイン側に決め打ちできる既定キーが無い。`InitialKeybinds` は
-    // 「物理キー -> アクション」の全対応表で、これだけが実際の割り当てを知る手段。
-    //
-    // 拾うのは `MessagePlugin` 由来の `Action::KeybindPipe` の **name**。
-    // fujin の pipe ハンドラが振り分けに見ているのも pipe名（`PipeMessage::name`）で、
-    // `payload` に同じ文字列を入れても実際には動かないため、そちらは見ない
-    fn learn_direct_keys(&mut self, keybinds: &KeybindsVec) -> bool {
-        let mut found: BTreeMap<String, String> = BTreeMap::new();
-        // Normal モードの割り当てを先に拾う。ツリー表示（＝非フォーカス、
-        // フッターにこのヒントが出ている状態）でユーザーが居るのは Normal なので、
-        // 同じ pipe が複数モードに割り当たっていてもそこで打てるキーを出す
-        for normal_pass in [true, false] {
-            for (mode, binds) in keybinds {
-                if (*mode == InputMode::Normal) != normal_pass {
-                    continue;
-                }
-                for (key, actions) in binds {
-                    for action in actions {
-                        let Action::KeybindPipe {
-                            name: Some(name), ..
-                        } = action
-                        else {
-                            continue;
-                        };
-                        if !DIRECT_KEY_HINTS.iter().any(|(pipe, _, _)| pipe == name) {
-                            continue;
-                        }
-                        found.entry(name.clone()).or_insert_with(|| format_key(key));
-                    }
-                }
+    //（決定6）、プラグイン側に決め打ちできる既定キーが無い。当初は
+    // `Event::InitialKeybinds` から実際の割り当てを解決する設計だったが、zellij
+    // 0.44.3 のプラグインAPIは `Action::KeybindPipe` の `name`/`payload` を捨てて
+    // 渡すため（`zellij-utils/src/plugin_api/action.rs`。どのキーが「何らかの
+    // プラグインpipe」に割り当たっているかまでしか分からない）実装できなかった。
+    // 代わりに、割り当てたキーの**表記だけ**を設定として受け取る（決定28）
+    fn adopt_direct_key_hints(&mut self, configuration: &BTreeMap<String, String>) {
+        self.direct_keys.clear();
+        for (setting, _, _) in DIRECT_KEY_HINTS {
+            let Some(raw) = configuration.get(setting).map(|v| v.trim()) else {
+                continue;
+            };
+            if raw.is_empty() {
+                continue;
             }
+            self.direct_keys
+                .insert(setting.to_string(), normalize_key(raw));
         }
-        let changed = found != self.direct_keys;
-        self.direct_keys = found;
-        changed
     }
 
     // 自分のプラグインペインが指定タブに居るか。
@@ -586,13 +570,30 @@ impl State {
     }
 }
 
+// 設定で受け取ったキー表記を画面用に整える（決定28）。
+//
+// 受けるのは zellij のキーバインド表記（`Alt u`）でも fujin の画面表記
+// （`alt+u`）でもよい。ユーザーは config.kdl の `bind "Alt u"` からコピーする
+// ことになるので、そのまま貼れないと使いにくい。
+//
+// 解釈できない値はそのまま出す。黙って落とすとヒントが1つ消えるだけになり、
+// 設定を間違えたことに気づけない
+pub(crate) fn normalize_key(raw: &str) -> String {
+    // zellij のパーサは修飾キーを空白区切りで読む。`+` 区切りも受けたいので均す
+    let spaced = raw.replace('+', " ");
+    match KeyWithModifier::from_str(&spaced) {
+        Ok(key) => format_key(&key),
+        Err(_) => raw.to_string(),
+    }
+}
+
 // キーの画面表記（docs/concept/ui-design.md の「文言」）。すべて小文字で、
 // 修飾キーは `shift+tab` のように `+` でつなぐ。
 //
 // `KeyWithModifier` の Display は使えない — 修飾キーを空白でつなぐうえ、
 // 大文字（`ESC`）や矢印（`↑`）を返す。矢印は東アジア文字幅が曖昧でキー列の
 // 位置揃えを崩すので、fujin ではキー表記に使わない
-pub(crate) fn format_key(key: &KeyWithModifier) -> String {
+fn format_key(key: &KeyWithModifier) -> String {
     let mut out = String::new();
     for modifier in &key.key_modifiers {
         out.push_str(&modifier.to_string().to_lowercase());

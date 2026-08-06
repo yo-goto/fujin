@@ -345,12 +345,33 @@ it as a command. Nav mode stays active the whole time.
 plugins {
     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
         show_cwd "true"   // show cwd on each pane row (default: false)
+
+        // Keys shown in the sidebar footer while it is unfocused.
+        // Write the same keys you bound to fujin_up / fujin_down / fujin_go.
+        up_key   "Alt u"
+        down_key "Alt d"
+        go_key   "Alt g"
     }
 }
 ```
 
 Since `cwd` comes from the hook payload, it's only shown for agent panes that
 have the hook configured.
+
+### Footer key hints
+
+`up_key` / `down_key` / `go_key` are display-only: they tell the footer what to
+print, they don't bind anything. Bind the keys as usual (see
+[Direct keys](#direct-keys-no-mode)) and repeat them here.
+
+Yes, that means writing the same key twice. fujin can't read the binding back:
+zellij hands plugins the *fact* that a key is bound to some plugin pipe, but
+drops which pipe it targets, so there is no way to tell `fujin_up` apart from
+`fujin_go`. Leaving one out just omits that one hint.
+
+Both spellings work — zellij's own `"Alt u"` and the way fujin prints it,
+`"alt+u"`. The footer normalizes them to `alt+u`. A value fujin can't parse is
+printed as written, so a typo is visible rather than silently dropped.
 
 ### Don't put settings only on the layout side
 

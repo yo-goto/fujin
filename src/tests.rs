@@ -696,52 +696,20 @@ fn ink_at(text: &Text, level: usize) -> Vec<usize> {
 
 const DIM_LEVEL: usize = 4;
 
-// Event::InitialKeybinds が運ぶ「物理キー -> アクション」の対応表。
-// config.kdl の `MessagePlugin` は Action::KeybindPipe に変換され、pipe名が
-// `name` に入る（`payload` ではない — fujin の振り分けも pipe名で行っている）
-fn keybinds(binds: &[(InputMode, KeyWithModifier, &str)]) -> KeybindsVec {
-    let mut table: KeybindsVec = Vec::new();
-    for (mode, key, pipe) in binds {
-        let action = Action::KeybindPipe {
-            name: Some(pipe.to_string()),
-            payload: None,
-            args: None,
-            plugin: Some("fujin".to_string()),
-            plugin_id: None,
-            configuration: None,
-            launch_new: false,
-            skip_cache: false,
-            floating: Some(true),
-            in_place: None,
-            cwd: None,
-            pane_title: None,
-        };
-        match table.iter_mut().find(|(m, _)| m == mode) {
-            Some((_, list)) => list.push((key.clone(), vec![action])),
-            None => table.push((*mode, vec![(key.clone(), vec![action])])),
-        }
-    }
-    table
+// direct-keys のヒント設定（decision28。configuration 経由で受け取る）
+fn direct_key_config(binds: &[(&str, &str)]) -> BTreeMap<String, String> {
+    binds
+        .iter()
+        .map(|(setting, key)| (setting.to_string(), key.to_string()))
+        .collect()
 }
 
 // READMEが例示している direct-keys の割り当て（Alt Up / Alt Down / Alt g）
 fn with_direct_keys(state: &mut State) {
-    state.learn_direct_keys(&keybinds(&[
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Up).with_alt_modifier(),
-            NAV_UP_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Down).with_alt_modifier(),
-            NAV_DOWN_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Char('g')).with_alt_modifier(),
-            NAV_GO_PIPE,
-        ),
+    state.adopt_direct_key_hints(&direct_key_config(&[
+        ("up_key", "alt+up"),
+        ("down_key", "alt+down"),
+        ("go_key", "alt+g"),
     ]));
 }
 
@@ -909,30 +877,46 @@ fn the_divider_leaves_the_right_margin() {
 // --- フッター（決定27。要件: sidebar-footer.feature） ---
 
 #[test]
-fn the_footer_shows_the_direct_keys_actually_bound() {
-    // 決め打ちのキー表記はユーザーの設定と食い違いうるので、InitialKeybinds から
-    // 解決した実際の割り当てを出す
+fn the_footer_shows_the_configured_direct_keys() {
+    // 決め打ちのキー表記はユーザーの設定と食い違いうるので、実際に割り当てた
+    // キーの表記を configuration から受け取って出す（決定28）
     let mut state = state_with_panes(2);
-    state.learn_direct_keys(&keybinds(&[
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::F(1)),
-            NAV_UP_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::F(2)),
-            NAV_DOWN_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::F(3)),
-            NAV_GO_PIPE,
-        ),
+    state.adopt_direct_key_hints(&direct_key_config(&[
+        ("up_key", "f1"),
+        ("down_key", "f2"),
+        ("go_key", "f3"),
     ]));
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
     assert_eq!(footer, "  f1:up  f2:down  f3:jump");
+}
+
+#[test]
+fn the_zellij_spelling_of_a_key_is_accepted_as_is() {
+    // ユーザーは config.kdl の `bind "Alt u"` からコピーしてくる。そのまま
+    // 貼れないと使いにくいので、空白区切りの zellij 表記も受けて画面表記へ均す
+    let mut state = state_with_panes(2);
+    for (written, shown) in [
+        ("Alt u", "  alt+u:up"),
+        ("alt+u", "  alt+u:up"),
+        ("Ctrl Shift g", "  ctrl+shift+g:up"),
+        ("PageUp", "  pgup:up"),
+        ("Enter", "  enter:up"),
+    ] {
+        state.adopt_direct_key_hints(&direct_key_config(&[("up_key", written)]));
+        assert_eq!(state.footer_line(SIDEBAR).content(), shown, "{}", written);
+    }
+}
+
+#[test]
+fn an_unreadable_key_setting_is_shown_as_written() {
+    // 黙って落とすとヒントが1つ消えるだけになり、設定を間違えたことに
+    // 気づけない。読めない値はそのまま出して気づかせる
+    let mut state = state_with_panes(2);
+    state.adopt_direct_key_hints(&direct_key_config(&[("up_key", "Meta q")]));
+
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert_eq!(footer, "  Meta q:up");
 }
 
 #[test]
@@ -949,89 +933,41 @@ fn direct_key_hints_are_dropped_whole_rather_than_truncated() {
 }
 
 #[test]
-fn a_rebound_direct_key_moves_the_footer_hint_with_it() {
+fn an_unset_direct_key_drops_only_its_own_hint() {
     let mut state = state_with_panes(2);
-    state.learn_direct_keys(&keybinds(&[(
-        InputMode::Normal,
-        KeyWithModifier::new(BareKey::Char('k')).with_ctrl_modifier(),
-        NAV_UP_PIPE,
-    )]));
-
-    let footer = state.footer_line(SIDEBAR).content().to_string();
-    assert!(footer.contains("ctrl+k:up"), "{}", footer);
-}
-
-#[test]
-fn an_unbound_direct_key_drops_only_its_own_hint() {
-    let mut state = state_with_panes(2);
-    state.learn_direct_keys(&keybinds(&[
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Up).with_alt_modifier(),
-            NAV_UP_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Down).with_alt_modifier(),
-            NAV_DOWN_PIPE,
-        ),
+    state.adopt_direct_key_hints(&direct_key_config(&[
+        ("up_key", "alt+up"),
+        ("down_key", "alt+down"),
     ]));
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
-    assert!(
-        !footer.contains("jump"),
-        "未バインドの項目は省く: {}",
-        footer
-    );
+    assert!(!footer.contains("jump"), "設定の無い項目は省く: {}", footer);
     assert!(footer.contains("alt+up:up"), "{}", footer);
     assert!(footer.contains("alt+down:down"), "{}", footer);
 }
 
 #[test]
-fn the_normal_mode_binding_wins_when_the_same_pipe_is_bound_twice() {
-    // 非フォーカス時にユーザーが居るのは Normal。そこで打てるキーを出す
+fn an_empty_direct_key_setting_is_treated_as_unset() {
     let mut state = state_with_panes(2);
-    state.learn_direct_keys(&keybinds(&[
-        (
-            InputMode::Pane,
-            KeyWithModifier::new(BareKey::Char('u')),
-            NAV_UP_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Up).with_alt_modifier(),
-            NAV_UP_PIPE,
-        ),
+    state.adopt_direct_key_hints(&direct_key_config(&[
+        ("up_key", "  "),
+        ("down_key", "alt+d"),
     ]));
 
-    let footer = state.footer_line(SIDEBAR).content().to_string();
-    assert!(footer.contains("alt+up:up"), "{}", footer);
-    assert!(!footer.contains("u:up"), "{}", footer);
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  alt+d:down");
 }
 
 #[test]
 fn long_direct_keys_fall_back_to_arrows() {
     // 実キーの長さはユーザー依存。英字表記が28セルに収まらないときだけ、
-    // up/down を矢印へ落とす（jump に対応する矢印記号は無いので残す）
+    // up/down を矢印へ落とす（jump に対応する矢印記号は無いので残す）。
     // `pgup:up  pgdn:down  alt+g:jump` は30セルで28に収まらないが、
     // 矢印にすれば26セルで3項目とも残る
     let mut state = state_with_panes(2);
-    state.learn_direct_keys(&keybinds(&[
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::PageUp),
-            NAV_UP_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::PageDown),
-            NAV_DOWN_PIPE,
-        ),
-        (
-            InputMode::Normal,
-            KeyWithModifier::new(BareKey::Char('g')).with_alt_modifier(),
-            NAV_GO_PIPE,
-        ),
+    state.adopt_direct_key_hints(&direct_key_config(&[
+        ("up_key", "PageUp"),
+        ("down_key", "PageDown"),
+        ("go_key", "alt+g"),
     ]));
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
