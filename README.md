@@ -33,15 +33,13 @@ jump to them with global keybindings.
 
 ## Status icons
 
-| Icon | State | Meaning |
-|---|---|---|
-| `»` | working | processing a prompt |
-| `◆` | blocked | waiting for permission / input (needs attention) |
-| `●` | done | turn finished (unread) |
-| `×` | error | API error / tool failure |
-| `○` | idle | agent starting up / waiting |
-| `+N` | — | number of active subagents |
-| `[N]` | — | number of incomplete tasks |
+Every pane row carries a one-character state icon, and each state has its own
+color. **The legend lives in the plugin**: press `?` in nav mode and it sits
+right under the key list, so you can read it where you need it instead of
+coming back here.
+
+Two counters may follow the pane name: `+N` for active subagents, `[N]` for
+incomplete tasks.
 
 `done` / `blocked` / `error` are **cleared automatically once you focus that
 pane** (a read-receipt model). Only the ones you haven't attended to stay lit.

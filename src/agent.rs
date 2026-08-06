@@ -20,13 +20,38 @@ pub(crate) enum AgentState {
 }
 
 impl AgentState {
+    // 状態アイコン凡例（決定25）に並べる順。緊急度（`triage_rank`）ではなく
+    // 起動→実行→待ち→完了という素直な遷移の順にする。凡例は「どの記号が何か」を
+    // 引くための表なので、優先度の主張はしない
+    pub(crate) const ALL: [AgentState; 5] = [
+        AgentState::Idle,
+        AgentState::Working,
+        AgentState::Blocked,
+        AgentState::Done,
+        AgentState::Error,
+    ];
+
     pub(crate) fn icon(&self) -> &'static str {
         match self {
             AgentState::Idle => "○",
             AgentState::Working => "»",
             AgentState::Blocked => "◆",
             AgentState::Done => "●",
+            // `✕` は東アジア文字幅が曖昧で右へずれるため `×` を使う
             AgentState::Error => "×",
+        }
+    }
+
+    // 状態アイコン凡例に出す説明。状態名そのものを見せる（ユビキタス言語の
+    // 決まりどおり、エージェント状態は英字のまま訳さない）。ワイヤ表現
+    // （`as_str`）と字面は同じだが、片方を変えても他方は追従しない
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            AgentState::Idle => "idle",
+            AgentState::Working => "working",
+            AgentState::Blocked => "blocked",
+            AgentState::Done => "done",
+            AgentState::Error => "error",
         }
     }
 
@@ -74,14 +99,16 @@ impl AgentState {
         )
     }
 
-    // Textのcolor_rangeレベル（テーマの強調色 0-3）
+    // Textのcolor_rangeレベル（テーマの強調色 0-3 とレベル6の error_color）。
+    // 5状態が重複しない色を持ち、色だけで判別できるようにしてある（決定25）
     pub(crate) fn color(&self) -> usize {
         match self {
             AgentState::Idle => 0,
             AgentState::Working => 2,
             AgentState::Blocked => 3,
             AgentState::Done => 1,
-            AgentState::Error => 3,
+            // `blocked` とレベル3で重複していたのを、テーマのエラー色へ移した
+            AgentState::Error => 6,
         }
     }
 }
