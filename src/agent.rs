@@ -26,7 +26,7 @@ impl AgentState {
             AgentState::Working => "»",
             AgentState::Blocked => "◆",
             AgentState::Done => "●",
-            AgentState::Error => "✕",
+            AgentState::Error => "×",
         }
     }
 

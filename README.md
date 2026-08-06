@@ -42,7 +42,7 @@ jump to them with global keybindings.
 | `»` | working | processing a prompt |
 | `◆` | blocked | waiting for permission / input (needs attention) |
 | `●` | done | turn finished (unread) |
-| `✕` | error | API error / tool failure |
+| `×` | error | API error / tool failure |
 | `○` | idle | agent starting up / waiting |
 | `+N` | — | number of active subagents |
 | `[N]` | — | number of incomplete tasks |
