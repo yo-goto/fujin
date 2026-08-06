@@ -177,7 +177,7 @@ impl State {
 
     // ヘルプオーバーレイに出すキー一覧（要件: nav-mode-hints）
     pub(crate) fn triage_help_lines(&self) -> &'static [HelpRow] {
-        use HelpRow::{Blank, Entry, Note, Title};
+        use HelpRow::{Blank, Entry, Title};
         &[
             Title("[tri]", "keys"),
             Blank,
@@ -186,8 +186,6 @@ impl State {
             Entry("enter", "jump & exit"),
             Entry("esc", "back to tree"),
             Entry("?", "this help"),
-            Blank,
-            Note("press any key to close"),
         ]
     }
 }

@@ -369,7 +369,7 @@ impl State {
     // いるか」だけを持つ。矢印など幅の曖昧な文字は使わない — サイドバーの
     // 幅計算が文字数ベース（v1）なので、キー列の位置がずれるため
     pub(crate) fn help_lines(&self) -> &'static [HelpRow] {
-        use HelpRow::{Blank, Entry, Note, Title};
+        use HelpRow::{Blank, Entry, Title};
         if self.triage.is_some() {
             self.triage_help_lines()
         } else if self.search.is_some() {
@@ -383,8 +383,6 @@ impl State {
                 Entry("enter", "jump & exit"),
                 Entry("esc", "cancel search"),
                 Entry("?", "this help"),
-                Blank,
-                Note("press any key to close"),
             ]
         } else {
             &[
@@ -398,8 +396,6 @@ impl State {
                 Entry("p", "triage"),
                 Entry("?", "this help"),
                 Entry("esc q", "exit"),
-                Blank,
-                Note("press any key to close"),
             ]
         }
     }

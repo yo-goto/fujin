@@ -270,10 +270,16 @@ impl State {
         self.broadcast_read_clears(&cleared);
     }
 
-    // 対応を待っているエージェントペインの数（要件: sidebar-header）。
+    // 対応を待っているエージェントペインの数。
     //
     // 一覧に出るペイン（`selectable`）だけを数える。`agents` を直接数えないのは、
-    // 閉じたペインの状態が prune されるまでの一瞬、画面に無いものを数えてしまうため
+    // 閉じたペインの状態が prune されるまでの一瞬、画面に無いものを数えてしまうため。
+    //
+    // **いまは表示の受け皿が無い。** 決定27でヘッダーの待ち件数表示を廃止したが、
+    // 概念としては残すと決めた — docs/issues/command-status-notification.md が
+    // 「コマンド状態も待ち件数へ統合する」方向で検討中で、集計ごと消すと
+    // その実装余地を潰してしまうため
+    #[allow(dead_code)] // 上記の理由で、呼び出し元が無くても残す
     pub(crate) fn waiting_count(&self) -> usize {
         self.selectable
             .iter()
