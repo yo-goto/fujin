@@ -1,14 +1,10 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="fujin logo" width="180" />
+  <img src="assets/logo-full.svg" alt="fujin — Zellij, your agents in formation." width="100%" />
 </div>
-
-# fujin
 
 A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualizes
 the state of AI agents (Claude Code, etc.) running in each pane, and lets you
 jump to them with global keybindings.
-
-**Zellij, plus eyes for your agents.**
 
 > [!NOTE]
 > The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" /

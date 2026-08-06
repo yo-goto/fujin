@@ -1,8 +1,6 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="fujin logo" width="180" />
+  <img src="assets/logo-full.svg" alt="fujin — Zellij, your agents in formation." width="100%" />
 </div>
-
-# fujin
 
 zellij用サイドバープラグインです。タブ > ペインを縦並びで一覧し、各ペインで動くAIエージェント（Claude Code等）の状態を可視化して、グローバルキーでジャンプできます。
 
