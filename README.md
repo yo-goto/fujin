@@ -233,7 +233,7 @@ Register `extras/claude-hooks/fujin-hook.sh` as a hook. Add it to `hooks` in
 {
   "hooks": {
     // Add the same entry for all of the following events:
-    // SessionStart, UserPromptSubmit, Stop, StopFailure, PostToolUseFailure,
+    // SessionStart, UserPromptSubmit, Stop, StopFailure,
     // SessionEnd, SubagentStart, SubagentStop, TaskCreated, TaskCompleted
     "UserPromptSubmit": [
       {
@@ -336,7 +336,7 @@ it as a command. Nav mode stays active the whole time.
 | `UserPromptSubmit` | working |
 | `Notification` | blocked (message retained) |
 | `Stop` | done — but stays working while background subagents are still running |
-| `StopFailure` / `PostToolUseFailure` | error |
+| `StopFailure` | error — not overwritten by a following `Stop` |
 | `SessionEnd` | unregister |
 | `SubagentStart` / `SubagentStop` | subagent count ±1; done when the last one stops after `Stop` |
 | `TaskCreated` / `TaskCompleted` | incomplete task count ±1 |

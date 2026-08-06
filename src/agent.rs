@@ -186,12 +186,20 @@ impl State {
                 // バックグラウンドで起動したサブエージェントはターンを待たせないので、
                 // Stop の時点でまだ走っていることがある（実測トレース:
                 // SubagentStart → Stop → …数十秒後… → SubagentStop）。
-                // 走っている間は working のままにする
-                if entry.subagents == 0 {
+                // 走っている間は working のままにする。
+                //
+                // `error` は上書きしない。StopFailure に続けて Stop が届く可能性が
+                // あり、上書きするとエラーで落ちたターンが done に見えてしまう
+                if entry.subagents == 0 && entry.state != AgentState::Error {
                     entry.state = AgentState::Done;
                 }
             }
-            "StopFailure" | "PostToolUseFailure" => entry.state = AgentState::Error,
+            "StopFailure" => entry.state = AgentState::Error,
+            // ツール単体の失敗では状態を変えない。PostToolUseFailure は存在しない
+            // ファイルへの Read 程度でも発火し、その後リカバリしてターンが正常に
+            // 終わることのほうが多い。error にすると誤警報が常態化する。
+            // 既存のフック設定から届きうるので unknown 扱いにはしない
+            "PostToolUseFailure" => {}
             "SessionEnd" => {
                 self.agents.remove(&payload.pane_id);
             }

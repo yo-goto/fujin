@@ -228,6 +228,36 @@ fn status_events_drive_agent_state() {
     assert_eq!(state.agents[&1].state, AgentState::Error);
 }
 
+// ツール単体の失敗（PostToolUseFailure）は状態を変えない。存在しないファイルへの
+// Read 程度でも発火し、その後リカバリしてターンが正常に終わることのほうが多いので、
+// error にすると誤警報になる（issues/error-state-overwritten-by-stop.md）
+#[test]
+fn tool_failure_does_not_change_state() {
+    let mut state = State::default();
+    state.apply_status(status(1, "UserPromptSubmit"));
+    state.apply_status(status(1, "PostToolUseFailure"));
+    assert_eq!(state.agents[&1].state, AgentState::Working);
+
+    state.apply_status(status(1, "Stop"));
+    assert_eq!(state.agents[&1].state, AgentState::Done);
+}
+
+// StopFailure に続けて Stop が届いても error のまま。上書きするとエラーで落ちた
+// ターンが done に見えてしまう（issues/error-state-overwritten-by-stop.md）
+#[test]
+fn stop_does_not_overwrite_error() {
+    let mut state = State::default();
+    state.apply_status(status(1, "UserPromptSubmit"));
+    state.apply_status(status(1, "StopFailure"));
+    state.apply_status(status(1, "Stop"));
+    assert_eq!(state.agents[&1].state, AgentState::Error);
+
+    // 次のターンが始まれば working に戻る（error から抜ける経路は既読化と
+    // UserPromptSubmit の2つだけ）
+    state.apply_status(status(1, "UserPromptSubmit"));
+    assert_eq!(state.agents[&1].state, AgentState::Working);
+}
+
 #[test]
 fn subagents_are_counted_until_they_stop() {
     let mut state = State::default();

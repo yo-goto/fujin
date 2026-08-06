@@ -218,7 +218,7 @@ bind "Alt g" {
 {
   "hooks": {
     // 以下のイベントすべてに同じエントリを追加する:
-    // SessionStart, UserPromptSubmit, Stop, StopFailure, PostToolUseFailure,
+    // SessionStart, UserPromptSubmit, Stop, StopFailure,
     // SessionEnd, SubagentStart, SubagentStop, TaskCreated, TaskCompleted
     "UserPromptSubmit": [
       {
@@ -316,7 +316,7 @@ navモード中に `/` を押すとヘッダがクエリ入力行（`/…▏`）
 | `UserPromptSubmit` | working |
 | `Notification` | blocked（メッセージ保持） |
 | `Stop` | done（バックグラウンドのサブエージェントが残っている間は working のまま） |
-| `StopFailure` / `PostToolUseFailure` | error |
+| `StopFailure` | error（後続の `Stop` では上書きされない） |
 | `SessionEnd` | 登録解除 |
 | `SubagentStart` / `SubagentStop` | サブエージェント数 ±1（`Stop` 後に最後の1つが終わったら done） |
 | `TaskCreated` / `TaskCompleted` | 未完了タスク数 ±1 |
