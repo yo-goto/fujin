@@ -37,6 +37,10 @@ pub(crate) enum Row<'a> {
     Divider,
     // フッター。いまの状態で使えるコマンドを1行で出す。空にはならない
     Footer,
+    // ツリーが画面高に届かないときの余白。下の枠を最下部へ押し下げるために
+    // 高さだけを占め、何も描かない（要件: sidebar-footer.feature の
+    // 「フッタの高さと位置はモードによらず常に同じ」）
+    Blank,
     // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
     // 開いている間は content（ツリー）がこの行に置き換わる。枠は出したまま
     Help(&'a HelpRow),
@@ -358,11 +362,15 @@ impl State {
     // 画面に実際に載る行。visible_rows() の並びから表示範囲ぶんを切り出し、
     // 隠れた行があれば上下端にあふれマーカー行を足す。
     //
+    // **返す行数は常に画面高ぴったり**（画面が枠より低いときを除く）。ツリーが
+    // 短いぶんは空行で埋め、下の枠を最下部へ押し下げる — 埋めないとフッターが
+    // ツリーの直後に浮き、画面高で位置が動いてしまう。
+    //
     // `rows` が 0 のときは切り出さない。行クリックの逆引きが最初の描画より前に
     // 来た場合（State::viewport_rows の初期値）で、スクロールは起きていない
     pub(crate) fn screen_rows(&self, rows: usize) -> Vec<Row<'_>> {
         let mut all = self.visible_rows();
-        if rows == 0 || all.len() <= rows {
+        if rows == 0 || all.is_empty() {
             return all;
         }
         let frame = FRAME_TOP + FRAME_BOTTOM;
@@ -390,13 +398,15 @@ impl State {
             });
         }
         screen.extend(list.into_iter().skip(scroll).take(shown));
-        let below = list_len - scroll - shown;
+        let below = list_len.saturating_sub(scroll + shown);
         if below > 0 {
             screen.push(Row::Overflow {
                 hidden: below,
                 above: false,
             });
         }
+        // 余った高さを空行で埋めてから下の枠を置く
+        screen.resize_with(FRAME_TOP + area, || Row::Blank);
         screen.extend(bottom);
         screen
     }
@@ -520,6 +530,8 @@ impl State {
                 Row::Footer => {
                     print_text_with_coordinates(self.footer_line(cols), 0, y, None, None);
                 }
+                // 高さを占めるだけの行。描くものは無い
+                Row::Blank => {}
                 Row::Divider => {
                     print_text_with_coordinates(divider_line(cols), 0, y, None, None);
                 }

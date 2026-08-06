@@ -2656,7 +2656,13 @@ fn scrolling_keeps_everything_in_place_when_it_all_fits() {
 
     assert_eq!(state.scroll, 0, "全部載るならスクロールしない");
     assert!(overflow_markers(&state, 40).is_empty());
-    assert_eq!(state.screen_rows(40).len(), HEADER_ROWS + 13 + FOOTER_ROWS);
+    let screen = state.screen_rows(40);
+    assert_eq!(screen.len(), 40, "画面高ぶんを返す（余りは空行）");
+    assert_eq!(
+        screen.iter().filter(|r| !matches!(r, Row::Blank)).count(),
+        HEADER_ROWS + 13 + FOOTER_ROWS,
+        "中身の行数は変わらない"
+    );
 }
 
 #[test]
@@ -2710,6 +2716,25 @@ fn the_cwd_row_stays_with_its_pane_row_at_the_bottom_edge() {
         matches!(screen.get(last_pane + 1), Some(Row::Cwd { .. })),
         "選択行の cwd行まで画面に入っていない"
     );
+}
+
+#[test]
+fn the_footer_sits_at_the_bottom_edge_even_when_the_tree_is_short() {
+    // ツリーが短いと、下の枠がツリーの直後へ浮いてしまう（実機で確認された
+    // 見た目の不具合）。余った高さは空行で埋めて最下部まで押し下げる
+    let mut state = state_with_panes(2);
+    state.render(20, SIDEBAR);
+
+    let screen = state.screen_rows(20);
+    assert_eq!(screen.len(), 20);
+    assert_frame(&screen, "ツリーが短いとき");
+    assert!(
+        matches!(screen[HEADER_ROWS + 3], Row::Blank),
+        "ツリーの後ろは空行で埋める"
+    );
+    // 空行はクリックの対象にならない（要件: click-to-focus と食い違わせない）
+    assert_eq!(state.pane_at_row(HEADER_ROWS + 3), None);
+    assert_eq!(state.pane_at_row(19), None, "フッターも対象外");
 }
 
 #[test]
