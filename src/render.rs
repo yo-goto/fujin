@@ -19,7 +19,7 @@
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::*;
 
-use crate::agent::AgentInfo;
+use crate::agent::{AgentInfo, AgentState};
 use crate::search::{Field, Hit};
 use crate::{Selectable, State, DIRECT_KEY_HINTS};
 
@@ -82,13 +82,41 @@ pub(crate) enum Row<'a> {
 
 // ヘルプオーバーレイの行の種類（中身は nav::help_lines() が持つ）。
 // 整形（キー列の幅・左マージン）と配色はこちら側で決める
+#[derive(Clone, Copy)]
 pub(crate) enum HelpRow {
     // モード名とその添え字。例: ("[nav]", "keys")
     Title(&'static str, &'static str),
+    // キー一覧に続く節の見出し。モード名を持たないので角括弧も付けない
+    Section(&'static str),
     // キーと、それが何をするか
     Entry(&'static str, &'static str),
+    // 状態アイコン凡例の1行（決定25）。アイコン・色・説明はすべて
+    // AgentState のテーブルから引くので、ここは状態だけを持つ
+    Legend(AgentState),
     Blank,
 }
+
+// ヘルプオーバーレイのキー一覧に続けて出す状態アイコン凡例（決定25）。
+// モードによらず同じものを出す — ツリーにもトリアージ一覧にも状態アイコンが
+// 出るので、どのオーバーレイから引いても同じ表が要る。
+//
+// アイコン・色・説明はもちろん、**並びと状態の数まで** AgentState 側のテーブルから
+// 引く。状態が増減しても凡例は自動で追従し、ここを直す必要はない
+const STATUS_LEGEND: [HelpRow; LEGEND_HEAD + AgentState::ALL.len()] = {
+    // キー一覧との間の空行・見出し・見出し下の空行
+    let mut rows = [HelpRow::Blank; LEGEND_HEAD + AgentState::ALL.len()];
+    rows[1] = HelpRow::Section("status");
+    // const 文脈では for も iterator も使えないので添字で回す
+    let mut i = 0;
+    while i < AgentState::ALL.len() {
+        rows[LEGEND_HEAD + i] = HelpRow::Legend(AgentState::ALL[i]);
+        i += 1;
+    }
+    rows
+};
+
+// 凡例の先頭に置く3行（空行・見出し・空行）
+const LEGEND_HEAD: usize = 3;
 
 // 行の左に空ける余白。文字を左端に貼り付けると窮屈に見える
 const HELP_INDENT: usize = 2;
@@ -126,6 +154,14 @@ fn content_cols(cols: usize) -> usize {
 // いちばん長いキー（`j k up down tab`）と、いちばん長い説明（`cancel search`）が
 // 左マージン込みで幅32（決定3）にちょうど収まる値
 const HELP_KEY_COLUMN: usize = 17;
+
+// キー列に置いた文字の後ろに空ける幅。列幅を超える場合は空白1つだけ空けて
+// 続ける（列は崩れるが、説明が切り詰められて消えるよりはよい）
+fn help_key_pad(keys: &str) -> usize {
+    HELP_KEY_COLUMN
+        .saturating_sub(UnicodeWidthStr::width(keys))
+        .max(1)
+}
 
 // 文字に与える意味。zellij のテーマ側の色をそのまま借りる（決定11と同じ方針で、
 // 色そのものを設定項目にはしない）
@@ -284,7 +320,15 @@ impl State {
     fn content_rows(&self) -> Vec<Row<'_>> {
         let mut rows = Vec::new();
         if self.help_overlay {
-            return self.help_lines().iter().map(Row::Help).collect();
+            // キー一覧（モードごとに違う）＋ 状態アイコン凡例（共通）。
+            // 収まらないぶんはツリーと同じあふれマーカーで示す — オーバーレイは
+            // 「任意のキーで閉じる」ので、スクロール用のキーを持てない
+            return self
+                .help_lines()
+                .iter()
+                .chain(STATUS_LEGEND.iter())
+                .map(Row::Help)
+                .collect();
         }
         // トリアージモード中はツリー表示を隠し、一覧だけを出す（要件: triage-mode）
         if self.triage.is_some() {
@@ -741,20 +785,32 @@ impl State {
                 ],
                 cols,
             ),
+            HelpRow::Section(label) => compose(&[(&indent, Ink::Plain), (label, Ink::Muted)], cols),
             HelpRow::Entry(keys, description) => {
-                // キー列は幅を固定して説明の開始位置を揃える。キーが長すぎて
-                // はみ出す場合は空白1文字だけ空けて続ける（列は崩れるが、
-                // 説明が消えるよりはよい）
-                let pad = HELP_KEY_COLUMN
-                    .saturating_sub(UnicodeWidthStr::width(*keys))
-                    .max(1);
-                let gap = " ".repeat(pad);
+                let gap = " ".repeat(help_key_pad(keys));
                 compose(
                     &[
                         (&indent, Ink::Plain),
                         (keys, Ink::Key),
                         (&gap, Ink::Plain),
                         (description, Ink::Plain),
+                    ],
+                    cols,
+                )
+            }
+            HelpRow::Legend(state) => {
+                // アイコンをキー列の位置に置き、説明はキー一覧と同じ開始位置から
+                // 出す。キーが常にレベル2固定なのに対し、凡例のアイコンだけは
+                // 状態色をそのまま乗せる — 意味と色を結びつけて見せるのが
+                // 凡例の目的そのものだから（決定25）
+                let icon = state.icon();
+                let gap = " ".repeat(help_key_pad(icon));
+                compose(
+                    &[
+                        (&indent, Ink::Plain),
+                        (icon, Ink::Accent(state.color())),
+                        (&gap, Ink::Plain),
+                        (state.label(), Ink::Plain),
                     ],
                     cols,
                 )

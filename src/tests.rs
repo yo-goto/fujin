@@ -1147,27 +1147,190 @@ fn the_help_overlay_covers_the_tree_but_keeps_the_frame() {
     assert!((0..rows.len()).all(|y| state.pane_at_row(y).is_none()));
 }
 
+// ヘルプオーバーレイに実際に載る行（モードごとのキー一覧＋共通の状態アイコン凡例）。
+// 高さは全部載るだけ渡す — あふれ方の検証は別のテストで見る
+fn overlay_lines(state: &State, cols: usize) -> Vec<String> {
+    state
+        .screen_rows(40)
+        .iter()
+        .filter_map(|row| match row {
+            Row::Help(help) => Some(state.help_line(help, cols).content().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn the_help_lines_fit_the_sidebar_width() {
     // 幅32（決定3）に収まらないと、キー列か説明のどちらかが … で消える
     let mut state = searchable_state();
-    for row in state.help_lines() {
-        let line = state.help_line(row, 32);
-        assert!(
-            !line.content().contains('…'),
-            "navモード: {}",
-            line.content()
-        );
+    state.handle_nav_key(key(BareKey::Char('?')));
+    for line in overlay_lines(&state, 32) {
+        assert!(!line.contains('…'), "navモード: {}", line);
     }
+    state.handle_nav_key(key(BareKey::Char('?'))); // いったん閉じる
     state.handle_nav_key(key(BareKey::Char('/')));
-    for row in state.help_lines() {
-        let line = state.help_line(row, 32);
+    state.handle_nav_key(key(BareKey::Char('?')));
+    for line in overlay_lines(&state, 32) {
+        assert!(!line.contains('…'), "検索サブモード: {}", line);
+    }
+}
+
+#[test]
+fn the_help_overlay_ends_with_the_status_icon_legend() {
+    // 要件: nav-mode-hints.feature「ヘルプオーバーレイに状態アイコン凡例が
+    // 表示される」。README を見に行かなくても記号の意味を引けるようにする（決定25）
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    let lines = overlay_lines(&state, SIDEBAR);
+    let heading = lines
+        .iter()
+        .position(|line| line.trim() == "status")
+        .expect("凡例の見出しがある");
+    let legend: Vec<&String> = lines[heading + 1..]
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    // 並び・アイコン・説明はすべて AgentState のテーブル由来（決定25）
+    assert_eq!(legend.len(), AgentState::ALL.len(), "{:?}", legend);
+    for (line, agent_state) in legend.iter().zip(AgentState::ALL.iter()) {
         assert!(
-            !line.content().contains('…'),
-            "検索サブモード: {}",
-            line.content()
+            line.starts_with(&format!("  {}", agent_state.icon())),
+            "アイコンがキー列の位置に出る: {}",
+            line
+        );
+        assert!(
+            line.ends_with(agent_state.label()),
+            "状態名が説明として続く: {}",
+            line
         );
     }
+    // キー一覧より後ろに置く。先に読むべきは操作のほう
+    let last_key = lines
+        .iter()
+        .position(|line| line.contains("this help"))
+        .expect("キー一覧がある");
+    assert!(last_key < heading);
+}
+
+#[test]
+fn the_status_legend_lines_up_with_the_key_column() {
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    let lines = overlay_lines(&state, SIDEBAR);
+    let key_entry = lines
+        .iter()
+        .find(|line| line.contains("this help"))
+        .expect("キー一覧がある");
+    let legend = lines
+        .iter()
+        .find(|line| line.ends_with("working"))
+        .expect("凡例がある");
+    // アイコンはマルチバイトなので、バイト位置ではなく文字位置で見る
+    let column = |line: &str, needle: &str| {
+        line.find(needle)
+            .map(|byte| line[..byte].chars().count())
+            .expect("説明がある")
+    };
+    assert_eq!(
+        column(legend, "working"),
+        column(key_entry, "this help"),
+        "説明の開始位置が揃っている: {:?} / {:?}",
+        legend,
+        key_entry
+    );
+}
+
+#[test]
+fn the_status_legend_carries_the_state_colors() {
+    // 凡例の目的は意味と色を結びつけることなので、アイコンにだけは状態色を乗せる
+    //（キーは常にレベル2固定、というヘルプの色役割の例外・決定25）
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    let overlay: Vec<Text> = state
+        .screen_rows(40)
+        .iter()
+        .filter_map(|row| match row {
+            Row::Help(help) => Some(state.help_line(help, SIDEBAR)),
+            _ => None,
+        })
+        .collect();
+    for agent_state in AgentState::ALL {
+        let line = overlay
+            .iter()
+            .find(|text| text.content().ends_with(agent_state.label()))
+            .unwrap_or_else(|| panic!("{} の凡例がある", agent_state.label()));
+        // 色が乗るのは左マージン(2)の直後、アイコン1文字だけ
+        assert_eq!(
+            ink_at(line, agent_state.color()),
+            vec![2],
+            "{} のアイコンに状態色が乗る",
+            agent_state.label()
+        );
+    }
+}
+
+#[test]
+fn every_agent_state_gets_a_color_of_its_own() {
+    // 要件: agent-status-icon.feature「状態ごとに異なる色で判別できる」。
+    // `error` が `blocked` とレベル3で重複していたのを解消した（決定25）
+    let levels: Vec<usize> = AgentState::ALL.iter().map(|s| s.color()).collect();
+    let mut unique = levels.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), levels.len(), "色が重複している: {:?}", levels);
+    assert_eq!(
+        AgentState::Error.color(),
+        6,
+        "error はテーマのエラー色（レベル6）"
+    );
+}
+
+#[test]
+fn the_status_legend_shows_up_in_every_overlay() {
+    // ツリーにもトリアージ一覧にも状態アイコンが出るので、どのモードの
+    // オーバーレイからでも同じ表を引けるようにする
+    let mut state = triage_state();
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(
+        overlay_lines(&state, SIDEBAR)
+            .iter()
+            .any(|line| line.trim() == "status"),
+        "トリアージモード"
+    );
+
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(
+        overlay_lines(&state, SIDEBAR)
+            .iter()
+            .any(|line| line.trim() == "status"),
+        "検索サブモード"
+    );
+}
+
+#[test]
+fn a_short_sidebar_marks_the_hidden_help_lines() {
+    // オーバーレイは「任意のキーで閉じる」のでスクロール用のキーを持てない。
+    // 収まらないぶんはツリーと同じあふれマーカーで、隠れていることだけ示す
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+    state.render(16, SIDEBAR);
+
+    let markers = overflow_markers(&state, 16);
+    assert_eq!(markers.len(), 1, "下端にだけ出る: {:?}", markers);
+    assert!(!markers[0].1, "上には隠れない（先頭から出す）");
 }
 
 #[test]
