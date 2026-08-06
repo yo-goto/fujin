@@ -1,11 +1,12 @@
 // サイドバーの描画。
 //
-// レイアウト: navモード名・検索クエリのヘッダ1行（navモード外のときは無し）に
-// 続けて、タブ見出し行 > 配下のペイン行 をタブ順で縦に並べる。
+// レイアウト: ヘッダ3行（ブランド行・モード行・境界線。要件:
+// docs/requirements/sidebar-tree/sidebar-header.feature）に続けて、
+// タブ見出し行 > 配下のペイン行 をタブ順で縦に並べる。
 //
-// navモード外でヘッダを出さないのは、セッション名を zellij 本体のトップバーが
-// `Zellij (セッション名)` の形で常時出しており、重複が視認性を下げるため
-//（要件: docs/requirements/sidebar-tree/）。
+// ヘッダは**モードによらず常に3行**を占める。行数が変わると、モードの入退場の
+// たびにツリー全体が上下にずれる。セッション名は出さない — zellij 本体の
+// トップバーが `Zellij (セッション名)` の形で常時出しており、重複が視認性を下げる。
 //
 // 行が画面高に収まらないときは表示範囲を選択行へ寄せる（縦スクロール。
 // 要件: docs/requirements/sidebar-tree/sidebar-scroll.feature）。ヘッダは
@@ -25,8 +26,13 @@ use crate::{Selectable, State};
 // 行の増減を伴うレイアウト変更は必ず visible_rows() 側で行うこと。
 // 描画だけ直すとクリックが行ずれする
 pub(crate) enum Row<'a> {
-    // navモード名 / 検索クエリの入力行
-    Header,
+    // ヘッダ1行目。`▲ fujin` を常時出し、三角の色でいまのモードを示す
+    Brand,
+    // ヘッダ2行目。モード中はモード名と操作ヒント、ツリー表示は待ち件数。
+    // どちらも無いときは空のまま（行そのものは消さない）
+    Mode,
+    // ヘッダ3行目。ヘッダ（chrome）とツリー（content）の境目を示す横線
+    Divider,
     // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
     // 開いている間はサイドバー全体がこの行だけになる
     Help(&'a HelpRow),
@@ -67,7 +73,7 @@ pub(crate) enum Row<'a> {
 // ヘルプオーバーレイの行の種類（中身は nav::help_lines() が持つ）。
 // 整形（キー列の幅・左マージン）と配色はこちら側で決める
 pub(crate) enum HelpRow {
-    // モード名とその添え字。例: ("[NAV]", "keys")
+    // モード名とその添え字。例: ("[nav]", "keys")
     Title(&'static str, &'static str),
     // キーと、それが何をするか
     Entry(&'static str, &'static str),
@@ -78,6 +84,10 @@ pub(crate) enum HelpRow {
 
 // 行の左に空ける余白。文字を左端に貼り付けると窮屈に見える
 const HELP_INDENT: usize = 2;
+// ヘッダの文字を置き始める位置（ブランド名・モード行）。ヘッダは chrome なので
+// ツリー側の階段（x=0/2/4/6）には乗せず、x=2 に揃えてヘッダだけで1つのブロックに
+// 見せる。三角だけがこの左に出る（x=0）
+const HEADER_INDENT: usize = 2;
 // cwd行の字下げ。ペイン名の開始位置（4セル）よりさらに右へ寄せて、
 // 隣のペイン行ではなく「上のペイン行の続き」として読ませる
 const CWD_INDENT: usize = 6;
@@ -107,13 +117,27 @@ const HELP_KEY_COLUMN: usize = 17;
 enum Ink {
     // 既定の文字色。読ませたい本文
     Plain,
-    // モード名。ヘッダの `[NAV]` と同じ強調色に揃える
+    // モード名。ヘッダの `[nav]` と同じ強調色に揃える
     Tag,
     // キーそのもの。zellij 本体の status-bar がキーを強調するのに倣う
     Key,
     // 添え物（`:help` の label 部分・補足行）。落として主役を目立たせる
     Muted,
+    // 強調色をレベル指定で乗せる。ブランド行の三角のように、色そのものが
+    // 情報を持つ断片に使う
+    Accent(usize),
+    // 強調色を落として乗せる（`color_range` と `dim_range` の併用）。待ち件数の
+    // ように「色で意味は伝えたいが主役ではない」断片に使う。
+    // 併用が効かない環境では色が落ちて dim だけが残る
+    MutedAccent(usize),
 }
+
+// ブランド行の三角に乗せる色（要件: sidebar-header）。navモード・検索サブモードは
+// レベル2（green）で、zellij のタブバーがアクティブなタブに使う色に対応させる
+const NAV_LEVEL: usize = 2;
+// トリアージモードはレベル0（orange）。緊急度を連想させる側へ寄せる。
+// 待ち件数の数字にも同じ色を薄く乗せ、「トリアージすべき件数」だと読ませる
+const TRIAGE_LEVEL: usize = 0;
 
 // 意味付きの断片を1行に組み立てる。
 //
@@ -141,6 +165,8 @@ fn compose(segments: &[(&str, Ink)], cols: usize) -> Text {
             Ink::Tag => text.color_range(3, start..end),
             Ink::Key => text.color_range(2, start..end),
             Ink::Muted => text.dim_range(start..end),
+            Ink::Accent(level) => text.color_range(level, start..end),
+            Ink::MutedAccent(level) => text.color_range(level, start..end).dim_range(start..end),
         };
     }
     text
@@ -228,10 +254,12 @@ impl State {
         if self.help_overlay {
             return self.help_lines().iter().map(Row::Help).collect();
         }
-        // ヘッダ: 検索サブモード中はクエリ入力行、navモード中はモード名、
-        // 通常表示ではブランディング文言。**常時1行を確保する** — モードの
-        // 入退場でヘッダの有無が切り替わると、ツリー全体が1行分上下にずれる
-        rows.push(Row::Header);
+        // ヘッダは**常時3行を確保する**（要件: sidebar-header）。中身がモードで
+        // 変わっても行数は変えない — 入退場でヘッダの高さが動くと、ツリー全体が
+        // そのぶん上下にずれる
+        rows.push(Row::Brand);
+        rows.push(Row::Mode);
+        rows.push(Row::Divider);
         // トリアージモード中はツリー表示を隠し、一覧だけを出す（要件: triage-mode）
         if self.triage.is_some() {
             let entries = self.triage_entries();
@@ -322,6 +350,12 @@ impl State {
             return all;
         }
         let pinned = pinned_rows(&all);
+        // 画面がヘッダ（3行）ぶんの高さも無いときは、入るところまでを出して終わる。
+        // 一覧に割ける高さが無いので、スクロールもあふれマーカーも出番がない
+        if rows <= pinned {
+            all.truncate(rows);
+            return all;
+        }
         let area = rows - pinned;
         let list_len = all.len() - pinned;
         // 描画とクリックの逆引きで同じ位置を使う。State::scroll は描画時に
@@ -448,8 +482,14 @@ impl State {
         let triage_cursor = self.triage_cursor();
         for (y, row) in screen.into_iter().enumerate() {
             match row {
-                Row::Header => {
-                    print_text_with_coordinates(self.header_line(cols), 0, y, None, None);
+                Row::Brand => {
+                    print_text_with_coordinates(self.brand_line(cols), 0, y, None, None);
+                }
+                Row::Mode => {
+                    print_text_with_coordinates(self.mode_line(cols), 0, y, None, None);
+                }
+                Row::Divider => {
+                    print_text_with_coordinates(divider_line(cols), 0, y, None, None);
                 }
                 Row::Help(row) => {
                     print_text_with_coordinates(self.help_line(row, cols), 0, y, None, None);
@@ -505,25 +545,47 @@ impl State {
         }
     }
 
-    // ヘッダ1行（要件: docs/requirements/nav-mode/ の操作ヒント）。
+    // ヘッダ1行目（ブランド行）。`▲ fujin` をモードによらず常に出す。
+    //
+    // 色を乗せるのは三角1文字だけで、ブランド名は dim のまま。名前まで色を付けると
+    // ツリーの状態アイコンの色分けと喧嘩する（要件: sidebar-header）
+    pub(crate) fn brand_line(&self, cols: usize) -> Text {
+        // 三角が x=0、ブランド名が x=2（HEADER_INDENT）に来る
+        compose(
+            &[("▲", self.brand_ink()), (" fujin", Ink::Muted)],
+            content_cols(cols),
+        )
+    }
+
+    // ブランド行の三角に乗せる色。**テキストを読まなくても色だけでモードが判別
+    // できる**ようにするのが狙いで、モード行のモード名はその裏取りという位置づけ
+    fn brand_ink(&self) -> Ink {
+        if self.triage.is_some() {
+            Ink::Accent(TRIAGE_LEVEL)
+        } else if self.nav_mode || self.search.is_some() {
+            Ink::Accent(NAV_LEVEL)
+        } else {
+            Ink::Muted
+        }
+    }
+
+    // ヘッダ2行目（モード行）。モード中は操作ヒント（要件:
+    // docs/requirements/nav-mode/）、ツリー表示は待ち件数。
     //
     // サイドバー幅は32文字（決定3）で全キーの説明は載らないので、常時出すのは
     // モード名とヘルプ・退出キーだけに絞り、詳細は `?` のヘルプオーバーレイへ
     // 追い出してある。文言は英語で統一する
-    pub(crate) fn header_line(&self, cols: usize) -> Text {
+    pub(crate) fn mode_line(&self, cols: usize) -> Text {
         // ツリーの行と同じく右端は空ける（ヘルプオーバーレイは別の面なので対象外）
         let cols = content_cols(cols);
-        // 通常表示はブランディング文言。dim にしてモード名の強調色と区別し、
-        // 角括弧でも囲まない — `[NAV]` と同じ見た目だとモードの一種に誤読される
-        if self.search.is_none() && !self.nav_mode {
-            return compose(&[("> fujin", Ink::Muted)], cols);
-        }
+        let indent = " ".repeat(HEADER_INDENT);
         // トリアージモード中はモード名を差し替える。Esc の行き先が navモードの
         // ツリー表示（退場ではない）なので、操作ヒントも `exit` ではなく `back`
         if self.triage.is_some() {
             return compose(
                 &[
-                    ("[TRIAGE]", Ink::Tag),
+                    (&indent, Ink::Plain),
+                    ("[tri]", Ink::Tag),
                     ("  ", Ink::Plain),
                     ("?", Ink::Key),
                     (":help", Ink::Muted),
@@ -534,10 +596,14 @@ impl State {
                 cols,
             );
         }
-        let Some(search) = &self.search else {
+        if let Some(search) = &self.search {
+            return search_mode_line(&search.query, &indent, cols);
+        }
+        if self.nav_mode {
             return compose(
                 &[
-                    ("[NAV]", Ink::Tag),
+                    (&indent, Ink::Plain),
+                    ("[nav]", Ink::Tag),
                     ("  ", Ink::Plain),
                     ("?", Ink::Key),
                     (":help", Ink::Muted),
@@ -547,24 +613,23 @@ impl State {
                 ],
                 cols,
             );
-        };
-        // 検索サブモード中はクエリ入力行が主役。操作ヒントは右端へ寄せ、クエリが
-        // 伸びてぶつかるところまで来たら入力中の文字列のほうを優先して落とす
-        let query = format!("{}▏", search.query);
-        // 余白は表示セル幅で数える。クエリに全角文字が入ると文字数とセル数が
-        // ずれ、操作ヒントが右端からはみ出す
-        let hint_width = UnicodeWidthStr::width("?:help");
-        let pad = cols
-            .saturating_sub(UnicodeWidthStr::width(query.as_str()) + 1) // 先頭の `/` のぶん
-            .saturating_sub(hint_width);
-        let mut segments = vec![("/", Ink::Tag), (query.as_str(), Ink::Plain)];
-        let spacer = " ".repeat(pad);
-        if pad > 0 {
-            segments.push((spacer.as_str(), Ink::Plain));
-            segments.push(("?", Ink::Key));
-            segments.push((":help", Ink::Muted));
         }
-        compose(&segments, cols)
+        // ツリー表示は待ち件数。0件なら**空のまま**にする — `all clear` のような
+        // 文言は装飾のための装飾で、対応が不要であることは何も無いことで伝わる
+        let waiting = self.waiting_count();
+        if waiting == 0 {
+            return Text::new("");
+        }
+        let count = waiting.to_string();
+        compose(
+            &[
+                (&indent, Ink::Plain),
+                // 数字だけトリアージモードの色を薄く乗せ、何の件数かを色でも示す
+                (&count, Ink::MutedAccent(TRIAGE_LEVEL)),
+                (" waiting", Ink::Muted),
+            ],
+            cols,
+        )
     }
 
     // ヘルプオーバーレイの1行。左マージンは描画位置（x）ではなく行の中に
@@ -814,6 +879,43 @@ impl State {
     }
 }
 
+// 検索サブモード中のモード行。クエリ入力が主役なので左に置き、操作ヒントは
+// 右端へ寄せる。クエリが伸びてぶつかるところまで来たら、入力中の文字列のほうを
+// 優先してヒント側を落とす（右寄せを使うのはヘッダでここ1箇所だけ）
+fn search_mode_line(query: &str, indent: &str, cols: usize) -> Text {
+    let query = format!("{}▏", query);
+    // 余白は表示セル幅で数える。クエリに全角文字が入ると文字数とセル数が
+    // ずれ、操作ヒントが右端からはみ出す
+    let hint_width = UnicodeWidthStr::width("?:help");
+    let pad = cols
+        .saturating_sub(UnicodeWidthStr::width(indent))
+        .saturating_sub(UnicodeWidthStr::width(query.as_str()) + 1) // 先頭の `/` のぶん
+        .saturating_sub(hint_width);
+    let mut segments = vec![
+        (indent, Ink::Plain),
+        ("/", Ink::Tag),
+        (query.as_str(), Ink::Plain),
+    ];
+    let spacer = " ".repeat(pad);
+    if pad > 0 {
+        segments.push((spacer.as_str(), Ink::Plain));
+        segments.push(("?", Ink::Key));
+        segments.push((":help", Ink::Muted));
+    }
+    compose(&segments, cols)
+}
+
+// ヘッダ3行目（境界線）。ヘッダ（chrome）とツリー（content）の境目を示す。
+//
+// サイドバーは borderless で運用していて自前の枠は引かないが、この1本だけは
+// 例外（2026-08-06）。領域を囲う枠ではなく境目を示す線なので許容する。
+// 右マージンは他の行と同じく空ける — 端まで引くと縁に貼り付いて見える
+pub(crate) fn divider_line(cols: usize) -> Text {
+    let cols = content_cols(cols);
+    let line = "─".repeat(cols);
+    compose(&[(line.as_str(), Ink::Muted)], cols)
+}
+
 // 表示範囲の外に隠れている行があることを示す1行。文言は英語で統一する。
 // 記号はタブ見出し行と同じ三角の系列で、上下どちら側が隠れているかを向きで示す
 fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
@@ -824,9 +926,15 @@ fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
 }
 
 // ヘッダのように固定して常に先頭へ出す行数。この下だけがスクロールする。
-// ヘッダを一緒に流すと、検索サブモードでクエリ入力行が画面から消える
+// ヘッダを一緒に流すと、検索サブモードでクエリ入力行が画面から消える。
+//
+// ヘッダは3行まとまって先頭に来る（ヘルプオーバーレイ中と権限未許可時は 0 行）。
+// 定数で 3 と書かずに数えるのは、visible_rows() 側で行を足したときに
+// ここの追従漏れでスクロールが行ずれするのを防ぐため
 fn pinned_rows(all: &[Row<'_>]) -> usize {
-    usize::from(matches!(all.first(), Some(Row::Header)))
+    all.iter()
+        .take_while(|row| matches!(row, Row::Brand | Row::Mode | Row::Divider))
+        .count()
 }
 
 // スクロール位置 `scroll` のとき、一覧を何行ぶん画面に出せるか。

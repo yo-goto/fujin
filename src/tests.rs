@@ -16,8 +16,8 @@
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
 use crate::render::{
-    cwd_row, fold_highlight_indices, pad_to_width, reconcile_scroll, shift_highlight_indices,
-    truncate, truncate_start, CounterColumn, Row,
+    cwd_row, divider_line, fold_highlight_indices, pad_to_width, reconcile_scroll,
+    shift_highlight_indices, truncate, truncate_start, CounterColumn, Row,
 };
 use std::collections::HashMap;
 
@@ -622,60 +622,241 @@ fn nav_leaves_on_undefined_keys() {
 //
 // サイドバー幅は32文字（決定3）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 
-#[test]
-fn the_plain_header_shows_the_branding_line() {
-    // 通常表示のヘッダはブランディング文言。モード名と誤読されないよう
-    // 角括弧では囲まない（docs/concept/ui-design.md の「ヘッダ」）
-    let state = state_with_panes(2);
-    assert!(!state.nav_mode);
-
-    let header = state.header_line(32);
-    let header = header.content();
-    assert_eq!(header, "> fujin");
+// Text の装飾を「レベル → 文字位置」に戻す。serialize() は
+// 「レベルごとの位置列を `$` 区切りで並べ、そのあとに本文」の形。
+// 色は 0-3、dim は 4（zellij-tile の Text の取り決め）
+fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
+    let serialized = text.serialize();
+    let Some((indices, _body)) = serialized.rsplit_once('$') else {
+        return Vec::new();
+    };
+    indices
+        .split('$')
+        .map(|level| {
+            level
+                .split(',')
+                .filter_map(|position| position.parse().ok())
+                .collect()
+        })
+        .collect()
 }
 
+// そのレベルの装飾が乗っている文字位置（乗っていなければ空）
+fn ink_at(text: &Text, level: usize) -> Vec<usize> {
+    ink_levels(text).get(level).cloned().unwrap_or_default()
+}
+
+const DIM_LEVEL: usize = 4;
+
 #[test]
-fn the_header_keeps_its_row_across_the_nav_mode_boundary() {
-    // navモードの入退場でヘッダの有無が切り替わると、ツリー全体が1行分
-    // 上下にずれる（要件: sidebar-tree.feature）
+fn the_brand_row_is_the_same_in_every_mode() {
+    // ブランド行はモードによらず内容が変わらない（要件: sidebar-header.feature）
     let mut state = searchable_state();
-    state.nav_mode = false;
-    let plain = {
-        let rows = state.visible_rows();
-        assert!(matches!(rows[0], Row::Header), "通常表示にもヘッダがある");
-        rows.len()
-    };
+    let plain = state.brand_line(32).content().to_string();
+    assert_eq!(plain, "▲ fujin");
 
     state.nav_mode = true;
-    let nav = state.visible_rows();
-    assert!(matches!(nav[0], Row::Header));
-    assert_eq!(nav.len(), plain, "行数が変わらない");
+    assert_eq!(state.brand_line(32).content(), plain);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    assert_eq!(state.brand_line(32).content(), plain);
 }
 
 #[test]
-fn the_nav_header_shows_the_help_and_exit_hints() {
+fn the_brand_triangle_carries_the_mode_color() {
+    // モード名を読まなくても三角の色だけでモードが判別できるようにする
+    //（docs/concept/ui-design.md の「ヘッダ」）
+    let mut state = triage_state();
+    set_agent_state(&mut state, 1, AgentState::Working);
+
+    // ツリー表示は dim のみ。色は乗らない
+    state.nav_mode = false;
+    let tree = state.brand_line(SIDEBAR);
+    assert!(
+        ink_at(&tree, DIM_LEVEL).contains(&0),
+        "{:?}",
+        ink_levels(&tree)
+    );
+    for level in 0..DIM_LEVEL {
+        assert!(
+            ink_at(&tree, level).is_empty(),
+            "レベル{}に色が乗っている",
+            level
+        );
+    }
+
+    // navモードはレベル2、トリアージモードはレベル0
+    state.nav_mode = true;
+    assert_eq!(ink_at(&state.brand_line(SIDEBAR), 2), vec![0]);
+    state.handle_nav_key(key(BareKey::Char('p')));
+    assert_eq!(ink_at(&state.brand_line(SIDEBAR), 0), vec![0]);
+}
+
+#[test]
+fn the_brand_name_stays_dim_in_every_mode() {
+    // 色を乗せるのは三角1文字だけ。ブランド名まで色を付けると、ツリーの
+    // 状態アイコンの色分けと喧嘩する
     let mut state = state_with_panes(2);
     state.nav_mode = true;
 
-    let header = state.header_line(32);
-    let header = header.content();
-    assert!(header.contains("[NAV]"), "{}", header);
-    assert!(header.contains("?:help"), "{}", header);
-    assert!(header.contains("esc:exit"), "{}", header);
-    assert!(header.chars().count() <= 32, "サイドバー幅に収まる");
+    let brand = state.brand_line(SIDEBAR);
+    let dim = ink_at(&brand, DIM_LEVEL);
+    // "▲ fujin" の1文字目以降（空白 + ブランド名）が dim
+    assert_eq!(
+        dim,
+        (1..brand.content().chars().count()).collect::<Vec<_>>()
+    );
+    assert_eq!(ink_at(&brand, 2), vec![0], "色は三角だけ");
 }
 
 #[test]
-fn the_search_header_keeps_the_help_hint_beside_the_query() {
+fn the_header_keeps_its_three_rows_across_every_mode_boundary() {
+    // モードの入退場でヘッダの行数が変わると、ツリー全体がそのぶん
+    // 上下にずれる（要件: sidebar-header.feature）
+    let mut state = searchable_state();
+    set_agent_state(&mut state, 1, AgentState::Done);
+    state.nav_mode = false;
+    let plain = {
+        let rows = state.visible_rows();
+        assert!(
+            matches!(
+                (&rows[0], &rows[1], &rows[2]),
+                (Row::Brand, Row::Mode, Row::Divider)
+            ),
+            "通常表示にもヘッダ3行がある"
+        );
+        rows.len()
+    };
+
+    for enter in ["nav", "search", "triage"] {
+        state.nav_mode = true;
+        match enter {
+            "search" => {
+                state.handle_nav_key(key(BareKey::Char('/')));
+            }
+            "triage" => {
+                state.handle_nav_key(key(BareKey::Char('p')));
+            }
+            _ => {}
+        }
+        let rows = state.visible_rows();
+        assert!(
+            matches!(
+                (&rows[0], &rows[1], &rows[2]),
+                (Row::Brand, Row::Mode, Row::Divider)
+            ),
+            "{} でヘッダ3行が崩れた",
+            enter
+        );
+        if enter == "nav" {
+            assert_eq!(rows.len(), plain, "navモードで行数が変わった");
+        }
+        state.search = None;
+        state.triage = None;
+    }
+}
+
+#[test]
+fn the_divider_leaves_the_right_margin() {
+    // 境界線も他の行と同じく右端2セルを空ける（決定3の右マージン）
+    let divider = divider_line(32);
+    let line = divider.content();
+    assert_eq!(line.chars().count(), 30);
+    assert!(line.chars().all(|c| c == '─'), "{}", line);
+    assert_eq!(ink_at(&divider, DIM_LEVEL).len(), 30, "dim で引く");
+}
+
+#[test]
+fn the_tree_mode_row_counts_the_waiting_panes() {
+    // 待ち件数に数えるのは注意を引く状態（done/blocked/error）だけ。
+    // working は数えない（要件: sidebar-header.feature）
+    let mut state = state_with_panes(4);
+    set_agent_state(&mut state, 1, AgentState::Done);
+    set_agent_state(&mut state, 2, AgentState::Blocked);
+    set_agent_state(&mut state, 3, AgentState::Working);
+
+    assert_eq!(state.waiting_count(), 2);
+    assert_eq!(state.mode_line(32).content(), "  2 waiting");
+}
+
+#[test]
+fn the_waiting_count_carries_the_triage_color() {
+    // 数字だけトリアージモードの色を薄く乗せる（色 + dim の併用）
+    let mut state = state_with_panes(2);
+    set_agent_state(&mut state, 1, AgentState::Error);
+
+    let mode = state.mode_line(SIDEBAR);
+    assert_eq!(ink_at(&mode, 0), vec![2], "数字にレベル0の色");
+    assert!(
+        ink_at(&mode, DIM_LEVEL).contains(&2),
+        "数字は dim も併用する"
+    );
+}
+
+#[test]
+fn a_two_digit_waiting_count_keeps_its_color_and_its_width() {
+    // 件数が桁上がりしても、色は数字の位置に追従し、幅もモード行に収まる
+    //（`  12 waiting` で12セル。サイドバー幅32の内容幅30に対して余裕がある）
+    let mut state = state_with_panes(12);
+    for pane_id in 1..=12 {
+        set_agent_state(&mut state, pane_id, AgentState::Done);
+    }
+
+    let mode = state.mode_line(SIDEBAR);
+    assert_eq!(mode.content(), "  12 waiting");
+    assert!(
+        unicode_width::UnicodeWidthStr::width(mode.content()) <= SIDEBAR - 2,
+        "右マージンを食わない: {}",
+        mode.content()
+    );
+    assert_eq!(ink_at(&mode, 0), vec![2, 3], "2桁とも色が乗る");
+}
+
+#[test]
+fn the_mode_row_stays_empty_when_nothing_waits() {
+    // 対応が不要であることを伝える文言は出さない（装飾のための装飾）
+    let mut state = state_with_panes(2);
+    set_agent_state(&mut state, 1, AgentState::Working);
+
+    assert_eq!(state.waiting_count(), 0);
+    assert_eq!(state.mode_line(32).content(), "");
+}
+
+#[test]
+fn a_mode_replaces_the_waiting_count() {
+    // モード行は1行しかないので、モード中は待ち件数を諦める
+    let mut state = state_with_panes(2);
+    set_agent_state(&mut state, 1, AgentState::Done);
+    state.nav_mode = true;
+
+    let mode = state.mode_line(32).content().to_string();
+    assert!(!mode.contains("waiting"), "{}", mode);
+    assert!(mode.contains("[nav]"), "{}", mode);
+}
+
+#[test]
+fn the_nav_mode_row_shows_the_help_and_exit_hints() {
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+
+    let mode = state.mode_line(32);
+    let mode = mode.content();
+    assert!(mode.starts_with("  [nav]"), "{}", mode);
+    assert!(mode.contains("?:help"), "{}", mode);
+    assert!(mode.contains("esc:exit"), "{}", mode);
+    assert!(mode.chars().count() <= 32, "サイドバー幅に収まる");
+}
+
+#[test]
+fn the_search_mode_row_keeps_the_help_hint_beside_the_query() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "alp");
 
-    let header = state.header_line(32);
-    let header = header.content();
-    assert!(header.starts_with("/alp"), "{}", header);
-    assert!(header.contains("?:help"), "{}", header);
-    assert!(header.chars().count() <= 32);
+    let mode = state.mode_line(32);
+    let mode = mode.content();
+    assert!(mode.starts_with("  /alp"), "{}", mode);
+    assert!(mode.contains("?:help"), "{}", mode);
+    assert!(mode.chars().count() <= 32);
 }
 
 #[test]
@@ -685,10 +866,10 @@ fn a_long_query_wins_over_the_help_hint() {
     type_query(&mut state, "0123456789");
 
     // 幅12には操作ヒントを置く余地が無い。入力中のクエリのほうを残す
-    let header = state.header_line(12);
-    let header = header.content();
-    assert!(!header.contains("?:help"), "{}", header);
-    assert!(header.chars().count() <= 12);
+    let mode = state.mode_line(12);
+    let mode = mode.content();
+    assert!(!mode.contains("?:help"), "{}", mode);
+    assert!(mode.chars().count() <= 12);
 }
 
 #[test]
@@ -699,11 +880,11 @@ fn a_full_width_query_does_not_push_the_hint_off_the_edge() {
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "日本語のペイン名");
 
-    let header = state.header_line(32);
+    let mode = state.mode_line(32);
     assert!(
-        unicode_width::UnicodeWidthStr::width(header.content()) <= 32,
+        unicode_width::UnicodeWidthStr::width(mode.content()) <= 32,
         "{}",
-        header.content()
+        mode.content()
     );
 }
 
@@ -837,7 +1018,7 @@ fn the_help_overlay_opens_from_the_search_submode_too() {
         .map(|row| state.help_line(row, 32));
     assert_eq!(
         title.as_ref().map(|t| t.content()),
-        Some("  [SEARCH] keys"),
+        Some("  [search] keys"),
         "検索サブモードのキーを出す"
     );
 
@@ -1643,6 +1824,9 @@ fn unknown_pipes_are_ignored() {
 // 消えない。cwd はペイン行に混ぜず、続く cwd行に出す
 
 const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定3）
+                           // ヘッダが常時占める行数（ブランド行・モード行・境界線）。ツリーの行番号は
+                           // すべてこの下から数える（要件: sidebar-header.feature）
+const HEADER_ROWS: usize = 3;
 const CONTENT: usize = SIDEBAR - 2; // 右マージン2セルを除いた、文字を置ける幅
 
 // 1ペインだけを持つ状態。ペイン名を指定して作る
@@ -1826,11 +2010,11 @@ fn the_cwd_is_rendered_as_its_own_row() {
         .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
 
     let rows = state.visible_rows();
-    // 0: ヘッダ / 1: tab1見出し / 2: ペイン行 / 3: cwd行
-    assert!(matches!(rows[2], Row::Pane { .. }));
-    assert!(matches!(rows[3], Row::Cwd { .. }));
+    // 0-2: ヘッダ3行 / 3: tab1見出し / 4: ペイン行 / 5: cwd行
+    assert!(matches!(rows[HEADER_ROWS + 1], Row::Pane { .. }));
+    assert!(matches!(rows[HEADER_ROWS + 2], Row::Cwd { .. }));
     assert_eq!(
-        state.pane_at_row(3),
+        state.pane_at_row(HEADER_ROWS + 2),
         Some(1),
         "cwd行のクリックも同じペインに当たる（要件: click-to-focus）"
     );
@@ -1856,7 +2040,11 @@ fn a_pane_without_a_cwd_gets_no_extra_row() {
     state.show_cwd = true;
 
     let rows = state.visible_rows();
-    assert_eq!(rows.len(), 3, "ヘッダ・タブ見出し行・ペイン行だけ");
+    assert_eq!(
+        rows.len(),
+        HEADER_ROWS + 2,
+        "ヘッダ・タブ見出し行・ペイン行だけ"
+    );
 }
 
 #[test]
@@ -2044,7 +2232,7 @@ fn scrolling_keeps_everything_in_place_when_it_all_fits() {
 
     assert_eq!(state.scroll, 0, "全部載るならスクロールしない");
     assert!(overflow_markers(&state, 40).is_empty());
-    assert_eq!(state.screen_rows(40).len(), 14);
+    assert_eq!(state.screen_rows(40).len(), HEADER_ROWS + 13);
 }
 
 #[test]
@@ -2107,8 +2295,11 @@ fn the_header_stays_pinned_while_the_list_scrolls() {
 
     let screen = state.screen_rows(ROWS);
     assert!(
-        matches!(screen.first(), Some(Row::Header)),
-        "ヘッダは流さず固定する"
+        matches!(
+            (&screen[0], &screen[1], &screen[2]),
+            (Row::Brand, Row::Mode, Row::Divider)
+        ),
+        "ヘッダ3行は流さず固定する"
     );
     assert_eq!(screen.len(), ROWS, "画面高ぴったりまで使う");
 }
@@ -2118,15 +2309,15 @@ fn overflow_markers_report_the_hidden_rows() {
     const ROWS: usize = 8;
     let mut state = overflowing_state();
 
-    // 先頭を選択中: 下だけが隠れる。ヘッダ1 + ペイン6 + 下端マーカー1 = 8行
+    // 先頭を選択中: 下だけが隠れる。ヘッダ3 + タブ見出し1 + ペイン3 + 下端マーカー1 = 8行
     state.selected = 0;
     state.render(ROWS, 32);
-    assert_eq!(overflow_markers(&state, ROWS), vec![(7, false)]);
+    assert_eq!(overflow_markers(&state, ROWS), vec![(9, false)]);
 
     // 末尾を選択中: 上だけが隠れる（タブ見出し行も隠れる側に入る）
     state.selected = 11;
     state.render(ROWS, 32);
-    assert_eq!(overflow_markers(&state, ROWS), vec![(7, true)]);
+    assert_eq!(overflow_markers(&state, ROWS), vec![(9, true)]);
 
     // 途中まで送ったところ: 上下ともマーカーが出る
     let mut state = overflowing_state();
@@ -2136,7 +2327,7 @@ fn overflow_markers_report_the_hidden_rows() {
     assert_eq!(markers.len(), 2, "上下ともマーカーが出る: {:?}", markers);
     assert!(markers[0].1 && !markers[1].1);
     assert_eq!(
-        markers[0].0 + markers[1].0 + (ROWS - 3),
+        markers[0].0 + markers[1].0 + (ROWS - HEADER_ROWS - 2),
         13,
         "隠れている行数と出ている行数の合計が一覧の行数になる"
     );
@@ -2151,14 +2342,14 @@ fn clicking_follows_the_scrolled_layout() {
     state.selected = 11;
     state.render(ROWS, 32);
 
-    // 0: ヘッダ / 1: 上端マーカー / 2..7: pane7..pane12
-    assert_eq!(state.pane_at_row(1), None, "マーカー行は対象外");
-    assert_eq!(state.pane_at_row(2), Some(7));
+    // 0-2: ヘッダ3行 / 3: 上端マーカー / 4..7: pane9..pane12
+    assert_eq!(state.pane_at_row(HEADER_ROWS), None, "マーカー行は対象外");
+    assert_eq!(state.pane_at_row(HEADER_ROWS + 1), Some(9));
     assert_eq!(state.pane_at_row(7), Some(12));
     assert_eq!(state.pane_at_row(8), None, "画面の外");
 
-    assert!(state.handle_click(2));
-    assert_eq!(state.selectable[state.selected].pane_id, 7);
+    assert!(state.handle_click(HEADER_ROWS as isize + 1));
+    assert_eq!(state.selectable[state.selected].pane_id, 9);
 }
 
 #[test]
@@ -2222,8 +2413,8 @@ fn reconcile_scroll_survives_a_screen_with_no_room() {
 // 何もしない）なので、ここでは「どの行がどのペインに対応するか」と
 // クリックが選択・モードに与える影響を見る。
 
-// navモード外の searchable_state。ヘッダは常時1行あるので、行の並びは
-// 0: ヘッダ / 1: tab1見出し / 2: alpha / 3: bravo / 4: tab2見出し / 5: charlie
+// navモード外の searchable_state。ヘッダは常時3行あるので、行の並びは
+// 0-2: ヘッダ / 3: tab1見出し / 4: alpha / 5: bravo / 6: tab2見出し / 7: charlie
 fn clickable_state() -> State {
     let mut state = searchable_state();
     state.nav_mode = false;
@@ -2234,11 +2425,11 @@ fn clickable_state() -> State {
 fn clicking_a_pane_row_selects_that_pane() {
     let mut state = clickable_state();
 
-    assert!(state.handle_click(3));
+    assert!(state.handle_click(HEADER_ROWS as isize + 2));
     assert_eq!(state.selectable[state.selected].pane_id, 2);
 
     // タブをまたいだ行も同じように引ける
-    assert!(state.handle_click(5));
+    assert!(state.handle_click(HEADER_ROWS as isize + 4));
     assert_eq!(state.selectable[state.selected].pane_id, 3);
 }
 
@@ -2247,9 +2438,12 @@ fn clicking_a_tab_heading_does_nothing() {
     let mut state = clickable_state();
     state.selected = 1;
 
-    assert!(!state.handle_click(0), "ヘッダ行も対象外");
-    assert!(!state.handle_click(1));
-    assert!(!state.handle_click(4));
+    // ヘッダ3行はどれもクリックの対象にならない（要件: sidebar-header.feature）
+    for y in 0..HEADER_ROWS as isize {
+        assert!(!state.handle_click(y), "ヘッダ{}行目が反応した", y + 1);
+    }
+    assert!(!state.handle_click(HEADER_ROWS as isize), "tab1見出し");
+    assert!(!state.handle_click(HEADER_ROWS as isize + 3), "tab2見出し");
     assert_eq!(state.selected, 1, "選択は動かない");
 }
 
@@ -2259,7 +2453,7 @@ fn clicking_outside_the_list_does_nothing() {
     state.selected = 1;
 
     // 一覧より下の余白
-    assert!(!state.handle_click(6));
+    assert!(!state.handle_click(HEADER_ROWS as isize + 5));
     assert!(!state.handle_click(99));
     // 負の行（サイドバーの外）
     assert!(!state.handle_click(-1));
@@ -2269,8 +2463,8 @@ fn clicking_outside_the_list_does_nothing() {
 #[test]
 fn clicking_in_nav_mode_jumps_and_leaves_the_mode() {
     let mut state = searchable_state(); // nav_mode = true
-                                        // ヘッダが1行入るぶん、ツリーはひとつ下から始まる
-    assert!(state.handle_click(3));
+                                        // ヘッダが3行入るぶん、ツリーはその下から始まる
+    assert!(state.handle_click(HEADER_ROWS as isize + 2));
 
     assert_eq!(state.selectable[state.selected].pane_id, 2);
     assert!(!state.nav_mode, "ジャンプしたら横取りは解除する");
@@ -2281,10 +2475,13 @@ fn clicking_follows_the_filtered_layout_while_searching() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "alp");
-    // 0: クエリ行 / 1: tab1見出し / 2: alpha（bravo と tab2 は絞り込みで消える）
-    assert!(!state.handle_click(1), "見出し行は対象外");
+    // 0-2: ヘッダ / 3: tab1見出し / 4: alpha（bravo と tab2 は絞り込みで消える）
+    assert!(
+        !state.handle_click(HEADER_ROWS as isize),
+        "見出し行は対象外"
+    );
 
-    assert!(state.handle_click(2));
+    assert!(state.handle_click(HEADER_ROWS as isize + 1));
     assert_eq!(state.selectable[state.selected].pane_id, 1);
     assert!(!state.nav_mode);
     assert!(state.search.is_none(), "検索サブモードも一緒に畳む");
@@ -2569,7 +2766,7 @@ fn an_empty_triage_list_says_so() {
     state.handle_nav_key(key(BareKey::Char('p')));
     let rows = state.visible_rows();
     assert!(
-        matches!(rows.get(1), Some(Row::Notice(_))),
+        matches!(rows.get(HEADER_ROWS), Some(Row::Notice(_))),
         "空リストのままだと壊れて見える"
     );
 }
@@ -2582,7 +2779,7 @@ fn triage_rows_carry_the_pane_name_and_its_tab_name() {
 
     let rows = state.visible_rows();
     let tab_column = state.triage_tab_column(&rows, SIDEBAR);
-    let Some(Row::Triage { entry, tab_name }) = rows.get(1) else {
+    let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い: {}", rows.len());
     };
     let text = state.triage_row(entry, tab_name, false, tab_column, SIDEBAR);
@@ -2619,7 +2816,7 @@ fn a_long_pane_name_does_not_push_the_tab_name_off_the_row() {
 
     let rows = state.visible_rows();
     let tab_column = state.triage_tab_column(&rows, SIDEBAR);
-    let Some(Row::Triage { entry, tab_name }) = rows.get(1) else {
+    let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い");
     };
     let content = state
@@ -2637,14 +2834,14 @@ fn a_long_pane_name_does_not_push_the_tab_name_off_the_row() {
 }
 
 #[test]
-fn the_triage_header_replaces_the_mode_name() {
+fn the_triage_mode_row_replaces_the_mode_name() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
     state.handle_nav_key(key(BareKey::Char('p')));
-    let header = state.header_line(SIDEBAR).content().to_string();
-    assert!(header.starts_with("[TRIAGE]"), "{}", header);
+    let mode = state.mode_line(SIDEBAR).content().to_string();
+    assert!(mode.starts_with("  [tri]"), "{}", mode);
     // Esc の行き先はツリー表示であってnavモードの退場ではない
-    assert!(header.contains("esc:back"), "{}", header);
+    assert!(mode.contains("esc:back"), "{}", mode);
 }
 
 #[test]
@@ -2659,7 +2856,7 @@ fn the_triage_help_overlay_lists_its_own_keys() {
         .iter()
         .map(|row| state.help_line(row, SIDEBAR).content().to_string())
         .collect();
-    assert!(lines[0].contains("[TRIAGE]"), "{:?}", lines);
+    assert!(lines[0].contains("[tri]"), "{:?}", lines);
     for line in &lines {
         assert!(!line.contains('…'), "幅32に収まらない: {}", line);
     }
@@ -2690,8 +2887,8 @@ fn clicking_a_triage_row_jumps_to_that_pane() {
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 4, AgentState::Error);
     state.handle_nav_key(key(BareKey::Char('p')));
-    // 0: ヘッダ / 1: delta（error）/ 2: alpha（working）
-    assert!(state.handle_click(2));
+    // 0-2: ヘッダ / 3: delta（error）/ 4: alpha（working）
+    assert!(state.handle_click(HEADER_ROWS as isize + 1));
     assert_eq!(state.selectable[state.selected].pane_id, 1);
     assert!(!state.nav_mode);
     assert!(state.triage.is_none(), "トリアージモードも一緒に畳む");

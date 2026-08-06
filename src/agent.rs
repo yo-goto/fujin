@@ -64,6 +64,16 @@ impl AgentState {
         }
     }
 
+    // 注意を引く状態か（要件: sidebar-header の待ち件数）。既読化（決定10）が
+    // `idle` に戻す対象と同じ集合で、`working` は数えない — 走っている最中の
+    // ペインは人の対応を待っていない
+    pub(crate) fn is_waiting(&self) -> bool {
+        matches!(
+            self,
+            AgentState::Done | AgentState::Blocked | AgentState::Error
+        )
+    }
+
     // Textのcolor_rangeレベル（テーマの強調色 0-3）
     pub(crate) fn color(&self) -> usize {
         match self {
@@ -99,10 +109,7 @@ impl AgentInfo {
     // 既読化（決定10）: 注意を引く状態（done/blocked/error）を idle に戻す。
     // 戻したら true
     pub(crate) fn mark_read(&mut self) -> bool {
-        if !matches!(
-            self.state,
-            AgentState::Done | AgentState::Blocked | AgentState::Error
-        ) {
+        if !self.state.is_waiting() {
             return false;
         }
         self.state = AgentState::Idle;
@@ -246,6 +253,21 @@ impl State {
         // クリアを実行したのは1つだけ）。観測できた可視インスタンスから
         // 兄弟インスタンスへ配る
         self.broadcast_read_clears(&cleared);
+    }
+
+    // 対応を待っているエージェントペインの数（要件: sidebar-header）。
+    //
+    // 一覧に出るペイン（`selectable`）だけを数える。`agents` を直接数えないのは、
+    // 閉じたペインの状態が prune されるまでの一瞬、画面に無いものを数えてしまうため
+    pub(crate) fn waiting_count(&self) -> usize {
+        self.selectable
+            .iter()
+            .filter(|entry| {
+                self.agents
+                    .get(&entry.pane_id)
+                    .is_some_and(|info| info.state.is_waiting())
+            })
+            .count()
     }
 
     // 閉じられたペインの状態を破棄

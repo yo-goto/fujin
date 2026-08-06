@@ -374,7 +374,7 @@ impl State {
             self.triage_help_lines()
         } else if self.search.is_some() {
             &[
-                Title("[SEARCH]", "keys"),
+                Title("[search]", "keys"),
                 Blank,
                 Entry("type", "filter panes"),
                 Entry("backspace", "delete char"),
@@ -388,7 +388,7 @@ impl State {
             ]
         } else {
             &[
-                Title("[NAV]", "keys"),
+                Title("[nav]", "keys"),
                 Blank,
                 Entry("j k up down tab", "move"),
                 Entry("g G", "top / bottom"),

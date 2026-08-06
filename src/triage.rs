@@ -179,7 +179,7 @@ impl State {
     pub(crate) fn triage_help_lines(&self) -> &'static [HelpRow] {
         use HelpRow::{Blank, Entry, Note, Title};
         &[
-            Title("[TRIAGE]", "keys"),
+            Title("[tri]", "keys"),
             Blank,
             Entry("j k up down tab", "move"),
             Entry("g G", "top / bottom"),
