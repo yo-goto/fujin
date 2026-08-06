@@ -189,7 +189,14 @@ impl State {
                 // 走っている間は working のままにする。
                 //
                 // `error` は上書きしない。StopFailure に続けて Stop が届く可能性が
-                // あり、上書きするとエラーで落ちたターンが done に見えてしまう
+                // あり、上書きするとエラーで落ちたターンが done に見えてしまう。
+                //
+                // `blocked` を守らないのは意図的（`is_waiting()` でまとめない）。
+                // `error` はターンが失敗して終わった**終端**の状態なのに対し、
+                // `blocked` はターン中の応答待ちという**過渡**の状態で、Stop は
+                // 「もう待っていない」を意味する。permission_prompt に承認した後は
+                // ツールが再開するだけで UserPromptSubmit は発火しないので、ここで
+                // 倒さないと正常に終わったターンが blocked のまま固着する
                 if entry.subagents == 0 && entry.state != AgentState::Error {
                     entry.state = AgentState::Done;
                 }

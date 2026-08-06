@@ -258,6 +258,24 @@ fn stop_does_not_overwrite_error() {
     assert_eq!(state.agents[&1].state, AgentState::Working);
 }
 
+// `blocked` は `error` と違って Stop で done に倒す。応答待ちはターン中の過渡的な
+// 状態で、Stop が届いた時点でもう待っていない。ここで倒さないと、permission_prompt
+// に承認して正常に終わったターンが blocked のまま固着する
+// （issues/blocked-status-overwritten-by-stop.md）
+#[test]
+fn stop_resolves_blocked() {
+    let mut state = State::default();
+    state.apply_status(status(1, "UserPromptSubmit"));
+
+    let mut notification = status(1, "Notification");
+    notification.detail = Some("permission required".to_string());
+    state.apply_status(notification);
+    assert_eq!(state.agents[&1].state, AgentState::Blocked);
+
+    state.apply_status(status(1, "Stop"));
+    assert_eq!(state.agents[&1].state, AgentState::Done);
+}
+
 #[test]
 fn subagents_are_counted_until_they_stop() {
     let mut state = State::default();
