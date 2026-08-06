@@ -354,6 +354,11 @@ cwd はフックのペイロード由来なので、フック設定済みのエ�
 プラグインは pipe 名 `fujin_status` で以下のJSONを受け取ります。
 Claude Code 以外のエージェント（codex 等）も、この形式で送れば同じように表示されます:
 
+| エージェント | 対応状況 |
+|---|---|
+| Claude Code | 動作確認済み。`extras/claude-hooks/fujin-hook.sh` を参照 |
+| その他（codex 等） | 未検証。下記の形式で送れば動作するはずだが、実機での確認は済んでいない |
+
 ```bash
 zellij pipe --name fujin_status -- '{
   "pane_id": '$ZELLIJ_PANE_ID',

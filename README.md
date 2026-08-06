@@ -379,6 +379,11 @@ The plugin listens on the pipe name `fujin_status` for JSON like the following.
 Agents other than Claude Code (codex, etc.) will show up the same way as long
 as they send this shape:
 
+| Agent | Status |
+|---|---|
+| Claude Code | Verified. See `extras/claude-hooks/fujin-hook.sh` |
+| Others (codex, etc.) | Unverified. Should work if sent in the shape below, but not yet confirmed against a real agent |
+
 ```bash
 zellij pipe --name fujin_status -- '{
   "pane_id": '$ZELLIJ_PANE_ID',
