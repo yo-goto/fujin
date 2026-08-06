@@ -619,7 +619,10 @@ impl State {
                     hit,
                 } => {
                     let is_selected = self.row_is_selected(entry, flat_index);
-                    let row = self.pane_row(entry, is_selected, hit, column, cols);
+                    // 番号ジャンプサブモード中だけ番号列が付く（決定29）
+                    let number = self.jump_number(flat_index);
+                    let number = number.as_ref().map(|(n, m)| (n.as_str(), *m));
+                    let row = self.pane_row(entry, is_selected, hit, column, number, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Triage { entry, tab_name } => {
@@ -706,7 +709,12 @@ impl State {
         }
         // 検索サブモード中はクエリ入力欄に転用する
         if let Some(search) = &self.search {
-            return search_footer(&search.query, &indent, ink, inner);
+            return input_footer("/", &search.query, &indent, ink, inner);
+        }
+        // 番号ジャンプサブモード中は番号入力バッファの表示に転用する（決定29）。
+        // 先頭の `n` は検索サブモードの `/` と同じく入場キーの提示
+        if let Some(jump) = &self.jump {
+            return input_footer("n ", &jump.buffer, &indent, ink, inner);
         }
         // トリアージモードの Esc の行き先は navモードのツリー表示（退場ではない）
         // なので、ヒントも `exit` ではなく `back`
@@ -882,23 +890,35 @@ impl State {
     //
     // レイアウトは `{アイコン} {ペイン名} …余白… {カウンタ列}` で、カウンタ列は
     // 右端に揃える。ペイン名はカウンタ列を除いた残り幅に収め、名前の長さで
-    // サブエージェント数・未完了タスク数が消えないようにする（決定21）
+    // サブエージェント数・未完了タスク数が消えないようにする（決定21）。
+    //
+    // `number` は番号ジャンプサブモード中だけ Some になる番号列のセル
+    //（通し番号の表示と、候補に残っているか。決定29）。アイコンの前に挟むので、
+    // head が桁数ぶん伸びてペイン名の残り幅がそのぶん縮む
     pub(crate) fn pane_row(
         &self,
         entry: &Selectable,
         is_selected: bool,
         hit: Option<&Hit>,
         column: CounterColumn,
+        number: Option<(&str, bool)>,
         cols: usize,
     ) -> Text {
         let agent = self.agents.get(&entry.pane_id);
         let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
         // 選択行は左端にバーを立てる。テーマの選択色が沈む配色でも
         // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
-        // 状態アイコンの color_range 2..3 をずらさない）
+        // 番号列・状態アイコンの開始位置をずらさない）
         let prefix = if is_selected { "▌ " } else { "  " };
-        let head = format!("{}{} ", prefix, icon); // "▌ {icon} " / "  {icon} "
+        // "▌ {icon} " / "  {icon} "、番号ジャンプサブモード中は "▌ {番号} {icon} "
+        let head = match number {
+            Some((digits, _)) => format!("{}{} {} ", prefix, digits, icon),
+            None => format!("{}{} ", prefix, icon),
+        };
         let head_width = UnicodeWidthStr::width(head.as_str());
+        // 状態アイコンの文字位置。head の末尾は常に「アイコン(1文字)+空白」なので、
+        // 番号列の有無で動いても末尾から数えれば追従できる
+        let icon_at = head.chars().count().saturating_sub(2);
 
         let (subagents, open_tasks) = counter_labels(agent);
         let counters = column.render(&subagents, &open_tasks);
@@ -958,8 +978,20 @@ impl State {
 
         let mut text = Text::new(&label);
         if let Some(a) = agent {
-            // 状態アイコン部分（先頭2..3文字目）に状態色
-            text = text.color_range(a.state.color(), 2..3);
+            // 状態アイコン部分に状態色（位置は番号列の有無に追従する）
+            text = text.color_range(a.state.color(), icon_at..icon_at + 1);
+        }
+        if let Some((digits, matches)) = number {
+            // 番号は「そのまま打つ文字」なのでキーの色で出す（ヘルプの
+            // キー列と同じ扱い）。番号入力バッファに前方一致しなくなった
+            // 番号は落とし、残っている候補だけが目に入るようにする
+            //（vimiumのリンクヒントと同じ提示。決定29）
+            let span = 2..2 + digits.chars().count();
+            text = if matches {
+                text.color_range(2, span)
+            } else {
+                text.dim_range(span)
+            };
         }
         if let Some(indices) = highlight.filter(|i| !i.is_empty()) {
             // レベル1で固定（決定11のv1スコープ: 設定項目は増やさない）
@@ -1059,25 +1091,27 @@ impl State {
     }
 }
 
-// 検索サブモード中のフッター。クエリ入力が主役なので左に置き、操作ヒントは
-// 右端へ寄せる。クエリが伸びてぶつかるところまで来たら、入力中の文字列のほうを
-// 優先してヒント側を落とす（右寄せを使うのは枠でここ1箇所だけ）。
+// 入力欄を兼ねるフッター（検索サブモードのクエリ・番号ジャンプサブモードの
+// 番号入力バッファ）。入力が主役なので左に置き、操作ヒントは右端へ寄せる。
+// 入力が伸びてぶつかるところまで来たら、入力中の文字列のほうを優先して
+// ヒント側を落とす（右寄せを使うのは枠でここ1箇所だけ）。
 //
-// クエリ本体は本文なので既定色のまま、先頭の `/` はモード名と同じ扱いで
-// レベル3。状態色で統一するのはヒント側（要件: sidebar-footer）
-fn search_footer(query: &str, indent: &str, ink: Ink, cols: usize) -> Text {
-    let query = format!("{}▏", query);
-    // 余白は表示セル幅で数える。クエリに全角文字が入ると文字数とセル数が
+// 入力本体は本文なので既定色のまま、先頭の `tag`（`/` や `n`）はモード名と
+// 同じ扱いでレベル3。状態色で統一するのはヒント側（要件: sidebar-footer）
+fn input_footer(tag: &str, input: &str, indent: &str, ink: Ink, cols: usize) -> Text {
+    let input = format!("{}▏", input);
+    // 余白は表示セル幅で数える。入力に全角文字が入ると文字数とセル数が
     // ずれ、操作ヒントが右端からはみ出す
     let hint = "?:help";
     let pad = cols
         .saturating_sub(UnicodeWidthStr::width(indent))
-        .saturating_sub(UnicodeWidthStr::width(query.as_str()) + 1) // 先頭の `/` のぶん
+        .saturating_sub(UnicodeWidthStr::width(tag))
+        .saturating_sub(UnicodeWidthStr::width(input.as_str()))
         .saturating_sub(UnicodeWidthStr::width(hint));
     let mut segments = vec![
         (indent, Ink::Plain),
-        ("/", Ink::Tag),
-        (query.as_str(), Ink::Plain),
+        (tag, Ink::Tag),
+        (input.as_str(), Ink::Plain),
     ];
     let spacer = " ".repeat(pad);
     if pad > 0 {
