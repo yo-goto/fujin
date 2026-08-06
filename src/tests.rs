@@ -16,7 +16,7 @@
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
 use crate::render::{
-    cwd_row, divider_line, fold_highlight_indices, pad_to_width, reconcile_scroll,
+    cwd_row, divider_line, fold_highlight_indices, overflow_row, pad_to_width, reconcile_scroll,
     shift_highlight_indices, truncate, truncate_start, CounterColumn, Row,
 };
 use std::collections::HashMap;
@@ -2302,6 +2302,28 @@ fn the_header_stays_pinned_while_the_list_scrolls() {
         "ヘッダ3行は流さず固定する"
     );
     assert_eq!(screen.len(), ROWS, "画面高ぴったりまで使う");
+}
+
+#[test]
+fn the_overflow_marker_sits_in_the_tab_heading_column() {
+    // マーカーは一覧の1項目ではなく「一覧がそこで打ち切られている」ことを示す行なので、
+    // ペイン行の階段ではなくタブ見出しと同じ x=0 に置く（docs/concept/ui-design.md）。
+    // タブ見出し行の `▾` と記号がぶつかるため、続く `…` で見分けさせている
+    for (above, marker) in [(true, '▴'), (false, '▾')] {
+        let row = overflow_row(7, above, SIDEBAR);
+        let chars: Vec<char> = row.content().chars().collect();
+        assert_eq!(chars[0], marker, "記号は x=0: {}", row.content());
+        assert_eq!(chars[2], '…', "x=2 に省略記号: {}", row.content());
+        assert_eq!(chars[4], '7', "行数は名前の列 x=4: {}", row.content());
+        assert!(row.content().ends_with(" more"), "{}", row.content());
+        // 一覧の行そのものではないので全体を落として出す
+        assert_eq!(ink_at(&row, DIM_LEVEL).len(), chars.len());
+    }
+
+    // 桁が増えても右マージンを食わない
+    let wide = overflow_row(123, true, SIDEBAR);
+    assert_eq!(wide.content(), "▴ … 123 more");
+    assert!(unicode_width::UnicodeWidthStr::width(wide.content()) <= SIDEBAR - 2);
 }
 
 #[test]

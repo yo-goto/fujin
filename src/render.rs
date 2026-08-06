@@ -917,10 +917,16 @@ pub(crate) fn divider_line(cols: usize) -> Text {
 }
 
 // 表示範囲の外に隠れている行があることを示す1行。文言は英語で統一する。
-// 記号はタブ見出し行と同じ三角の系列で、上下どちら側が隠れているかを向きで示す
-fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
+// 記号はタブ見出し行と同じ三角の系列で、上下どちら側が隠れているかを向きで示す。
+// タブ見出しと同列（x=0）に置く — 一覧の1項目ではなく、一覧そのものが
+// そこで打ち切られていることを表す行なので、階層の外側に出す
+pub(crate) fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
     let marker = if above { "▴" } else { "▾" };
-    let label = format!("  {} {} more", marker, hidden);
+    // `…` はペインの cwd（truncate_start）と同じ省略記号。マーカーと数字の
+    // あいだに挟み、一覧がそこで途切れていることを添える。
+    // **消さないこと** — 下端の `▾` はアクティブなタブ見出しと記号も列も同じなので、
+    // この `…` だけが「タブ見出しではない」ことを示している
+    let label = format!("{} … {} more", marker, hidden);
     // 一覧の行そのものではないので、通知行と同じく落として出す
     compose(&[(&label, Ink::Muted)], content_cols(cols))
 }
