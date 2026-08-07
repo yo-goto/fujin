@@ -10,7 +10,7 @@ use zellij_tile::prelude::*;
 
 use crate::render::HelpRow;
 use crate::search::{match_pane, Hit};
-use crate::{Selectable, State};
+use crate::{ParkedFocus, Selectable, State};
 
 // 番号ジャンプサブモード（navモード内の `n`、決定29）のローカルUI状態。
 // 検索サブモードと同じく権威インスタンスにしか発生しないため、
@@ -44,40 +44,80 @@ impl State {
             self.select_pane_id(pane_id);
         }
         self.broadcast_selection();
-        self.suppress_focus_frame();
+        self.park_focus();
         intercept_key_presses();
     }
 
-    // navモード中だけ、作業ペインからペイン枠を落とす（決定34）。
+    // navモード中だけ、実フォーカスをサイドバー自身へ預かる（決定34）。
     //
-    // navモードは実フォーカスを動かさないので、探索中もフォーカス枠は直前まで
-    // 作業していたペインに点いたままになる。サイドバーのハイライトと二重に
-    // 「ここが操作対象」を主張して紛らわしいため、navモードの間だけ枠を消す。
-    // フォーカス枠の色だけを消すAPIは無いので、枠ごと落とすしかない
-    fn suppress_focus_frame(&mut self) {
-        let Some(pane_id) = self.focused_pane else {
+    // navモードは実フォーカスを動かさないので、そのままでは探索中もフォーカス枠が
+    // 直前まで作業していたペインに点いたままになり、サイドバーのハイライトと
+    // 二重に「ここが操作対象」を主張する。フォーカス枠の色だけを消すAPIは無いが、
+    // **フォーカス枠はセッション内で1枚しか点かない**（実測）ので、フォーカスを
+    // サイドバーへ移せば作業ペインの枠は非フォーカス色に戻る。枠そのものは残る。
+    //
+    // 召喚インスタンス（決定16）は最初から自分がフォーカスを持っているので、
+    // これは常駐サイドバーを召喚と同じ状態に揃える操作でもある
+    fn park_focus(&mut self) {
+        // 既に預かっている（入場のやり直し）なら二重に動かさない
+        if self.summoned || self.focus_parked.is_some() {
             return;
-        };
-        // 実フォーカスがプラグインペイン側にあるなら（召喚インスタンス自身が
-        // フォーカスを持つ場合）、作業ペインにフォーカス枠は点いていない。
-        // 消す理由が無いうえ、消せば枠の消失ぶんの再描画だけが起きる
+        }
+        // 実フォーカスがプラグインペイン側にあるなら、作業ペインにフォーカス枠は
+        // 点いていない（上記の1枚だけの性質）。預かる理由が無い
         if !self.focus_on_terminal {
             return;
         }
-        if !self.pane_has_frame(pane_id) {
+        let (Some(pane_id), Some(own_id)) = (self.focused_pane, self.own_plugin_id) else {
             return;
-        }
-        set_pane_borderless(PaneId::Terminal(pane_id), true);
-        self.frame_suppressed = Some(pane_id);
+        };
+        let is_floating = self.pane_is_floating(pane_id);
+        // unselectable なペインはフォーカスできない（実測。api-reference.md）ので、
+        // 預かる間だけ selectable に戻す。navモード中は全キーを横取りしている
+        // ため、この間にフォーカス巡回でサイドバーへ入り込む余地は無く、
+        // 決定6（サイドバーを巡回に混ぜない）の意図は保たれる
+        set_selectable(true);
+        // 召喚インスタンスはここへ来ないので、フローティング層の出し入れ
+        //（should_float_if_hidden）も in-place 化も要らない
+        focus_plugin_pane(own_id, false, false);
+        self.focus_parked = Some(ParkedFocus {
+            pane_id,
+            is_floating,
+        });
     }
 
-    // 抑制した枠を戻す（決定34）。退場の2系統（exit_nav_mode / leave_nav_mode）と
-    // プラグインの終了（Event::BeforeClose）のどこを通っても必ず戻すため、
-    // 「抑制した相手」を覚えておいて冪等に戻す
-    pub(crate) fn restore_focus_frame(&mut self) {
-        if let Some(pane_id) = self.frame_suppressed.take() {
-            set_pane_borderless(PaneId::Terminal(pane_id), false);
+    // 預かったフォーカスを手放す（決定34）。`refocus` が真なら作業ペインへ返す。
+    //
+    // 退場の2系統（exit_nav_mode / leave_nav_mode）と `Event::BeforeClose` の
+    // どこを通っても必ず手放すため、「預かった相手」を覚えておいて冪等に戻す。
+    // ジャンプ経路も一度は作業ペインへ返す — 呼び出し側の `focus_selected()` が
+    // すぐ上書きするが、フローティング層の出し入れを含む移動の起点を
+    // navモードに入る前と同じ状態に揃えられる
+    pub(crate) fn release_parked_focus(&mut self, refocus: bool) {
+        let Some(parked) = self.focus_parked.take() else {
+            return;
+        };
+        self.park_confirmed = false;
+        if refocus {
+            if let Some((pane_id, is_floating)) = self.refocus_target(parked) {
+                focus_pane_with_id(PaneId::Terminal(pane_id), is_floating, false);
+            }
         }
+        // 決定6へ戻す。**フォーカスを返したあとに** unselectable にすること —
+        // 逆順だと自分にフォーカスが残ったまま巡回対象から外れる
+        set_selectable(false);
+    }
+
+    // フォーカスの返し先。原則は預かった当のペインだが、**navモード中に
+    // 閉じられていたら選択行のペインへ返す**（決定34）。unselectable な自分に
+    // フォーカスが残ると、横取りも解いた後なのでキーの行き先が無くなる
+    pub(crate) fn refocus_target(&self, parked: ParkedFocus) -> Option<(u32, bool)> {
+        if self.selectable.iter().any(|e| e.pane_id == parked.pane_id) {
+            return Some((parked.pane_id, parked.is_floating));
+        }
+        self.selectable
+            .get(self.selected)
+            .map(|entry| (entry.pane_id, entry.is_floating))
     }
 
     // 入場時に選択すべきペイン（要件: docs/requirements/focus-sync/）。
@@ -115,10 +155,10 @@ impl State {
         self.triage = None;
         // 番号ジャンプサブモードも同様。入力途中のバッファは持ち越さない
         self.jump = None;
-        // navモード中だけ落としていた作業ペインの枠を戻す（決定34）。
-        // 召喚インスタンスの自死（下）より前に置く — 自分を閉じたあとでは
-        // ホストコマンドが届くか分からない
-        self.restore_focus_frame();
+        // 預かっていたフォーカスを作業ペインへ返す（決定34）。召喚インスタンスの
+        // 自死（下）より前に置く — 自分を閉じたあとではホストコマンドが届くか
+        // 分からない
+        self.release_parked_focus(true);
         clear_key_presses_intercepts();
         // 召喚インスタンスは用が済んだら自分で退場する（決定16）。
         // 残すと作業ペインに重なり続ける。次の入場でまた呼べばよい

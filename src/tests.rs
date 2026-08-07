@@ -1955,133 +1955,180 @@ fn owns_tab_only_matches_the_tab_holding_this_instance() {
     assert!(!state.owns_tab(2), "存在しないタブ");
 }
 
-// --- 枠の抑制（決定34） ---
+// --- フォーカスの預かり（決定34） ---
 //
-// `set_pane_borderless()` は副作用だけのホストコマンドなのでテストから呼んでも
-// 安全だが、効き目は観測できない。したがって「どのペインに抑制をかけたか」を
-// 畳んだ State::frame_suppressed で、抑制と復帰の対応を見る。
+// `set_selectable()` / `focus_plugin_pane()` / `focus_pane_with_id()` は副作用
+// だけのホストコマンドなのでテストから呼んでも安全だが、効き目は観測できない。
+// したがって「誰からフォーカスを預かっているか」を畳んだ State::focus_parked で
+// 預かりと返却の対応を見る。
 
-// 枠付きのターミナルペイン。枠の有無は PaneInfo に項目が無いので、
-// 内容領域が1行下・1桁右へ寄っていることで表す（決定34）
-fn framed_terminal_pane(id: u32, title: &str) -> PaneInfo {
-    PaneInfo {
-        pane_y: 0,
-        pane_content_y: 1,
-        pane_x: 0,
-        pane_content_x: 1,
-        pane_rows: 20,
-        pane_content_rows: 18,
-        ..terminal_pane(id, title)
-    }
+// 預かっている相手のペインID。テストから見たいのはこれだけなので、
+// State 側にアクセサは置かない
+fn parked_pane(state: &State) -> Option<u32> {
+    state.focus_parked.map(|parked| parked.pane_id)
 }
 
-// 枠付きペイン2枚のタブ1枚。実フォーカスはターミナル側にある状態
-fn state_with_framed_panes() -> State {
-    let mut state = State {
-        tabs: vec![tab(0, true)],
-        panes: Some(manifest(vec![(
-            0,
-            vec![
-                framed_terminal_pane(1, "pane1"),
-                framed_terminal_pane(2, "pane2"),
-            ],
-        )])),
-        permissions_granted: true,
-        focused_pane: Some(1),
-        focus_on_terminal: true,
-        ..Default::default()
-    };
-    state.rebuild_selectable();
+// フォーカスを預かれる状態（実フォーカスがターミナル側にあり、自分のIDも判明済み）
+fn state_ready_to_park(count: u32) -> State {
+    let mut state = state_with_panes(count);
+    state.own_plugin_id = Some(9);
+    state.focused_pane = Some(1);
+    state.focus_on_terminal = true;
     state
 }
 
 #[test]
-fn pane_has_frame_reads_the_content_offset() {
-    let state = State {
-        panes: Some(manifest(vec![(
-            0,
-            vec![
-                framed_terminal_pane(1, "framed"),
-                terminal_pane(2, "borderless"),
-                plugin_pane(9, "fujin.wasm"),
-            ],
-        )])),
-        ..Default::default()
-    };
-
-    assert!(state.pane_has_frame(1));
-    assert!(
-        !state.pane_has_frame(2),
-        "元から枠が無いペインに枠を生やしてはいけない"
-    );
-    assert!(!state.pane_has_frame(9), "プラグインペインは対象外");
-    assert!(!state.pane_has_frame(99), "一覧に無いペイン");
-    // 一覧そのものが無いうちは触らない側に倒す
-    assert!(!State::default().pane_has_frame(1));
-}
-
-#[test]
-fn entering_nav_mode_suppresses_the_pane_frame_of_the_focused_pane() {
-    let mut state = state_with_framed_panes();
+fn entering_nav_mode_parks_the_focus_on_the_sidebar() {
+    let mut state = state_ready_to_park(3);
 
     state.enter_nav_mode();
-    assert_eq!(state.frame_suppressed, Some(1));
+    assert_eq!(parked_pane(&state), Some(1));
 
     state.handle_nav_key(key(BareKey::Esc));
-    assert_eq!(state.frame_suppressed, None, "退場で枠を戻す");
+    assert_eq!(parked_pane(&state), None, "退場でフォーカスを返す");
 }
 
 #[test]
-fn jumping_out_of_nav_mode_also_restores_the_pane_frame() {
-    // 退場は2系統ある（exit_nav_mode / leave_nav_mode）。ジャンプ側でも戻す
-    let mut state = state_with_framed_panes();
+fn jumping_out_of_nav_mode_also_releases_the_parked_focus() {
+    // 退場は2系統ある（exit_nav_mode / leave_nav_mode）。ジャンプ側でも手放す
+    let mut state = state_ready_to_park(3);
     state.enter_nav_mode();
     state.handle_nav_key(key(BareKey::Char('j')));
     state.handle_nav_key(key(BareKey::Enter));
 
     assert!(!state.nav_mode);
-    assert_eq!(state.frame_suppressed, None);
+    assert_eq!(parked_pane(&state), None);
 }
 
 #[test]
-fn the_pane_frame_goes_back_to_the_pane_it_was_taken_from() {
-    // navモード中に実フォーカスが動いても、戻す相手は抑制をかけた当のペイン
-    let mut state = state_with_framed_panes();
+fn the_focus_goes_back_to_the_pane_it_was_taken_from() {
+    // 探索で選択を動かしても、返す相手は預かった当のペイン
+    let mut state = state_ready_to_park(3);
     state.enter_nav_mode();
-    assert_eq!(state.frame_suppressed, Some(1));
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(parked_pane(&state), Some(1));
 
+    state.handle_nav_key(key(BareKey::Esc));
+    assert_eq!(parked_pane(&state), None);
+
+    // 返したあとの入場は、そのときのフォーカスから預かり直す
     state.focused_pane = Some(2);
-    state.leave_nav_mode();
-    assert_eq!(state.frame_suppressed, None);
-
-    // 戻したあとの入場は、そのときのフォーカスに掛け直す
     state.enter_nav_mode();
-    assert_eq!(state.frame_suppressed, Some(2));
+    assert_eq!(parked_pane(&state), Some(2));
 }
 
 #[test]
-fn a_pane_without_a_pane_frame_is_left_alone() {
-    // レイアウトの borderless=true や pane_frames false の環境。
-    // 抑制しなければ復帰も要らない（無かった枠を生やさない）
-    let mut state = state_with_panes(3);
-    state.focused_pane = Some(1);
-    state.focus_on_terminal = true;
+fn a_floating_work_pane_is_remembered_as_floating() {
+    // 返すときの should_float_if_hidden。タイル扱いで返すと、フローティング層が
+    // 隠れているタブでは戻り先に届かない（`focus_selected` と同じ罠）
+    let mut state = state_ready_to_park(2);
+    if let Some(panes) = state.panes.as_mut().and_then(|m| m.panes.get_mut(&0)) {
+        panes[0].is_floating = true;
+    }
+    state.rebuild_selectable();
 
     state.enter_nav_mode();
-    assert_eq!(state.frame_suppressed, None);
+    assert_eq!(
+        state.focus_parked.map(|parked| parked.is_floating),
+        Some(true)
+    );
 }
 
 #[test]
-fn a_summoned_instance_leaves_the_work_pane_frame_alone() {
-    // 召喚インスタンスは自分がフォーカスを持つ（決定16）。zellij のフォーカス枠は
-    // レイヤをまたいで1枚しか点かない（実測）ので、作業ペイン側の枠はそもそも
-    // ハイライトされていない ＝ 落とす理由が無い
-    let mut state = state_with_framed_panes();
+fn a_summoned_instance_does_not_park_anything() {
+    // 召喚インスタンスは最初から自分がフォーカスを持っている（決定16）
+    let mut state = state_ready_to_park(3);
     state.summoned = true;
+
+    state.enter_nav_mode();
+    assert_eq!(parked_pane(&state), None);
+}
+
+#[test]
+fn the_focus_is_left_alone_when_a_plugin_pane_already_holds_it() {
+    // フォーカス枠はセッション内で1枚しか点かない（実測）。プラグインペイン側に
+    // フォーカスがあるなら作業ペインの枠は既に非フォーカス色で、預かる理由が無い
+    let mut state = state_ready_to_park(3);
     state.focus_on_terminal = false;
 
     state.enter_nav_mode();
-    assert_eq!(state.frame_suppressed, None);
+    assert_eq!(parked_pane(&state), None);
+}
+
+#[test]
+fn a_park_counts_as_lost_only_after_it_was_confirmed() {
+    // フォーカスの移動は非同期。預けた直後は「自分にフォーカスが無い」のが正常で、
+    // ここで持って行かれたと判定すると入場した直後に退場してしまう
+    let mut state = state_ready_to_park(3);
+    state.enter_nav_mode();
+
+    assert!(
+        !state.park_taken_over(false),
+        "預かりの成立を観測する前は判定しない"
+    );
+    assert!(!state.park_taken_over(true));
+
+    // 一度自分にフォーカスが来たのを観測した後は、離れたら持って行かれた扱い
+    state.park_confirmed = true;
+    assert!(state.park_taken_over(false));
+    assert!(!state.park_taken_over(true));
+
+    // 預かっていなければ、そもそも判定の対象外
+    state.release_parked_focus(false);
+    assert!(!state.park_taken_over(false));
+}
+
+#[test]
+fn the_focus_falls_back_to_the_selected_row_when_the_parked_pane_is_gone() {
+    // navモード中に預かった相手が閉じられたケース。unselectable な自分に
+    // フォーカスを残すと、横取りも解いた後なのでキーの行き先が無くなる
+    let mut state = state_ready_to_park(3);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j'))); // 選択は pane2 へ
+    let parked = state.focus_parked.expect("預かっているはず");
+
+    // pane1（預かった相手）が閉じられた
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![terminal_pane(2, "pane2"), terminal_pane(3, "pane3")],
+    )]));
+    state.rebuild_selectable();
+    state.select_pane_id(2);
+
+    assert_eq!(
+        state.refocus_target(parked),
+        Some((2, false)),
+        "閉じられていたら選択行へ返す"
+    );
+    // 生きていれば当のペインへ返す
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![terminal_pane(1, "pane1"), terminal_pane(2, "pane2")],
+    )]));
+    state.rebuild_selectable();
+    assert_eq!(state.refocus_target(parked), Some((1, false)));
+}
+
+#[test]
+fn an_interrupted_nav_mode_does_not_take_the_focus_back() {
+    // マウスで別のペインを選んだ場合。預かりを「返して」しまうと、ユーザーが
+    // 選んだ先からフォーカスを奪い返すことになる
+    let mut state = state_ready_to_park(3);
+    state.enter_nav_mode();
+    assert_eq!(parked_pane(&state), Some(1));
+
+    // refresh_focus() はホスト問い合わせを含むのでここでは呼べない。
+    // 「フォーカスが動いた」と観測した後の処理だけを再現する
+    state.release_parked_focus(false);
+    state.focused_pane = Some(3);
+    state.leave_nav_mode();
+
+    assert!(!state.nav_mode);
+    assert_eq!(parked_pane(&state), None);
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 3,
+        "ハイライトは新しい実フォーカスへ揃う"
+    );
 }
 
 // --- 検索サブモード（要件: docs/requirements/search-explorer/） ---

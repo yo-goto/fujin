@@ -298,12 +298,13 @@ The highlighted row always follows the pane you have focused, so nav mode starts
 on the pane you are working in. The one exception: if you leave with `Esc` and
 come back without moving the focus, it resumes where you were browsing.
 
-While nav mode is active, zellij's frame around the pane you were working in is
-hidden as well. Nav mode does not move the real focus, so without this you would
-see the focused-pane frame and the sidebar highlight both claiming to be your
-current target. The frame (and its title bar) comes back when you leave the mode.
-Panes that have no frame to begin with — `borderless=true` in your layout, or
-`pane_frames false` — are left alone.
+While nav mode is active, the sidebar borrows zellij's focus, so the pane you
+were working in keeps its frame but loses the focused-pane highlight — otherwise
+that highlight and the sidebar's own highlight would both claim to be your
+current target. Leaving the mode hands the focus back to the pane you came from
+(or to the pane you jumped to). Moving the focus yourself while in nav mode —
+clicking another pane, for instance — leaves the mode without taking the focus
+back.
 
 ### Search (`/` inside nav mode)
 

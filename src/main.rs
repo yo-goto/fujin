@@ -101,6 +101,14 @@ struct Selectable {
     is_floating: bool,
 }
 
+// navモード中、サイドバーへ預けたフォーカスの戻し先（決定34）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ParkedFocus {
+    pane_id: u32,
+    // 戻すときの should_float_if_hidden に使う（`focus_selected` と同じ理由）
+    is_floating: bool,
+}
+
 #[derive(Default)]
 struct State {
     tabs: Vec<TabInfo>,
@@ -136,12 +144,16 @@ struct State {
     // 問い合わせがプラグインペインを返して `focused_terminal_in_tab()` で
     // 作業ペインを拾い直した場合は false。zellij のフォーカス枠はレイヤを
     // またいで1枚しか点かない（実測）ので、この場合の作業ペインには
-    // フォーカス枠が点いていない ＝ 枠の抑制をする理由が無い
+    // フォーカス枠が点いていない ＝ フォーカスを預かる理由が無い
     focus_on_terminal: bool,
-    // 枠の抑制中の作業ペイン（決定34）。退場時にここへ枠を戻す。
-    // 実フォーカスとは別に覚えるのは、navモード中に実フォーカスが動いても
-    // 抑制した当のペインへ確実に戻すため
-    frame_suppressed: Option<u32>,
+    // navモード中にフォーカスを預かっている作業ペイン（決定34）。
+    // 退場でここへ戻す。`focused_pane` とは別に持つ — 預けている間の
+    // 実フォーカスはサイドバー自身なので、両者は違うものを指す
+    focus_parked: Option<ParkedFocus>,
+    // 預かったフォーカスが実際に自分へ来たのを一度でも観測したか（決定34）。
+    // フォーカスの移動は非同期なので、これを待たずに「自分にフォーカスが無い」を
+    // 「ユーザーが持って行った」と解釈すると、入場した直後に退場してしまう
+    park_confirmed: bool,
     // 前面に出たあと、まだ実フォーカスを取り直せていない（要件: focus-sync）。
     // 非可視の間は PaneUpdate が届かず上の キャッシュが凍るため、タブを
     // 切り替えて戻ってきたときに「フォーカスは動いていない」と誤判定して
@@ -311,10 +323,11 @@ impl ZellijPlugin for State {
                     self.nav_mode = false;
                     clear_key_presses_intercepts();
                 }
-                // 枠の抑制は自分ではなく作業ペインに対する変更なので、
-                // 閉じられている最中でも戻して構わない（決定34）。ここで
-                // 戻し損ねると、その作業ペインの枠が二度と戻らなくなる
-                self.restore_focus_frame();
+                // 預かっているフォーカスは作業ペインへ返す（決定34）。返し先は
+                // 自分ではなく作業ペインなので、閉じられている最中でも投げて
+                // よい。リロードの場合はここで返さないと、ユーザーは
+                // unselectable に戻ったサイドバーにフォーカスを残して詰まる
+                self.release_parked_focus(true);
                 false
             }
             // 左クリックだけを扱う（要件: click-to-focus）。
@@ -505,9 +518,30 @@ impl State {
             return false;
         }
         self.focus_on_terminal = matches!(focused_pane, PaneId::Terminal(_));
+        let own_pane_focused = matches!(
+            (focused_pane, self.own_plugin_id),
+            (PaneId::Plugin(id), Some(own_id)) if id == own_id
+        );
+        // 預かりが成立したのを観測しておく（決定34。`park_taken_over` が使う）
+        if own_pane_focused && self.focus_parked.is_some() {
+            self.park_confirmed = true;
+        }
+        // 預けたフォーカスをユーザーの操作で持って行かれたら、奪い返さずに手放す
+        let park_lost = self.park_taken_over(own_pane_focused);
+        if park_lost {
+            self.release_parked_focus(false);
+        }
         let focused = match focused_pane {
             PaneId::Terminal(id) => Some(id),
-            // プラグインペインは selectable に無い。ただし諦めるのではなく
+            // 自分がフォーカスを預かっている間（決定34）は、実フォーカスが
+            // サイドバーに在っても作業ペインは動いていない。一覧から拾い直すと
+            // 「タイル層でフォーカス中のターミナル」が居らず None になり、
+            // 探索位置も戻し先も失う
+            PaneId::Plugin(_) if own_pane_focused && self.focus_parked.is_some() => self
+                .focus_parked
+                .map(|parked| parked.pane_id)
+                .or_else(|| self.focused_terminal_in_tab(focused_tab)),
+            // 他のプラグインペインは selectable に無い。ただし諦めるのではなく
             // 一覧から作業ペインを拾い直す（召喚インスタンス自身がフォーカスを
             // 持つ場合がこれ。下記参照）
             PaneId::Plugin(_) => self.focused_terminal_in_tab(focused_tab),
@@ -519,12 +553,19 @@ impl State {
         // 戻ったとみなす（要件: nav-mode / focus-sync）。navモード中のキーは
         // 横取りしているので、これが起きる主な経路はマウスでのペイン選択。
         // 横取りを解かないと、クリックした先で j/k がサイドバー操作として
-        // 食われ続ける
-        let interrupted = self.nav_mode && focused.is_some() && focused != self.focused_pane;
+        // 食われ続ける。
+        //
+        // 預けたフォーカスを持って行かれた場合（`park_lost`）も同じ扱いにする。
+        // 行き先が預かる前と同じペインでも「作業に戻る」という意思表示なので、
+        // ペインIDの比較だけでは取りこぼす
+        let interrupted =
+            self.nav_mode && (park_lost || (focused.is_some() && focused != self.focused_pane));
         // フォーカスの記録は追従しない場合（navモード中など）も続ける。
         // navモード退場時の「動いたか」の比較材料になる
         self.focused_pane = focused;
         if interrupted {
+            // 預かりの手放しは上で済んでいる（`park_lost`）。ここで戻す形にすると
+            // ユーザーが自分で選んだ先からフォーカスを奪い返してしまう
             // ハイライトも実フォーカスへ揃う（退場後は navモード外なので）
             self.leave_nav_mode();
         } else if let Some(pane_id) = follow {
@@ -578,24 +619,25 @@ impl State {
         floating
     }
 
-    // 指定ターミナルペインに枠が描かれているか（決定34）。
+    // 預けたフォーカスをユーザーの操作で持って行かれたか（決定34）。
+    // `own_pane_focused` は「いま実フォーカスが自分のペインにあるか」の観測結果。
     //
-    // `PaneInfo` に borderless の項目は無いので、ペイン全体と内容領域の座標差で
-    // 見る（枠があれば内容は1行下・1桁右へ寄る）。**元から枠が無いペインは
-    // 抑制の対象にしない** — 抑制と対で `set_pane_borderless(false)` を投げる
-    // 以上、レイアウトで `borderless=true` にしてあるペインや `pane_frames false`
-    // の環境では、退場時に元々無かった枠を生やしてしまう。
-    //
-    // 一覧が無い（まだ PaneUpdate が来ていない）ときは false ＝ 触らない側に倒す
-    pub(crate) fn pane_has_frame(&self, pane_id: u32) -> bool {
-        let Some(manifest) = self.panes.as_ref() else {
-            return false;
-        };
-        manifest.panes.values().flatten().any(|pane| {
-            !pane.is_plugin
-                && pane.id == pane_id
-                && (pane.pane_content_y > pane.pane_y || pane.pane_content_x > pane.pane_x)
-        })
+    // **`park_confirmed` を待つのが要点。** フォーカスの移動は非同期なので、
+    // 預けた命令が処理される前に届いた `PaneUpdate` では自分にフォーカスが無い。
+    // 確認を待たずに判定すると、入場した直後に「持って行かれた」と誤読して退場する
+    pub(crate) fn park_taken_over(&self, own_pane_focused: bool) -> bool {
+        self.focus_parked.is_some() && self.park_confirmed && !own_pane_focused
+    }
+
+    // 指定ターミナルペインがフローティングか（決定34）。フォーカスを預かるとき、
+    // 戻すための `should_float_if_hidden` を控えておくのに使う。
+    // 一覧に無ければ false ＝ タイル扱い（`focus_selected` の既定と同じ）
+    pub(crate) fn pane_is_floating(&self, pane_id: u32) -> bool {
+        self.selectable
+            .iter()
+            .find(|entry| entry.pane_id == pane_id)
+            .map(|entry| entry.is_floating)
+            .unwrap_or(false)
     }
 
     // フッターに出す direct-keys のヒントを configuration から取り込む
