@@ -16,6 +16,7 @@
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
 use crate::command::{CommandState, PaneStatus};
+use crate::deploy::TROOP;
 use crate::render::{
     cwd_row, divider_line, fold_highlight_indices, overflow_row, pad_to_width, reconcile_scroll,
     shift_highlight_indices, truncate, truncate_start, CounterColumn, Row,
@@ -4507,4 +4508,233 @@ fn the_read_clear_pipe_ignores_the_grace() {
     let mut state = run_and_fail_while_focused();
     assert!(state.pipe(pipe_message(READ_CLEAR_PIPE, "1")));
     assert_eq!(state.pane_status(1), None);
+}
+
+// --- 配置演出（要件: docs/requirements/header-animation/） ---
+
+// 兵が使える領域の実測値（幅32セル・右マージン2セル・`▲ fujin` は7セル）。
+// 発進位置は本文の右端の1つ先、いちばん奥の着地列は内容幅の右端
+const LAUNCH: usize = 8;
+const DEEPEST: usize = CONTENT - 1;
+
+// ペイン一覧を差し替えて1回ぶん観測させる。`Event::PaneUpdate` の扱いと同じ
+// 順序（一覧の組み直し → 新規エージェント検出）を踏む
+fn observe_panes(state: &mut State, ids: &[u32]) {
+    let panes: Vec<PaneInfo> = ids
+        .iter()
+        .map(|id| terminal_pane(*id, &format!("pane{}", id)))
+        .collect();
+    state.panes = Some(manifest(vec![(0, panes)]));
+    state.rebuild_selectable();
+    state.detect_new_agents();
+}
+
+// まだ何も観測していない、既定幅で描画済みのサイドバー
+fn sidebar_state() -> State {
+    State {
+        tabs: vec![tab(0, true)],
+        permissions_granted: true,
+        viewport_cols: SIDEBAR,
+        ..Default::default()
+    }
+}
+
+// いま画面に出ている兵の列
+fn troop_columns(state: &State) -> Vec<usize> {
+    let (launch, width) = state.troop_field(SIDEBAR);
+    state
+        .deployment
+        .map(|deployment| deployment.columns(launch, width))
+        .unwrap_or_default()
+}
+
+// 演出が終わるまでフレームを送る。返すのは要したフレーム数
+fn play_out(state: &mut State) -> usize {
+    for frame in 1.. {
+        state.advance_deployment();
+        if state.deployment.is_none() {
+            return frame;
+        }
+        assert!(frame < 100, "演出が終わらない");
+    }
+    unreachable!()
+}
+
+#[test]
+fn the_first_observation_only_seeds_the_baseline() {
+    // 起動直後は一覧まるごとが「増えたペイン」に見える。ここで発火させると
+    // セッションを開くたびに演出が出てしまう
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2, 3]);
+
+    assert!(state.deployment.is_none());
+    assert_eq!(state.header_line(SIDEBAR).content(), "▲ fujin");
+}
+
+#[test]
+fn a_new_agent_starts_the_deployment_animation() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2]);
+
+    assert_eq!(state.deployment.map(|d| d.troops), Some(1));
+    // 兵はブランド行の `fujin` の右側から現れる
+    assert_eq!(troop_columns(&state), vec![LAUNCH]);
+    let header = state.header_line(SIDEBAR).content().to_string();
+    assert!(header.starts_with("▲ fujin "), "{}", header);
+    assert_eq!(
+        header.chars().position(|c| c.to_string() == TROOP),
+        Some(LAUNCH)
+    );
+}
+
+#[test]
+fn every_detected_agent_gets_a_troop() {
+    for detected in [1usize, 3, 6] {
+        let mut state = sidebar_state();
+        observe_panes(&mut state, &[1]);
+        let ids: Vec<u32> = (1..=detected as u32 + 1).collect();
+        observe_panes(&mut state, &ids);
+
+        assert_eq!(
+            state.deployment.map(|d| d.troops),
+            Some(detected),
+            "{}体の検出",
+            detected
+        );
+    }
+}
+
+#[test]
+fn ending_panes_never_start_a_deployment() {
+    // 減ったぶんは検出ではない
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2, 3]);
+    observe_panes(&mut state, &[1]);
+
+    assert!(state.deployment.is_none());
+}
+
+#[test]
+fn detections_in_the_same_window_join_one_deployment() {
+    // 新規タブ作成のように一括で増えるときは、検出が複数回に割れて届く。
+    // 検出のたびに発火させると演出が重なって騒がしくなる
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2]);
+    state.advance_deployment();
+    observe_panes(&mut state, &[1, 2, 3, 4]);
+
+    let deployment = state.deployment.expect("演出は続いている");
+    assert_eq!(deployment.troops, 3, "検出した数の合計ぶんの兵が出る");
+    assert_eq!(deployment.frame, 1, "演出は最初から巻き直さない");
+}
+
+#[test]
+fn the_troops_line_up_with_the_first_launched_deepest() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2, 3, 4]);
+
+    // 先に発進した兵ほど奥へ着く。着地列は右端から2セル間隔
+    let mut landed = Vec::new();
+    for _ in 0..20 {
+        state.advance_deployment();
+        let columns = troop_columns(&state);
+        if columns.len() == 3 && columns.iter().all(|c| *c >= DEEPEST - 4) {
+            landed = columns;
+            break;
+        }
+    }
+    assert_eq!(landed, vec![DEEPEST - 4, DEEPEST - 2, DEEPEST]);
+
+    // 静止したあとは動かない
+    state.advance_deployment();
+    assert_eq!(troop_columns(&state), landed);
+}
+
+#[test]
+fn the_troops_stay_clear_of_the_brand() {
+    // 幅が足りないぶんの兵は着地列を確保できない。ブランド行に重ねるくらいなら
+    // 出さない（着地列は発進位置より左には作らない）
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &(1..=40).collect::<Vec<u32>>());
+
+    // 出せるだけ出た瞬間（＝いちばん多く並んだフレーム）を見る
+    let mut columns = Vec::new();
+    while state.deployment.is_some() {
+        state.advance_deployment();
+        let frame = troop_columns(&state);
+        if frame.len() > columns.len() {
+            columns = frame;
+        }
+    }
+    assert!(columns.iter().all(|c| *c >= LAUNCH), "{:?}", columns);
+    assert_eq!(columns.first(), Some(&LAUNCH));
+    assert_eq!(columns.last(), Some(&DEEPEST));
+}
+
+#[test]
+fn the_header_returns_to_normal_when_the_deployment_ends() {
+    // 着地点は完全に元へ戻る。稼働数のような情報は残さない
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2, 3]);
+    assert!(state.header_line(SIDEBAR).content().contains(TROOP));
+
+    let frames = play_out(&mut state);
+    assert!(
+        frames > 3,
+        "整列した状態を見せる間もなく畳んでいる: {}",
+        frames
+    );
+    assert_eq!(state.header_line(SIDEBAR).content(), "▲ fujin");
+    // 取り残されたタイマーが来ても何も起きない
+    assert!(!state.advance_deployment());
+}
+
+#[test]
+fn a_detection_missed_while_hidden_is_not_replayed() {
+    // 非可視の間は PaneUpdate が届かず、前面に出た直後にまとめて届く。
+    // これを検出として扱うと、見逃したぶんが遡って再生されてしまう
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    state.forget_known_panes();
+    observe_panes(&mut state, &[1, 2, 3]);
+
+    assert!(state.deployment.is_none());
+    // 基準は取り直せているので、次の検出からは再生される
+    observe_panes(&mut state, &[1, 2, 3, 4]);
+    assert_eq!(state.deployment.map(|d| d.troops), Some(1));
+}
+
+#[test]
+fn the_deployment_leaves_the_mode_label_readable() {
+    // navモード中は `[nav]` のぶんだけ発進位置が右へずれる。兵がラベルに
+    // 重なるとどちらも読めなくなる
+    let mut state = sidebar_state();
+    state.nav_mode = true;
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2]);
+
+    let header = state.header_line(SIDEBAR).content().to_string();
+    assert!(header.starts_with("▲ fujin  [nav] "), "{}", header);
+    assert_eq!(
+        troop_columns(&state),
+        vec!["▲ fujin  [nav]".chars().count() + 1]
+    );
+}
+
+#[test]
+fn render_survives_the_deployment() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2, 3]);
+    state.render(40, SIDEBAR);
+    state.render(40, 12);
+    state.render(3, 2);
+    state.render(0, 0);
+    // 幅0で描いたあともフレーム送りは止まらない
+    state.advance_deployment();
 }

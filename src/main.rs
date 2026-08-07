@@ -17,12 +17,14 @@
 // - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
+// - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
 // - render — サイドバーの描画
 // - sync   — インスタンス間の状態同期（決定13）
 // - summon — フローティングでの臨時召喚（決定16）
 
 mod agent;
 mod command;
+mod deploy;
 mod nav;
 mod render;
 mod search;
@@ -41,6 +43,7 @@ use zellij_tile::prelude::*;
 
 use agent::{AgentInfo, StatusPayload};
 use command::CommandInfo;
+use deploy::Deployment;
 use nav::{JumpState, SearchState};
 use triage::TriageState;
 
@@ -192,6 +195,16 @@ struct State {
     // 直近に描画した画面高。行クリックの逆引き（pane_at_row）が描画と同じ
     // 表示範囲を再現するために要る。0 は「まだ一度も描いていない」
     viewport_rows: usize,
+    // 直近に描画した画面幅（viewport_rows と対）。配置演出の着地列は幅から
+    // 決まるが、タイマーは描画の外で進むのでここに控えておく
+    viewport_cols: usize,
+    // 再生中の配置演出（要件: docs/requirements/header-animation/）。
+    // 再生中だけ Some で、終われば None に戻ってヘッダーも通常表示へ戻る
+    deployment: Option<Deployment>,
+    // 直近に観測したターミナルペインID。次の観測との差分が新規エージェント検出に
+    // なる。None は基準をまだ持っていない状態で、次の観測は基準を作るだけ
+    //（起動直後と、見ていない間の検出を遡って演出しないため）
+    known_panes: Option<BTreeSet<u32>>,
     // direct-keys方式（決定6）の configuration キー -> 画面に出すキー表記。
     // フッターのヒントに使う（決定27・決定28）。書かれていない項目は持たない
     // ＝ヒントからその項目だけが省かれる
@@ -241,6 +254,9 @@ impl ZellijPlugin for State {
             EventType::InterceptedKeyPress,
             // 行クリックでのフォーカス移動（要件: docs/requirements/click-to-focus/）
             EventType::Mouse,
+            // 配置演出のフレーム送り（要件: docs/requirements/header-animation/）。
+            // 発火するのは再生中に set_timeout() を繋いでいる間だけ
+            EventType::Timer,
             // プラグイン終了・リロード時に横取りを解除する保険
             EventType::BeforeClose,
         ]);
@@ -286,6 +302,10 @@ impl ZellijPlugin for State {
                     // 信用せず、実フォーカスから選択を引き直す（要件: focus-sync）
                     self.pending_focus_resync = true;
                     self.refresh_focus();
+                    // 見ていない間に増えたペインは、前面に出た直後の PaneUpdate で
+                    // まとめて届く。これを検出として扱うと見逃したぶんが遡って
+                    // 再生されてしまうので、基準を取り直させる（要件: header-animation）
+                    self.forget_known_panes();
                 }
                 visible
             }
@@ -305,6 +325,9 @@ impl ZellijPlugin for State {
                 self.apply_read_model(&manifest);
                 self.panes = Some(manifest);
                 self.rebuild_selectable();
+                // 増えたペイン＝新規にデプロイされたエージェント。ヘッダーの
+                // 配置演出を発火させる（要件: header-animation）
+                self.detect_new_agents();
                 self.prune_stale_agents();
                 // 自分のURLは PaneManifest で初めて分かる。新しい兄弟
                 // インスタンスを見つけたら状態を配る（決定13）
@@ -330,6 +353,9 @@ impl ZellijPlugin for State {
                 self.release_parked_focus(true);
                 false
             }
+            // 配置演出のフレーム送り（要件: header-animation）。
+            // 演出が終われば鎖が切れ、次のタイマーは来ない
+            Event::Timer(_) => self.advance_deployment(),
             // 左クリックだけを扱う（要件: click-to-focus）。
             // ダブルクリック・ドラッグ・右クリックはv1対象外
             Event::Mouse(Mouse::LeftClick(line, _column)) => self.handle_click(line),
@@ -487,6 +513,8 @@ impl ZellijPlugin for State {
         // 表示範囲の寄せ直しは描画の直前に行う。画面高が分かるのがここだけで、
         // 行の増減も選択の移動もまとめて吸収できる
         self.reconcile_viewport(rows);
+        // 配置演出のタイマーは描画の外で進むので、幅を控えておく
+        self.viewport_cols = cols;
         self.draw(rows, cols);
     }
 }

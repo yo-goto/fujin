@@ -20,6 +20,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
+use crate::deploy::TROOP;
 use crate::search::{Field, Hit};
 use crate::{Selectable, State, DIRECT_KEY_HINTS};
 
@@ -187,6 +188,14 @@ enum Ink {
 const NAV_LEVEL: usize = 2;
 // トリアージモードはレベル0（orange）。緊急度を連想させる側へ寄せる
 const TRIAGE_LEVEL: usize = 0;
+// 配置演出の兵の色（要件: header-animation）。レベル2（green）で、状態アイコンの
+// 色分けではなくブランド側の色として読ませる。一過性の演出なので、ヘッダーの
+// 状態色（navモードも同じレベル2）と一瞬並んでも意味の取り違えは起きない。
+// 実機での見え方はまだ詰めていない暫定値
+const TROOP_LEVEL: usize = 2;
+// ヘッダー本文の右端と兵の発進位置のあいだに空けるセル数。詰めると `fujin` の
+// 語尾と兵がくっついて、文字の一部に見える
+const LAUNCH_GAP: usize = 1;
 
 // 意味付きの断片を1行に組み立てる。
 //
@@ -650,6 +659,20 @@ impl State {
     // 色を乗せるのは三角とモードラベルで、ブランド名は dim のまま。名前まで色を
     // 付けるとツリーの状態アイコンの色分けと喧嘩する
     pub(crate) fn header_line(&self, cols: usize) -> Text {
+        // 兵の間を埋める空白は借用されるので、断片を組む前に作っておく
+        let pads = self.troop_pads(cols);
+        let mut segments = self.header_segments();
+        // 配置演出中だけ、本文の右に兵が並ぶ（要件: header-animation）
+        for pad in &pads {
+            segments.push((pad.as_str(), Ink::Plain));
+            segments.push((TROOP, Ink::Accent(TROOP_LEVEL)));
+        }
+        compose(&segments, content_cols(cols))
+    }
+
+    // ヘッダーの本文（`▲ fujin` ＋モードラベル）。配置演出は**この右側**に
+    // 兵を並べるので、本文の幅を測れるよう断片のまま返す
+    fn header_segments(&self) -> Vec<(&str, Ink)> {
         // 三角が x=0、ブランド名が x=2（HEADER_INDENT）に来る
         let ink = self.state_ink();
         let mut segments = vec![("▲", ink), (" fujin", Ink::Muted)];
@@ -657,7 +680,40 @@ impl State {
             segments.push(("  ", Ink::Plain));
             segments.push((label, ink));
         }
-        compose(&segments, content_cols(cols))
+        segments
+    }
+
+    // ヘッダー本文の表示幅
+    fn header_width(&self) -> usize {
+        self.header_segments()
+            .iter()
+            .map(|(fragment, _)| UnicodeWidthStr::width(*fragment))
+            .sum()
+    }
+
+    // 配置演出で兵が使える領域 `(発進位置, 幅)`（要件: header-animation）。
+    //
+    // 発進位置はヘッダー本文の右端の1つ先で、モードラベルが出ているぶんだけ
+    // 右へずれる — 兵がラベルに重なるとどちらも読めなくなる。幅は他の行と同じく
+    // 右マージンを除いた内容幅で、着地列はその手前から確保する
+    pub(crate) fn troop_field(&self, cols: usize) -> (usize, usize) {
+        (self.header_width() + LAUNCH_GAP, content_cols(cols))
+    }
+
+    // 兵と兵のあいだを埋める空白。compose() は断片を順に置くだけなので、
+    // 兵の絶対位置はこの空白の幅で作る
+    fn troop_pads(&self, cols: usize) -> Vec<String> {
+        let Some(deployment) = &self.deployment else {
+            return Vec::new();
+        };
+        let (launch, width) = self.troop_field(cols);
+        let mut pads = Vec::new();
+        let mut x = self.header_width();
+        for column in deployment.columns(launch, width) {
+            pads.push(" ".repeat(column.saturating_sub(x)));
+            x = column + UnicodeWidthStr::width(TROOP);
+        }
+        pads
     }
 
     // いまの状態を語る色。ヘッダーの三角・モードラベルとフッター全体に同じ色を
