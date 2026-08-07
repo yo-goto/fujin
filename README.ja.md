@@ -42,7 +42,69 @@ zellij用サイドバープラグインです。タブ > ペインを縦並び�
 - Rust + `rustup target add wasm32-wasip1`（ビルド時のみ）
 - `jq`（Claude Code フック用）
 
-## インストール
+## クイックスタート
+
+```bash
+make install   # release ビルドして ~/.config/zellij/plugins/fujin.wasm へ配置
+make setup     # レイアウトを生成し、Claude Code フックを登録する
+```
+
+`make setup`（実体は `extras/setup.sh`）がやること:
+
+- `~/.config/zellij/layouts/fujin.kdl` を生成します。手で書くと踏みやすい
+  `children` / `pane` の取り違えと `new_tab_template` の書き漏らし（[後述](#3-サイドバーの常駐レイアウト)）が、
+  生成物の側で起こりません
+- `extras/claude-hooks/fujin-hook.sh` を `~/.config/zellij/plugins/` へコピーし、
+  そのパスを `~/.claude/settings.json` の10イベントへ登録します。同じパスを
+  10箇所に書き写す作業がなくなり、登録先がこのリポジトリの位置に依存しなくなります
+- `config.kdl` に貼るべき設定を表示します（**このファイルは書き換えません**）
+
+あとは表示された内容を `~/.config/zellij/config.kdl` に貼るだけです:
+
+```kdl
+plugins {
+    fujin location="file:~/.config/zellij/plugins/fujin.wasm"
+}
+
+// keybinds ブロックが既にあるなら、中の bind だけを足してください
+keybinds {
+    shared_except "locked" {
+        bind "Ctrl y" {
+            MessagePlugin "fujin" {
+                name "fujin_mode"
+                floating true
+            }
+        }
+    }
+}
+
+default_layout "fujin"
+```
+
+zellij を起動し直すと左端にサイドバーが出ます。初回は権限承認プロンプトが出るので、
+そのペインにフォーカスして `y` を押してください。
+
+| オプション | 内容 |
+|---|---|
+| `--dry-run` | 何も書かずに、書き込む内容を表示する |
+| `--no-hooks` | Claude Code フックの登録をスキップする |
+| `--layout-only` / `--hooks-only` / `--config-only` | その処理だけ実行する |
+| `--width N` | サイドバーの幅（既定 32） |
+| `--force` | 既存のレイアウトファイルを確認なしで上書きする |
+
+再実行しても安全です（フック登録は冪等で、`settings.json` はバックアップを取ります）。
+リポジトリを移動したあとに `--hooks-only` で流し直すと、古い `fujin-hook.sh` の
+登録パスが新しい場所へ書き換わります。
+
+> [!NOTE]
+> `config.kdl` だけはスクリプトが書き換えません。`plugins` / `keybinds` は既存ブロックへの
+> マージが必要で（`keybinds clear-defaults=true` やモード別の入れ子もある）、テキスト処理で
+> 壊したときの復旧が重いためです。代わりに、いま何が未設定かを判定して表示します。
+
+## セットアップ（手動でやる場合）
+
+`make setup` が何をしているかの内訳です。スクリプトを使わずに手で設定する場合や、
+既存の設定へ部分的に取り込みたい場合はこちらを参照してください。
 
 ### 1. ビルドして配置する
 
@@ -73,9 +135,7 @@ plugins {
 - エイリアス定義の `location` に**相対パスは書けません**。cwd 補完が効かないため、
   絶対パスか `~` 付きか `https://…` にしてください
 
-## セットアップ
-
-### 1. サイドバーの常駐（レイアウト）
+### 3. サイドバーの常駐（レイアウト）
 
 デフォルトレイアウトのタブテンプレートにサイドバーを埋め込みます。例
 （`~/.config/zellij/layouts/fujin.kdl`）:
@@ -144,7 +204,7 @@ zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 
 サイドバーの幅は zellij 標準の resize（`Ctrl+n` 等）でそのまま変更できます。
 
-### 2. グローバルキーバインド（ジャンプ機能）
+### 4. グローバルキーバインド（ジャンプ機能）
 
 `~/.config/zellij/config.kdl` の keybinds ブロック（`shared_except "locked"` など）に
 追加します。navモード方式と直接キー方式があり、併用もできます。
@@ -204,10 +264,11 @@ bind "Alt g" {
 > 起動するため、ID指定ではキーが衝突します。エイリアス（またはURL）指定の
 > `MessagePlugin` なら全インスタンスに届きます。
 
-### 3. Claude Code フック（状態通知）
+### 5. Claude Code フック（状態通知）
 
-`extras/claude-hooks/fujin-hook.sh` をフックとして登録します。
-`~/.claude/settings.json` の `hooks` に追記してください:
+`extras/claude-hooks/fujin-hook.sh` をフックとして登録します
+（`make setup` はこれを `~/.config/zellij/plugins/` へコピーしてから、そのパスを登録します）。
+手で書く場合は `~/.claude/settings.json` の `hooks` に追記してください:
 
 ```jsonc
 {

@@ -55,7 +55,73 @@ the command. Panes with no name show the command line instead.
 - Rust + `rustup target add wasm32-wasip1` (build time only)
 - `jq` (for the Claude Code hook)
 
-## Install
+## Quick start
+
+```bash
+make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
+make setup     # generate the layout, register the Claude Code hooks
+```
+
+What `make setup` (i.e. `extras/setup.sh`) does:
+
+- Generates `~/.config/zellij/layouts/fujin.kdl`. The two mistakes that are easy
+  to make by hand — `children` vs `pane`, and forgetting `new_tab_template`
+  ([details below](#3-keep-the-sidebar-resident-layout)) — cannot happen in the
+  generated file.
+- Copies `extras/claude-hooks/fujin-hook.sh` into `~/.config/zellij/plugins/` and
+  registers that path for all 10 events in `~/.claude/settings.json`. No writing
+  the same path ten times, and the registration no longer depends on where this
+  repository lives.
+- Prints the snippet to add to `config.kdl` — it **never edits that file**.
+
+Then paste what it printed into `~/.config/zellij/config.kdl`:
+
+```kdl
+plugins {
+    fujin location="file:~/.config/zellij/plugins/fujin.wasm"
+}
+
+// if you already have a keybinds block, add just the bind inside it
+keybinds {
+    shared_except "locked" {
+        bind "Ctrl y" {
+            MessagePlugin "fujin" {
+                name "fujin_mode"
+                floating true
+            }
+        }
+    }
+}
+
+default_layout "fujin"
+```
+
+Restart zellij and the sidebar appears on the left. On first load, focus that
+pane and press `y` to approve the permission prompt.
+
+| Option | Effect |
+|---|---|
+| `--dry-run` | Show what would be written, write nothing |
+| `--no-hooks` | Skip the Claude Code hook registration |
+| `--layout-only` / `--hooks-only` / `--config-only` | Run just that part |
+| `--width N` | Sidebar width (default 32) |
+| `--force` | Overwrite an existing layout file without asking |
+
+Re-running is safe: hook registration is idempotent and `settings.json` is backed
+up first. If you move this repository, re-run with `--hooks-only` and the stale
+`fujin-hook.sh` path gets rewritten to the new one.
+
+> [!NOTE]
+> `config.kdl` is the one file the script won't touch. `plugins` and `keybinds`
+> need to be merged into blocks you may already have (possibly with
+> `keybinds clear-defaults=true` and per-mode nesting), and getting that wrong
+> with text munging is expensive to recover from. It reports which pieces are
+> still missing instead.
+
+## Setup (by hand)
+
+This is what `make setup` does, step by step. Follow it if you'd rather not run
+the script, or if you're folding fujin into an existing configuration.
 
 ### 1. Build and place the wasm
 
@@ -86,9 +152,7 @@ plugins {
 - The alias's `location` **cannot be a relative path**. cwd expansion doesn't
   apply here, so use an absolute path, a `~`-prefixed path, or `https://…`
 
-## Setup
-
-### 1. Keep the sidebar resident (layout)
+### 3. Keep the sidebar resident (layout)
 
 Embed the sidebar in the default layout's tab template. Example
 (`~/.config/zellij/layouts/fujin.kdl`):
@@ -159,7 +223,7 @@ expanded wasm, so **moving the wasm means re-approving**.
 The sidebar's width can be resized with zellij's standard resize keys
 (`Ctrl+n`, etc.) just like any other pane.
 
-### 2. Global keybindings (jump feature)
+### 4. Global keybindings (jump feature)
 
 Add these to the keybinds block in `~/.config/zellij/config.kdl` (e.g.
 `shared_except "locked"`). There's a nav-mode approach and a direct-key
@@ -223,10 +287,11 @@ bind "Alt g" {
 > so targeting by ID causes key collisions. A `MessagePlugin` addressed by alias
 > (or URL) reaches every instance instead.
 
-### 3. Claude Code hooks (state notifications)
+### 5. Claude Code hooks (state notifications)
 
-Register `extras/claude-hooks/fujin-hook.sh` as a hook. Add it to `hooks` in
-`~/.claude/settings.json`:
+Register `extras/claude-hooks/fujin-hook.sh` as a hook (`make setup` copies it to
+`~/.config/zellij/plugins/` first and registers that path). By hand, add it to
+`hooks` in `~/.claude/settings.json`:
 
 ```jsonc
 {

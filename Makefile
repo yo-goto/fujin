@@ -10,7 +10,7 @@ HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 # 解決されるので、その配下を既定にしておく（zellij 側にプラグインの置き場所の規約は無い）
 PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
 
-.PHONY: all build release install test fmt fmt-check lint check clean changelog
+.PHONY: all build release install setup test fmt fmt-check lint check clean changelog
 
 all: check
 
@@ -26,6 +26,12 @@ release:
 install: release
 	mkdir -p $(PLUGIN_DIR)
 	cp target/wasm32-wasip1/release/fujin.wasm $(PLUGIN_DIR)/fujin.wasm
+
+# 配置のあとのセットアップ（レイアウト生成 + Claude Code フック登録）。
+# config.kdl は書き換えず、貼り付ける KDL 片を表示するだけ。
+# 追加の引数は SETUP_ARGS で渡す（例: make setup SETUP_ARGS="--no-hooks --dry-run"）
+setup: install
+	./extras/setup.sh --plugin-dir $(PLUGIN_DIR) $(SETUP_ARGS)
 
 test:
 	cargo test --target $(HOST_TARGET)
