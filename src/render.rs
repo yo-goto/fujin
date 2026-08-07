@@ -47,7 +47,8 @@ pub(crate) enum Row<'a> {
     // 開いている間は content（ツリー）がこの行に置き換わる。枠は出したまま
     Help(&'a HelpRow),
     // 一覧が空であることの通知行（検索の0件・トリアージの対象なし）。
-    // 空リストのまま描くと、絞り込みが効いているのか描画が壊れているのか区別できない
+    // 空リストのまま描くと、絞り込みが効いているのか描画が壊れているのか区別できない。
+    // 文言は他のUI文言と同じく英語（ui-design.md の「文言」）
     Notice(&'static str),
     // 表示範囲の外に行があることを示す上下端のあふれマーカー行。
     // 出さないと、一覧がそこで終わっているのか隠れているのか区別できない
@@ -334,7 +335,7 @@ impl State {
         if self.triage.is_some() {
             let entries = self.triage_entries();
             if entries.is_empty() {
-                rows.push(Row::Notice("対象なし"));
+                rows.push(Row::Notice("nothing to triage"));
                 return rows;
             }
             for entry in entries {
@@ -349,7 +350,7 @@ impl State {
             // 0件は空リストではなく明示する。絞り込みが効いているのか
             // 描画が壊れているのか区別できないため
             if search.hits.is_empty() {
-                rows.push(Row::Notice("一致なし"));
+                rows.push(Row::Notice("no matches"));
                 return rows;
             }
         }

@@ -1341,6 +1341,83 @@ fn the_help_lines_fit_the_sidebar_width() {
     }
 }
 
+// 文字列に日本語（ひらがな・カタカナ・漢字）が混ざっているか。
+// `▲` `▌` `…` や状態アイコンは英語の文言と一緒に使うので弾かない
+fn has_japanese(text: &str) -> bool {
+    text.chars()
+        .any(|c| ('\u{3040}'..='\u{30ff}').contains(&c) || ('\u{4e00}'..='\u{9fff}').contains(&c))
+}
+
+// fujin が自分で書く行（ヘッダー・フッタ・ヘルプ・通知行）。ペイン名・タブ名・
+// cwd はユーザーのデータなので、日本語が入っていて当然で対象から外す
+fn chrome_lines(state: &State) -> Vec<String> {
+    let mut lines = vec![
+        state.header_line(SIDEBAR).content().to_string(),
+        state.footer_line(SIDEBAR).content().to_string(),
+    ];
+    lines.extend(overlay_lines(state, SIDEBAR));
+    for row in state.visible_rows() {
+        if let Row::Notice(notice) = row {
+            lines.push(notice.to_string());
+        }
+    }
+    lines
+}
+
+#[test]
+fn the_sidebar_never_shows_japanese_text() {
+    // UI文言は英語で統一する（docs/concept/ui-design.md の「文言」）。
+    // コメントとドキュメントは日本語なので、画面に出る側だけを一度に見る
+    let mut lines = vec![overflow_row(3, true, SIDEBAR).content().to_string()];
+
+    let agent_state = |nav: bool| {
+        let mut state = triage_state();
+        set_agent_state(&mut state, 1, AgentState::Working);
+        state.nav_mode = nav;
+        state
+    };
+    // ツリー表示（非フォーカス）と navモード
+    lines.extend(chrome_lines(&agent_state(false)));
+    lines.extend(chrome_lines(&agent_state(true)));
+
+    // 各サブモードと、そこで開いたヘルプオーバーレイ（状態アイコン凡例を含む）
+    for entry in ['/', 'p', 'n'] {
+        let mut state = agent_state(true);
+        state.handle_nav_key(key(BareKey::Char(entry)));
+        lines.extend(chrome_lines(&state));
+        state.handle_nav_key(key(BareKey::Char('?')));
+        lines.extend(chrome_lines(&state));
+    }
+
+    // 通知行（検索の0件・トリアージの対象なし）
+    let mut no_hits = agent_state(true);
+    no_hits.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut no_hits, "zzz");
+    lines.extend(chrome_lines(&no_hits));
+    let mut nothing_to_triage = triage_state(); // 状態を持つペインが1つも無い
+    nothing_to_triage.handle_nav_key(key(BareKey::Char('p')));
+    lines.extend(chrome_lines(&nothing_to_triage));
+
+    for line in &lines {
+        assert!(
+            !has_japanese(line),
+            "UI文言に日本語が混ざっている: {}",
+            line
+        );
+    }
+    // 通知行を拾えていることの確認（拾えていないと上のループが素通しになる）
+    assert!(
+        lines.iter().any(|l| l == "no matches"),
+        "検索の0件通知が無い: {:?}",
+        lines
+    );
+    assert!(
+        lines.iter().any(|l| l == "nothing to triage"),
+        "トリアージの対象なし通知が無い: {:?}",
+        lines
+    );
+}
+
 #[test]
 fn the_help_overlay_ends_with_the_status_icon_legend() {
     // 要件: nav-mode-hints.feature「ヘルプオーバーレイに状態アイコン凡例が
@@ -2897,7 +2974,7 @@ fn render_survives_search_mode() {
     state.render(40, 20);
     state.render(3, 2);
 
-    // 0件（「一致なし」の行）
+    // 0件（`no matches` の通知行）
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "zzz");
@@ -3579,10 +3656,10 @@ fn an_empty_triage_list_says_so() {
     let mut state = triage_state();
     state.handle_nav_key(key(BareKey::Char('p')));
     let rows = state.visible_rows();
-    assert!(
-        matches!(rows.get(HEADER_ROWS), Some(Row::Notice(_))),
-        "空リストのままだと壊れて見える"
-    );
+    let Some(Row::Notice(notice)) = rows.get(HEADER_ROWS) else {
+        panic!("空リストのままだと壊れて見える: {}", rows.len());
+    };
+    assert_eq!(*notice, "nothing to triage");
 }
 
 #[test]
@@ -3748,7 +3825,7 @@ fn render_survives_triage_mode() {
     state.render(2, 1);
     state.render(0, 0);
 
-    // 対象なしの行も通す
+    // 対象なしの通知行（`nothing to triage`）も通す
     let mut state = triage_state();
     state.handle_nav_key(key(BareKey::Char('p')));
     state.render(40, 20);
