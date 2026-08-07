@@ -64,9 +64,10 @@ const COMMAND_STATE_PIPE: &str = "fujin_command";
 // 選択ペインIDの兄弟インスタンスへの配布（決定13）
 const SELECTION_PIPE: &str = "fujin_selection";
 // 取り残された召喚インスタンスの強制掃除（決定16）。navモードへ入れないまま
-// 取り残された召喚インスタンスはキーを横取りしておらず Esc が届かない。zellij 側にも
-// ペインIDを指定して閉じる手段が無い（`close-pane` はフォーカス中のみ、
-// fujin は unselectable でフォーカスできない）ため、逃げ道を用意しておく
+// 取り残された召喚インスタンスはキーを横取りしておらず Esc が届かない。fujin は
+// unselectable でフォーカスできないので、ユーザーの普段のペイン操作でも消せない
+//（CLI の `close-pane --pane-id` なら消せるが、IDを調べさせる手順は逃げ道として
+// 貧しい）ため、pipe 経由の逃げ道を用意しておく
 const DISMISS_PIPE: &str = "fujin_dismiss";
 
 // 召喚インスタンスに渡す configuration キー（決定16）。
@@ -237,10 +238,11 @@ impl ZellijPlugin for State {
                     // フォーカス巡回にサイドバーが混ざらないようにする（決定6）。
                     //
                     // **臨時召喚は例外**（決定16）。unselectable なペインは
-                    // フォーカスできず、zellij にはペインIDを指定して閉じる
-                    // 手段が無いので、プラグイン側のロジックが壊れると
-                    // ユーザーには消す手段が一つも無くなる（実測でそうなった）。
-                    // 一時的に出ているだけなので「必ず自分で消せる」ほうを取る
+                    // フォーカスできないので、プラグイン側のロジックが壊れると
+                    // ユーザーは普段のペイン操作で消せなくなる（実測でそうなった。
+                    // CLI の `close-pane --pane-id` に頼れば消せるが、IDを調べさせる
+                    // 手順は逃げ道として貧しい）。一時的に出ているだけなので
+                    // 「必ず自分で消せる」ほうを取る
                     if !self.summoned {
                         set_selectable(false);
                     }
