@@ -288,6 +288,7 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `/` | enter search sub-mode (below) |
 | `n` | enter number jump sub-mode (below) |
 | `p` | enter triage mode (panes that need attention, most urgent first) |
+| `d` | enter the pane termination sub-mode (below) |
 | `?` | open the key help (below) |
 | `Esc` / `q` | exit the mode |
 
@@ -346,6 +347,30 @@ of another and you never end up with an ambiguous `1`.
 Typing a number that does not exist clears the buffer instead of forcing you to
 back out with `Backspace`. The number column is only there while the sub-mode is
 active, so it never eats into the usual row layout.
+
+### Terminate a pane (`d` inside nav mode)
+
+Pressing `d` turns the footer into a confirmation prompt
+(`c:close k:kill x:kill+close`), painted in the theme's error colour. Nothing
+happens until you pick one of the three, and `Esc` backs out. The prompt does
+not spell out the pane name — the highlighted row already says which pane this
+is about, and the footer is too narrow to show a name without cutting it.
+
+| Key | Action |
+|---|---|
+| `c` | close the pane, leaving its process alone |
+| `k` | send `SIGKILL` to the pane's process |
+| `x` | kill, then close the pane |
+| `?` | open the key help (below) |
+| `Esc` | cancel and go back to the tree (nav mode continues) |
+
+All three are offered whatever the pane is running — an agent, a command pane,
+or an unrelated shell. Killing a shell takes its children with it and zellij
+closes the pane on its own; a command pane (`zellij run -- …`) stays on screen
+after its command dies, which is what `x` is for. Killing a command pane whose
+command has already exited does nothing.
+
+Only the selected pane is affected — there is no multi-select yet.
 
 ### Help (`?` inside nav mode)
 

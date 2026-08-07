@@ -155,6 +155,9 @@ impl State {
         self.triage = None;
         // 番号ジャンプサブモードも同様。入力途中のバッファは持ち越さない
         self.jump = None;
+        // 終了操作サブモードも同様。確認を経ていない終了操作は実行しない
+        //（要件: pane-close-kill）
+        self.termination = None;
         // 預かっていたフォーカスを作業ペインへ返す（決定34）。召喚インスタンスの
         // 自死（下）より前に置く — 自分を閉じたあとではホストコマンドが届くか
         // 分からない
@@ -238,6 +241,11 @@ impl State {
         if self.jump.is_some() {
             return self.handle_jump_key(key);
         }
+        // 終了操作サブモードも同様（要件: pane-close-kill）。フッターの中は
+        // 専用のキー空間で、navモード本体の `k` とはここで分かれる
+        if self.termination.is_some() {
+            return self.handle_termination_key(key);
+        }
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す
         if has_hard_modifier(&key) {
@@ -256,6 +264,11 @@ impl State {
             // このサブモードへ一本化して削除した（決定29）。navモード最上位の
             // 数字は未定義キー＝安全弁の扱いに戻る
             BareKey::Char('n') => self.enter_jump(),
+            // 終了操作サブモードへ（要件: docs/requirements/pane-close-kill/、
+            // 決定35）。`d` は delete の頭文字で、navモード内で未使用だった。
+            // close/kill/kill→close を独立キーにすると押し間違いのリスクが高い
+            // ので、入場キー1つ＋確認プロンプトのミニフローに畳んである
+            BareKey::Char('d') => self.enter_termination(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
@@ -560,6 +573,8 @@ impl State {
         use HelpRow::{Blank, Entry, Section};
         if self.triage.is_some() {
             self.triage_help_lines()
+        } else if self.termination.is_some() {
+            self.termination_help_lines()
         } else if self.jump.is_some() {
             &[
                 Section("keys"),
@@ -591,6 +606,7 @@ impl State {
                 Entry("/", "search"),
                 Entry("p", "triage"),
                 Entry("n", "number jump"),
+                Entry("d", "terminate pane"),
                 Entry("?", "this help"),
                 Entry("esc", "exit"),
             ]

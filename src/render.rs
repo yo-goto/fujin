@@ -188,6 +188,9 @@ enum Ink {
 const NAV_LEVEL: usize = 2;
 // トリアージモードはレベル0（orange）。緊急度を連想させる側へ寄せる
 const TRIAGE_LEVEL: usize = 0;
+// 終了操作サブモードはレベル6（error_color）。確認プロンプトを警告色で出す
+//（決定35）。新しい色は増やさず、状態アイコン `error` と同じ色を借りる
+const TERMINATION_LEVEL: usize = 6;
 // 配置演出の兵の色（要件: header-animation）。レベル2（green）で、状態アイコンの
 // 色分けではなくブランド側の色として読ませる。一過性の演出なので、ヘッダーの
 // 状態色（navモードも同じレベル2）と一瞬並んでも意味の取り違えは起きない。
@@ -720,7 +723,12 @@ impl State {
     // 使い、**テキストを読まなくても色だけでモードが判別できる**ようにする
     //（決定27。要件: sidebar-header / sidebar-footer）
     fn state_ink(&self) -> Ink {
-        if self.triage.is_some() {
+        // 終了操作サブモードが最優先。確認プロンプトのあいだは、ヘッダーの三角も
+        // 含めて警告色にする（決定35のフッター転用を、決定27の「ヘッダーとフッターは
+        // 同じ状態色」に沿わせたもの）
+        if self.termination.is_some() {
+            Ink::Accent(TERMINATION_LEVEL)
+        } else if self.triage.is_some() {
             Ink::Accent(TRIAGE_LEVEL)
         } else if self.nav_mode || self.search.is_some() {
             Ink::Accent(NAV_LEVEL)
@@ -762,6 +770,13 @@ impl State {
                 &[(&indent, Ink::Plain), ("press any key to close", ink)],
                 inner,
             );
+        }
+        // 終了操作サブモード中は確認プロンプトに転用する（決定35。要件:
+        // pane-close-kill）。**ペイン名は出さない** — 対象は選択行のハイライトで
+        // 分かっており、この幅では名前の大半が切り詰められて識別の役に立たない
+        if self.termination.is_some() {
+            let prompt = termination_prompt(inner.saturating_sub(HEADER_INDENT));
+            return compose(&[(&indent, Ink::Plain), (prompt, ink)], inner);
         }
         // 検索サブモード中はクエリ入力欄に転用する
         if let Some(search) = &self.search {
@@ -1199,6 +1214,23 @@ fn input_footer(tag: &str, input: &str, indent: &str, ink: Ink, cols: usize) -> 
         segments.push((hint, ink));
     }
     compose(&segments, cols)
+}
+
+// 終了操作サブモードの確認プロンプト（決定35。要件: pane-close-kill）。
+//
+// 幅28セル（決定27）に3項目とも収める都合で、項目のあいだは他のヒントの半分の
+// 空白1つ。それでも収まらない幅ではキーだけに落とす — 項目の途中で切り詰めると
+// `キー:動作` の形が壊れて読めなくなる（direct-keys のヒントと同じ考え方）。
+//
+// Esc（取り消し）はここには出ない。3項目で幅を使い切っているので、行き先の説明は
+// ヘルプオーバーレイ側（termination_help_lines）が担う
+fn termination_prompt(budget: usize) -> &'static str {
+    let full = "c:close k:kill x:kill+close";
+    if UnicodeWidthStr::width(full) <= budget {
+        full
+    } else {
+        "c k x"
+    }
 }
 
 // 境界線。chrome（ヘッダー・フッター）と content（ツリー）の境目を示す。

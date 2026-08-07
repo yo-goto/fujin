@@ -21,6 +21,7 @@ use crate::render::{
     cwd_row, divider_line, fold_highlight_indices, overflow_row, pad_to_width, reconcile_scroll,
     shift_highlight_indices, truncate, truncate_start, CounterColumn, Row,
 };
+use crate::termination::Termination;
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -952,6 +953,186 @@ fn the_footer_shows_the_number_buffer_while_jumping() {
     assert!(content.ends_with("?:help"), "{}", content);
 }
 
+// --- 終了操作サブモード（決定35、要件: docs/requirements/pane-close-kill/） ---
+//
+// 実行そのもの（send_sigkill_to_pane_id / close_pane_with_id）は副作用だけの
+// ホスト関数で結果を観測できないので、その手前で畳んだ `termination_plan()`
+//（対象ペインと効果の内訳）を検証対象にする
+
+fn termination_state(count: u32) -> State {
+    let mut state = state_with_panes(count);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('d')));
+    state
+}
+
+#[test]
+fn the_entry_key_opens_the_confirmation_prompt() {
+    let state = termination_state(3);
+    assert!(state.termination.is_some());
+    assert!(state.nav_mode, "サブモードはnavモードの内側");
+    // フッターが確認プロンプトに転用され、3操作とも選べる
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  c:close k:kill x:kill+close"
+    );
+}
+
+#[test]
+fn each_key_picks_its_own_termination() {
+    // close はプロセスに触れず閉じるだけ、kill はSIGKILLだけ、
+    // kill→close は両方（順序は kill → close）
+    for (pressed, kind, effects) in [
+        ('c', Termination::Close, (false, true)),
+        ('k', Termination::Kill, (true, false)),
+        ('x', Termination::KillThenClose, (true, true)),
+    ] {
+        let mut state = termination_state(3);
+        assert_eq!(Termination::from_key(BareKey::Char(pressed)), Some(kind));
+        assert_eq!(
+            state.termination_plan(kind),
+            Some((1, effects.0, effects.1)),
+            "{} の効果",
+            pressed
+        );
+
+        state.handle_nav_key(key(BareKey::Char(pressed)));
+        assert!(
+            state.termination.is_none(),
+            "{} でサブモードを抜ける",
+            pressed
+        );
+        assert!(state.nav_mode, "{} で戻る先はnavモード", pressed);
+    }
+}
+
+#[test]
+fn the_prompt_targets_the_selected_pane() {
+    let mut state = state_with_panes(3);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.handle_nav_key(key(BareKey::Char('d')));
+
+    assert_eq!(
+        state.termination_plan(Termination::Close),
+        Some((2, false, true))
+    );
+}
+
+#[test]
+fn the_target_is_pinned_at_entry() {
+    // 確認の途中で選択が動いても（兄弟インスタンスからの配布・ペインの増減）、
+    // 確認したときに見えていたペイン以外を対象にしない
+    let mut state = termination_state(3);
+    state.select_pane_id(3);
+
+    assert_eq!(
+        state.termination_plan(Termination::Kill),
+        Some((1, true, false))
+    );
+}
+
+#[test]
+fn a_pane_closed_during_the_prompt_is_left_alone() {
+    let mut state = termination_state(3);
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![terminal_pane(2, "pane2"), terminal_pane(3, "pane3")],
+    )]));
+    state.rebuild_selectable();
+
+    assert_eq!(state.termination_plan(Termination::Close), None);
+}
+
+#[test]
+fn the_prompt_needs_a_selected_pane() {
+    let mut state = state_with_panes(0);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('d')));
+
+    assert!(state.termination.is_none(), "対象が無ければ入場しない");
+    assert!(state.nav_mode);
+}
+
+#[test]
+fn esc_cancels_the_termination() {
+    let mut state = termination_state(3);
+    state.handle_nav_key(key(BareKey::Esc));
+
+    assert!(state.termination.is_none());
+    assert!(state.nav_mode, "取り消しでnavモードごと抜けはしない");
+    assert_eq!(state.selected, 0, "選択は動かさない");
+    // フッターは元の表示に戻る
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  ?:help  esc:exit");
+}
+
+#[test]
+fn the_safety_valve_reaches_the_termination_submode() {
+    for key_press in [
+        KeyWithModifier::new(BareKey::Char('z')),
+        KeyWithModifier::new(BareKey::Enter),
+        KeyWithModifier::new(BareKey::Char('c')).with_ctrl_modifier(),
+    ] {
+        let mut state = termination_state(3);
+        state.handle_nav_key(key_press.clone());
+        assert!(!state.nav_mode, "{:?} でnavモードごと抜ける", key_press);
+        assert!(
+            state.termination.is_none(),
+            "{:?} で終了操作は実行しない",
+            key_press
+        );
+    }
+}
+
+#[test]
+fn every_kind_of_pane_offers_all_three_terminations() {
+    // 対象種別で出し分けはしない（決定35）。対象プロセスが実質存在しない
+    // 場合（終了済みコマンドペインへのkill）も no-op になるだけ
+    let mut with_agent = state_with_panes(1);
+    set_agent_state(&mut with_agent, 1, AgentState::Working);
+    let running = state_with_command_panes(vec![command_pane(1, "docker build .")]);
+    let exited = state_with_command_panes(vec![exited_command_pane(1, "ls", Some(0))]);
+    let plain = state_with_panes(1);
+
+    for mut state in [with_agent, running, exited, plain] {
+        state.nav_mode = true;
+        state.handle_nav_key(key(BareKey::Char('d')));
+        for kind in [
+            Termination::Close,
+            Termination::Kill,
+            Termination::KillThenClose,
+        ] {
+            assert!(state.termination_plan(kind).is_some(), "{:?}", kind);
+        }
+    }
+}
+
+#[test]
+fn the_confirmation_prompt_wears_the_warning_color() {
+    // 新しい色は増やさず、状態アイコン `error` と同じ error_color を借りる（決定35）
+    let state = termination_state(3);
+    let footer = state.footer_line(SIDEBAR);
+    let indent = 2;
+    let end = footer.content().chars().count();
+    assert_eq!(
+        ink_at(&footer, ERROR_LEVEL),
+        (indent..end).collect::<Vec<_>>(),
+        "{}",
+        footer.content()
+    );
+    // ヘッダーの三角も同じ状態色（決定27）。モードラベルは navモードのまま
+    let header = state.header_line(SIDEBAR);
+    assert!(ink_at(&header, ERROR_LEVEL).contains(&0), "{:?}", header);
+    assert!(header.content().contains("[nav]"), "{}", header.content());
+}
+
+#[test]
+fn the_prompt_falls_back_to_bare_keys_when_it_does_not_fit() {
+    // 項目の途中で切り詰めると `キー:動作` の形が壊れて読めなくなる
+    let state = termination_state(3);
+    assert_eq!(state.footer_line(16).content(), "  c k x");
+}
+
 // --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/nav-mode/） ---
 //
 // サイドバー幅は32文字（決定3）。ヘッダもヘルプもこの幅を前提に文言を決めてある
@@ -981,6 +1162,8 @@ fn ink_at(text: &Text, level: usize) -> Vec<usize> {
 }
 
 const DIM_LEVEL: usize = 4;
+// error_color。状態アイコン `error` と終了操作サブモードの警告色（決定35）
+const ERROR_LEVEL: usize = 6;
 
 // direct-keys のヒント設定（decision28。configuration 経由で受け取る）
 fn direct_key_config(binds: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -1471,6 +1654,36 @@ fn the_help_lines_fit_the_sidebar_width() {
     for line in overlay_lines(&state, 32) {
         assert!(!line.contains('…'), "番号ジャンプサブモード: {}", line);
     }
+    state.handle_nav_key(key(BareKey::Char('?'))); // いったん閉じる
+    state.handle_nav_key(key(BareKey::Esc)); // 番号ジャンプサブモードを抜ける
+    state.handle_nav_key(key(BareKey::Char('d')));
+    state.handle_nav_key(key(BareKey::Char('?')));
+    for line in overlay_lines(&state, 32) {
+        assert!(!line.contains('…'), "終了操作サブモード: {}", line);
+    }
+}
+
+#[test]
+fn the_help_overlay_explains_each_termination() {
+    // フッターの確認プロンプトに収まらない Esc の行き先もここで補う
+    let mut state = termination_state(3);
+    state.handle_nav_key(key(BareKey::Char('?')));
+    let lines = overlay_lines(&state, SIDEBAR).join("\n");
+    for expected in ["close pane", "kill process", "kill & close", "cancel"] {
+        assert!(lines.contains(expected), "{}: {}", expected, lines);
+    }
+    // 開いたヘルプは終了操作を実行せずに閉じ、確認プロンプトへ戻る
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(state.termination.is_some());
+}
+
+#[test]
+fn the_nav_help_advertises_the_termination_key() {
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+    let lines = overlay_lines(&state, SIDEBAR).join("\n");
+    assert!(lines.contains("terminate pane"), "{}", lines);
 }
 
 // 文字列に日本語（ひらがな・カタカナ・漢字）が混ざっているか。
@@ -1513,7 +1726,7 @@ fn the_sidebar_never_shows_japanese_text() {
     lines.extend(chrome_lines(&agent_state(true)));
 
     // 各サブモードと、そこで開いたヘルプオーバーレイ（状態アイコン凡例を含む）
-    for entry in ['/', 'p', 'n'] {
+    for entry in ['/', 'p', 'n', 'd'] {
         let mut state = agent_state(true);
         state.handle_nav_key(key(BareKey::Char(entry)));
         lines.extend(chrome_lines(&state));

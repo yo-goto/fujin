@@ -17,6 +17,7 @@
 // - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
+// - termination — 終了操作サブモード（選択ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
 // - render — サイドバーの描画
 // - sync   — インスタンス間の状態同期（決定13）
@@ -30,6 +31,7 @@ mod render;
 mod search;
 mod summon;
 mod sync;
+mod termination;
 mod triage;
 
 #[cfg(test)]
@@ -45,6 +47,7 @@ use agent::{AgentInfo, StatusPayload};
 use command::CommandInfo;
 use deploy::Deployment;
 use nav::{JumpState, SearchState};
+use termination::TerminationState;
 use triage::TriageState;
 
 // --- ワイヤプロトコル（pipe名） ---
@@ -200,6 +203,9 @@ struct State {
     // 番号ジャンプサブモード中か否かも同じく is_some() で表す
     //（要件: pane-number-jump、決定29）
     jump: Option<JumpState>,
+    // 終了操作サブモード中か否かも同じく is_some() で表す
+    //（要件: pane-close-kill、決定35）。中身は入場時に捕まえた対象ペイン
+    termination: Option<TerminationState>,
     // 状態変化のたびに進む単調増加のカウンタ。トリアージ一覧の tie-break に使う
     //（要件: triage-mode）。値そのものに意味はなく、比べられればよい
     state_seq: u64,
