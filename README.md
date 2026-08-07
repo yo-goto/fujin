@@ -284,9 +284,10 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `j` / `↓` / `Tab` | next pane |
 | `k` / `↑` | previous pane |
 | `g` / `G` | first / last |
-| `1`-`9` | jump straight to the nth item and exit the mode |
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
 | `/` | enter search sub-mode (below) |
+| `n` | enter number jump sub-mode (below) |
+| `p` | enter triage mode (panes that need attention, most urgent first) |
 | `?` | open the key help (below) |
 | `Esc` / `q` | exit the mode |
 
@@ -324,6 +325,26 @@ as a hint for which field matched (a cwd match is shown on that row even if
 The query is discarded every time you leave search, so it always starts empty
 next time. `cwd` is only known for panes that reported it via the hook — an
 ordinary shell pane won't match on cwd.
+
+### Number jump (`n` inside nav mode)
+
+Pressing `n` numbers every selectable pane — one running sequence across all
+tabs, not per-tab — and shows the numbers in a column on the left. Typing digits
+narrows the candidates by prefix, and the jump happens the moment only one
+candidate is left; there is no `Enter` to press. Numbers are zero-padded to the
+width of the total count (`01`, `02`, … with 12 panes), so no number is a prefix
+of another and you never end up with an ambiguous `1`.
+
+| Key | Action |
+|---|---|
+| `0`-`9` | narrow the candidates, jumping as soon as one is left |
+| `Backspace` | delete the last digit |
+| `?` | open the key help (below) |
+| `Esc` | leave the sub-mode and go back to the tree (nav mode continues) |
+
+Typing a number that does not exist clears the buffer instead of forcing you to
+back out with `Backspace`. The number column is only there while the sub-mode is
+active, so it never eats into the usual row layout.
 
 ### Help (`?` inside nav mode)
 
