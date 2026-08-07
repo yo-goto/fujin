@@ -12,6 +12,16 @@ use crate::render::HelpRow;
 use crate::search::{match_pane, Hit};
 use crate::{Selectable, State};
 
+// 番号ジャンプサブモード（navモード内の `n`、決定29）のローカルUI状態。
+// 検索サブモードと同じく権威インスタンスにしか発生しないため、
+// 兄弟インスタンスへは配らない（決定13の範囲外）
+#[derive(Debug, Default)]
+pub(crate) struct JumpState {
+    // 番号入力バッファ。数字が入るたびに通し番号へ前方一致で照合し、
+    // 候補が1件になった時点でジャンプ、0件になったら空へ戻す（決定29）
+    pub(crate) buffer: String,
+}
+
 // 検索サブモード（navモード内の `/`）のローカルUI状態。
 // 権威インスタンスにしか発生しないため、兄弟への同期は不要（決定13の範囲外）
 #[derive(Debug, Default)]
@@ -70,6 +80,8 @@ impl State {
         self.search = None;
         // トリアージモードも navモードの内側の表示なので、一緒に畳む
         self.triage = None;
+        // 番号ジャンプサブモードも同様。入力途中のバッファは持ち越さない
+        self.jump = None;
         clear_key_presses_intercepts();
         // 召喚インスタンスは用が済んだら自分で退場する（決定16）。
         // 残すと作業ペインに重なり続ける。次の入場でまた呼べばよい
@@ -145,6 +157,10 @@ impl State {
         if self.triage.is_some() {
             return self.handle_triage_key(key);
         }
+        // 番号ジャンプサブモードも同様（要件: pane-number-jump）
+        if self.jump.is_some() {
+            return self.handle_jump_key(key);
+        }
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す
         if has_hard_modifier(&key) {
@@ -157,20 +173,17 @@ impl State {
             // トリアージモードへ（要件: docs/requirements/triage-mode/）。
             // `p` は priority の頭文字で、navモード内で未使用だった
             BareKey::Char('p') => self.enter_triage(),
+            // 番号ジャンプサブモードへ（要件: docs/requirements/pane-number-jump/）。
+            // `n` は number の頭文字で、navモード内で未使用だった。
+            // かつてここにあった 1-9 の直行ジャンプ（1桁固定・番号の表示なし）は
+            // このサブモードへ一本化して削除した（決定29）。navモード最上位の
+            // 数字は未定義キー＝安全弁の扱いに戻る
+            BareKey::Char('n') => self.enter_jump(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
             BareKey::Char('G') => {
                 self.selected = self.selectable.len().saturating_sub(1);
-            }
-            // 1-9 で n 番目へ直行
-            BareKey::Char(c @ '1'..='9') => {
-                let index = c as usize - '1' as usize;
-                if index < self.selectable.len() {
-                    self.selected = index;
-                    self.exit_nav_mode();
-                    self.focus_selected();
-                }
             }
             BareKey::Enter | BareKey::Char(' ') | BareKey::Char('l') => {
                 // フォーカス移動でタブが変わりうるので、先に横取りを解除する
@@ -225,6 +238,104 @@ impl State {
         // 取り消せない位置に取り残される（決定13）。配るのは確定時
         //（confirm_search）だけ
         true
+    }
+
+    // 番号ジャンプサブモード（要件: docs/requirements/pane-number-jump/）。
+    //
+    // 選択対象の全ペインに全タブ貫通の通し番号を振り、番号の入力でジャンプする。
+    // 曖昧性解消方式（vimiumのリンクヒントに近い）: 数字を1つ入力するたびに
+    // 前方一致で候補を絞り込み、1件に確定した時点で即ジャンプする（決定29）
+    fn enter_jump(&mut self) {
+        self.jump = Some(JumpState::default());
+    }
+
+    // 通し番号の桁数（番号列の幅）。総数の桁数に固定し、全番号をゼロ埋めで
+    // 揃える（決定29）。桁数を固定すると番号どうしが互いの前方一致にならず
+    //（prefix-free）、「1 を打ったが 10 があるので確定できない」という
+    // 行き止まりが構造的に起きない
+    pub(crate) fn pane_number_width(&self) -> usize {
+        self.selectable.len().to_string().len()
+    }
+
+    // 選択対象 flat_index 番目の行に振る通し番号の表示（ゼロ埋め、1始まり）
+    pub(crate) fn pane_number(&self, flat_index: usize) -> String {
+        format!(
+            "{:0width$}",
+            flat_index + 1,
+            width = self.pane_number_width()
+        )
+    }
+
+    // 番号ジャンプサブモード中、この行の番号列に出すセル。
+    // 返り値は (通し番号の表示, 番号入力バッファに前方一致して候補に残っているか)。
+    // サブモード外は None ＝ 番号列そのものを出さない（決定29: 平常時の幅配分を崩さない）
+    pub(crate) fn jump_number(&self, flat_index: usize) -> Option<(String, bool)> {
+        let jump = self.jump.as_ref()?;
+        let number = self.pane_number(flat_index);
+        let matches = number.starts_with(&jump.buffer);
+        Some((number, matches))
+    }
+
+    // 番号ジャンプサブモード中のキー解釈。数字だけを受け、それ以外は
+    // navモード本体と同じ安全弁（決定12）に倒す
+    fn handle_jump_key(&mut self, key: KeyWithModifier) -> bool {
+        // Shift 以外の修飾キーは安全弁 — サブモードだけでなく navモードごと抜ける
+        if has_hard_modifier(&key) {
+            self.leave_nav_mode();
+            return true;
+        }
+        match key.bare_key {
+            // Esc はサブモードだけ抜けて navモードに留まる（検索・トリアージと
+            // 同じパターン）。exit_nav_mode() を呼んではいけない — 召喚
+            // インスタンスなら番号入力の取り消しでサイドバーごと閉じてしまう（決定16）
+            BareKey::Esc => self.jump = None,
+            BareKey::Backspace => {
+                if let Some(jump) = &mut self.jump {
+                    jump.buffer.pop();
+                }
+            }
+            BareKey::Char(c @ '0'..='9') => self.push_jump_digit(c),
+            // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
+            _ => self.leave_nav_mode(),
+        }
+        // 番号入力の途中経過は兄弟インスタンスへ配らない（決定29。検索サブモードと
+        // 同じ扱い）。確定時のジャンプは push_jump_digit 側で配る
+        true
+    }
+
+    // 数字を1つ足して候補を引き直す。前方一致の候補が1件になったら即ジャンプ、
+    // 0件になったらバッファを空に戻して次の数字からやり直す（決定29。
+    // Backspace での訂正を強制しないための救済）
+    fn push_jump_digit(&mut self, digit: char) {
+        let Some(jump) = &mut self.jump else {
+            return;
+        };
+        jump.buffer.push(digit);
+        let buffer = jump.buffer.clone();
+        let (first, ambiguous) = {
+            let mut candidates = (0..self.selectable.len())
+                .filter(|&index| self.pane_number(index).starts_with(&buffer));
+            let first = candidates.next();
+            (first, candidates.next().is_some())
+        };
+        match first {
+            // 0件: 存在しない番号。その場でリセットして打ち直させる
+            None => {
+                if let Some(jump) = &mut self.jump {
+                    jump.buffer.clear();
+                }
+            }
+            // 1件: 確定。既存のジャンプと同じ手順で navモードごと抜ける
+            //（検索サブモードの confirm_search と同じ順序）
+            Some(index) if !ambiguous => {
+                self.selected = index;
+                self.exit_nav_mode();
+                self.broadcast_selection(); // 確定時だけ配る（決定13）
+                self.focus_selected();
+            }
+            // 2件以上: まだ曖昧。次の数字を待つ
+            Some(_) => {}
+        }
     }
 
     fn enter_search(&mut self) {
@@ -372,6 +483,15 @@ impl State {
         use HelpRow::{Blank, Entry, Title};
         if self.triage.is_some() {
             self.triage_help_lines()
+        } else if self.jump.is_some() {
+            &[
+                Title("[jump]", "keys"),
+                Blank,
+                Entry("0-9", "narrow & jump"),
+                Entry("backspace", "delete digit"),
+                Entry("esc", "back to tree"),
+                Entry("?", "this help"),
+            ]
         } else if self.search.is_some() {
             &[
                 Title("[search]", "keys"),
@@ -390,10 +510,10 @@ impl State {
                 Blank,
                 Entry("j k up down tab", "move"),
                 Entry("g G", "top / bottom"),
-                Entry("1-9", "jump to n"),
                 Entry("enter l space", "jump & exit"),
                 Entry("/", "search"),
                 Entry("p", "triage"),
+                Entry("n", "number jump"),
                 Entry("?", "this help"),
                 Entry("esc q", "exit"),
             ]

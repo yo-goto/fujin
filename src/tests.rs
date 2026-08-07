@@ -623,21 +623,14 @@ fn nav_g_jumps_to_the_edges() {
 }
 
 #[test]
-fn nav_digit_jumps_and_leaves_the_mode() {
+fn nav_digits_no_longer_jump_directly() {
+    // かつての 1-9 直行ジャンプは番号ジャンプサブモードへ一本化した（決定29）。
+    // navモード最上位の数字は未定義キー＝安全弁で退場する
     let mut state = state_with_panes(3);
     state.nav_mode = true;
     state.handle_nav_key(KeyWithModifier::new(BareKey::Char('2')));
-    assert_eq!(state.selected, 1);
     assert!(!state.nav_mode);
-}
-
-#[test]
-fn nav_digit_out_of_range_is_ignored() {
-    let mut state = state_with_panes(2);
-    state.nav_mode = true;
-    state.handle_nav_key(KeyWithModifier::new(BareKey::Char('9')));
-    assert_eq!(state.selected, 0);
-    assert!(state.nav_mode, "範囲外のときはモードに留まる");
+    assert_eq!(state.selected, 0, "選択は動かさない");
 }
 
 #[test]
@@ -664,6 +657,167 @@ fn nav_leaves_on_undefined_keys() {
         assert!(!state.nav_mode, "{:?} でモードを抜けるべき", key);
         assert_eq!(state.selected, 0, "{:?} で選択を動かすべきでない", key);
     }
+}
+
+// --- 番号ジャンプサブモード（決定29、要件: docs/requirements/pane-number-jump/） ---
+
+fn jump_state(count: u32) -> State {
+    let mut state = state_with_panes(count);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('n')));
+    state
+}
+
+fn jump_buffer(state: &State) -> Option<&str> {
+    state.jump.as_ref().map(|j| j.buffer.as_str())
+}
+
+#[test]
+fn n_enters_the_number_jump_submode() {
+    let state = jump_state(3);
+    assert!(state.jump.is_some());
+    assert!(state.nav_mode, "サブモードに入ってもnavモードは継続する");
+}
+
+#[test]
+fn a_unique_number_jumps_and_leaves_nav_mode() {
+    let mut state = jump_state(3);
+    state.handle_nav_key(key(BareKey::Char('2')));
+    assert_eq!(state.selected, 1);
+    assert!(!state.nav_mode, "ジャンプはnavモードの退場を伴う");
+    assert!(state.jump.is_none());
+}
+
+#[test]
+fn numbers_are_zero_padded_to_the_digit_count_of_the_total() {
+    // 桁数を総数に固定すると番号どうしが互いの前方一致にならず（prefix-free）、
+    // 「1 を打ったが 10 があるので確定できない」という行き止まりが起きない（決定29）
+    let state = state_with_panes(12);
+    assert_eq!(state.pane_number_width(), 2);
+    assert_eq!(state.pane_number(0), "01");
+    assert_eq!(state.pane_number(11), "12");
+    let single = state_with_panes(9);
+    assert_eq!(single.pane_number(0), "1", "総数が1桁ならゼロ埋めしない");
+}
+
+#[test]
+fn an_ambiguous_prefix_waits_for_the_next_digit() {
+    let mut state = jump_state(12);
+    state.handle_nav_key(key(BareKey::Char('1')));
+    assert!(state.nav_mode, "10-12 が残っているので確定しない");
+    assert_eq!(jump_buffer(&state), Some("1"));
+    state.handle_nav_key(key(BareKey::Char('2')));
+    assert_eq!(state.selected, 11);
+    assert!(!state.nav_mode);
+}
+
+#[test]
+fn a_leading_zero_reaches_the_early_panes() {
+    let mut state = jump_state(12);
+    state.handle_nav_key(key(BareKey::Char('0')));
+    assert!(state.nav_mode, "01-09 が残っているので確定しない");
+    state.handle_nav_key(key(BareKey::Char('3')));
+    assert_eq!(state.selected, 2);
+    assert!(!state.nav_mode);
+}
+
+#[test]
+fn a_dead_end_input_resets_the_buffer() {
+    // 存在しない番号（候補0件）はその場で空に戻す。Backspace での訂正を強制しない
+    let mut state = jump_state(12);
+    state.handle_nav_key(key(BareKey::Char('9')));
+    assert!(state.nav_mode, "リセットしてサブモードには留まる");
+    assert_eq!(jump_buffer(&state), Some(""));
+    state.handle_nav_key(key(BareKey::Char('0')));
+    state.handle_nav_key(key(BareKey::Char('4')));
+    assert_eq!(state.selected, 3, "リセット後は最初から入力し直せる");
+}
+
+#[test]
+fn backspace_deletes_the_last_digit() {
+    let mut state = jump_state(12);
+    state.handle_nav_key(key(BareKey::Char('1')));
+    state.handle_nav_key(key(BareKey::Backspace));
+    assert_eq!(jump_buffer(&state), Some(""));
+    state.handle_nav_key(key(BareKey::Char('0')));
+    state.handle_nav_key(key(BareKey::Char('5')));
+    assert_eq!(state.selected, 4);
+}
+
+#[test]
+fn esc_leaves_only_the_jump_submode() {
+    let mut state = jump_state(3);
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(state.jump.is_none());
+    assert!(state.nav_mode, "navモードは継続している");
+}
+
+#[test]
+fn the_safety_valve_reaches_the_jump_submode() {
+    // 未定義キー・修飾キー付きは navモードごと退場（安全弁は最上位まで効かせる）
+    for key_press in [
+        KeyWithModifier::new(BareKey::Char('x')),
+        KeyWithModifier::new(BareKey::Enter),
+        KeyWithModifier::new(BareKey::Char('1')).with_ctrl_modifier(),
+    ] {
+        let mut state = jump_state(3);
+        state.handle_nav_key(key_press.clone());
+        assert!(!state.nav_mode, "{:?} でnavモードごと抜ける", key_press);
+        assert_eq!(state.selected, 0, "{:?} で選択は動かさない", key_press);
+    }
+}
+
+#[test]
+fn the_number_column_appears_only_in_the_jump_submode() {
+    let mut state = state_with_panes(12);
+    let column = CounterColumn::default();
+    let plain = state.pane_row(&state.selectable[0], false, None, column, None, SIDEBAR);
+    assert!(
+        plain.content().starts_with("    pane1"),
+        "{}",
+        plain.content()
+    );
+
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('n')));
+    let cell = state.jump_number(0);
+    let cell = cell.as_ref().map(|(n, m)| (n.as_str(), *m));
+    let numbered = state.pane_row(&state.selectable[0], false, None, column, cell, SIDEBAR);
+    assert!(
+        numbered.content().starts_with("  01   pane1"),
+        "番号列はアイコンの前に挟む: {}",
+        numbered.content()
+    );
+}
+
+#[test]
+fn numbers_off_the_candidate_list_are_dimmed() {
+    // vimiumのリンクヒントと同じ提示: バッファに前方一致しなくなった番号は
+    // 落とし、残っている候補だけがキーの色（レベル2）で目に入る（決定29）
+    let mut state = jump_state(12);
+    state.handle_nav_key(key(BareKey::Char('1')));
+
+    let column = CounterColumn::default();
+    let render_with_number = |state: &State, index: usize| {
+        let cell = state.jump_number(index);
+        let cell = cell.as_ref().map(|(n, m)| (n.as_str(), *m));
+        state.pane_row(&state.selectable[index], false, None, column, cell, SIDEBAR)
+    };
+    let candidate = render_with_number(&state, 9); // "10"
+    assert_eq!(ink_at(&candidate, 2), vec![2, 3]);
+    let dropped = render_with_number(&state, 0); // "01"
+    assert_eq!(ink_at(&dropped, DIM_LEVEL), vec![2, 3]);
+    assert!(ink_at(&dropped, 2).is_empty());
+}
+
+#[test]
+fn the_footer_shows_the_number_buffer_while_jumping() {
+    let mut state = jump_state(12);
+    state.handle_nav_key(key(BareKey::Char('1')));
+    let footer = state.footer_line(SIDEBAR);
+    let content = footer.content().to_string();
+    assert!(content.starts_with("  n 1▏"), "{}", content);
+    assert!(content.ends_with("?:help"), "{}", content);
 }
 
 // --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/nav-mode/） ---
@@ -816,7 +970,7 @@ fn the_frame_keeps_its_rows_across_every_mode_boundary() {
         rows.len()
     };
 
-    for enter in ["nav", "search", "triage", "help"] {
+    for enter in ["nav", "search", "triage", "jump", "help"] {
         state.nav_mode = true;
         match enter {
             "search" => {
@@ -824,6 +978,9 @@ fn the_frame_keeps_its_rows_across_every_mode_boundary() {
             }
             "triage" => {
                 state.handle_nav_key(key(BareKey::Char('p')));
+            }
+            "jump" => {
+                state.handle_nav_key(key(BareKey::Char('n')));
             }
             "help" => {
                 state.handle_nav_key(key(BareKey::Char('?')));
@@ -840,6 +997,7 @@ fn the_frame_keeps_its_rows_across_every_mode_boundary() {
         }
         state.search = None;
         state.triage = None;
+        state.jump = None;
         state.help_overlay = false;
     }
 }
@@ -1174,6 +1332,13 @@ fn the_help_lines_fit_the_sidebar_width() {
     for line in overlay_lines(&state, 32) {
         assert!(!line.contains('…'), "検索サブモード: {}", line);
     }
+    state.handle_nav_key(key(BareKey::Char('?'))); // いったん閉じる
+    state.handle_nav_key(key(BareKey::Esc)); // 検索サブモードを抜ける
+    state.handle_nav_key(key(BareKey::Char('n')));
+    state.handle_nav_key(key(BareKey::Char('?')));
+    for line in overlay_lines(&state, 32) {
+        assert!(!line.contains('…'), "番号ジャンプサブモード: {}", line);
+    }
 }
 
 #[test]
@@ -1316,6 +1481,15 @@ fn the_status_legend_shows_up_in_every_overlay() {
             .iter()
             .any(|line| line.trim() == "status"),
         "検索サブモード"
+    );
+
+    let mut state = jump_state(3);
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(
+        overlay_lines(&state, SIDEBAR)
+            .iter()
+            .any(|line| line.trim() == "status"),
+        "番号ジャンプサブモード"
     );
 }
 
@@ -2258,6 +2432,7 @@ fn counters_are_flush_with_the_right_edge() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     let content = text.content();
@@ -2302,7 +2477,9 @@ fn every_tree_row_leaves_a_right_margin() {
     for row in &rows {
         let line = match row {
             Row::Tab(tab) => state.tab_heading(tab, SIDEBAR),
-            Row::Pane { entry, hit, .. } => state.pane_row(entry, false, *hit, column, SIDEBAR),
+            Row::Pane { entry, hit, .. } => {
+                state.pane_row(entry, false, *hit, column, None, SIDEBAR)
+            }
             Row::Cwd { cwd, hit, .. } => cwd_row(cwd, false, *hit, SIDEBAR),
             _ => continue,
         };
@@ -2314,7 +2491,7 @@ fn every_tree_row_leaves_a_right_margin() {
     }
 
     // 選択行の背景だけは右マージンも塗る。塗らないと帯が途中で切れて見える
-    let selected = state.pane_row(&state.selectable[0], true, None, column, SIDEBAR);
+    let selected = state.pane_row(&state.selectable[0], true, None, column, None, SIDEBAR);
     assert_eq!(
         unicode_width::UnicodeWidthStr::width(selected.content()),
         SIDEBAR
@@ -2335,8 +2512,8 @@ fn the_counter_column_is_shared_by_every_row() {
     repeat_status(&mut state, 2, "TaskCreated", 3);
 
     let column = column_of(&state);
-    let first = state.pane_row(&state.selectable[0], false, None, column, SIDEBAR);
-    let second = state.pane_row(&state.selectable[1], false, None, column, SIDEBAR);
+    let first = state.pane_row(&state.selectable[0], false, None, column, None, SIDEBAR);
+    let second = state.pane_row(&state.selectable[1], false, None, column, None, SIDEBAR);
 
     // 列幅は `+12`（3）と `[3]`（3）、あいだの空白1つで計7セル
     assert_eq!(column_at(first.content(), "+12"), CONTENT - 7);
@@ -2359,6 +2536,7 @@ fn the_counter_column_costs_nothing_when_nobody_has_counters() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     let content = text.content();
@@ -2378,6 +2556,7 @@ fn a_pane_name_that_is_a_path_keeps_its_tail() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     let content = text.content();
@@ -2415,6 +2594,7 @@ fn the_cwd_is_rendered_as_its_own_row() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     assert!(
@@ -2511,6 +2691,7 @@ fn an_empty_pane_name_falls_back_to_the_cwd() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     assert!(
@@ -2530,6 +2711,7 @@ fn a_pane_name_that_is_only_spaces_falls_back_too() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     assert!(text.content().contains("fujin"), "{}", text.content());
@@ -2546,6 +2728,7 @@ fn a_non_empty_pane_name_is_left_alone() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     let content = text.content();
@@ -2567,6 +2750,7 @@ fn an_empty_pane_name_without_a_cwd_stays_blank() {
         false,
         None,
         column_of(&state),
+        None,
         SIDEBAR,
     );
     assert_eq!(text.content().trim(), "", "{}", text.content());
