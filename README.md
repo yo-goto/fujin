@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo-full.svg" alt="fujin — Zellij, your agents in formation." width="100%" />
+  <img src="assets/logo-full-animated.svg" alt="fujin — Zellij, your agents in formation." width="100%" />
 </div>
 
 A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualizes
