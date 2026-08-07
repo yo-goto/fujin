@@ -52,27 +52,44 @@ the command. Panes with no name show the command line instead.
 ## Requirements
 
 - zellij 0.44 or later
-- Rust + `rustup target add wasm32-wasip1` (build time only)
+- `curl` (to fetch a release) or Rust + `rustup target add wasm32-wasip1` (to build it yourself)
 - `jq` (for the Claude Code hook)
 
 ## Quick start
 
+Grab the prebuilt wasm from the latest release (**no Rust needed**):
+
 ```bash
-make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
-make setup     # generate the layout, register the Claude Code hooks
+curl -fsSLO https://github.com/yo-goto/fujin/releases/latest/download/setup.sh
+bash setup.sh --download
 ```
 
-What `make setup` (i.e. `extras/setup.sh`) does:
+What `setup.sh` does:
 
+- Downloads `fujin.wasm` and the hook script into `~/.config/zellij/plugins/`.
 - Generates `~/.config/zellij/layouts/fujin.kdl`. The two mistakes that are easy
   to make by hand — `children` vs `pane`, and forgetting `new_tab_template`
   ([details below](#3-keep-the-sidebar-resident-layout)) — cannot happen in the
   generated file.
-- Copies `extras/claude-hooks/fujin-hook.sh` into `~/.config/zellij/plugins/` and
-  registers that path for all 10 events in `~/.claude/settings.json`. No writing
-  the same path ten times, and the registration no longer depends on where this
-  repository lives.
+- Registers the hook's path for all 10 events in `~/.claude/settings.json`. No
+  writing the same path ten times.
 - Prints the snippet to add to `config.kdl` — it **never edits that file**.
+
+<details>
+<summary>Building from source instead</summary>
+
+Needs Rust and `rustup target add wasm32-wasip1`.
+
+```bash
+git clone https://github.com/yo-goto/fujin.git && cd fujin
+make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
+make setup     # generate the layout, register the Claude Code hooks
+```
+
+`make setup` just runs `extras/setup.sh` without `--download`. Extra arguments go
+through `SETUP_ARGS`, e.g. `make setup SETUP_ARGS="--no-hooks"`.
+
+</details>
 
 Then paste what it printed into `~/.config/zellij/config.kdl`:
 
@@ -101,15 +118,18 @@ pane and press `y` to approve the permission prompt.
 
 | Option | Effect |
 |---|---|
+| `--download` | Fetch the wasm and the hook script from a release |
+| `--version TAG` | Which release to fetch (default `latest`) |
 | `--dry-run` | Show what would be written, write nothing |
 | `--no-hooks` | Skip the Claude Code hook registration |
 | `--layout-only` / `--hooks-only` / `--config-only` | Run just that part |
 | `--width N` | Sidebar width (default 32) |
 | `--force` | Overwrite an existing layout file without asking |
 
-Re-running is safe: hook registration is idempotent and `settings.json` is backed
-up first. If you move this repository, re-run with `--hooks-only` and the stale
-`fujin-hook.sh` path gets rewritten to the new one.
+**Updating is the same command.** Re-running is safe — hook registration is
+idempotent, `settings.json` is backed up first, and only the layout overwrite
+asks for confirmation. If the registered hook path has gone stale (you moved
+`fujin-hook.sh`), re-running rewrites it to the new one.
 
 > [!NOTE]
 > `config.kdl` is the one file the script won't touch. `plugins` and `keybinds`
@@ -120,16 +140,22 @@ up first. If you move this repository, re-run with `--hooks-only` and the stale
 
 ## Setup (by hand)
 
-This is what `make setup` does, step by step. Follow it if you'd rather not run
-the script, or if you're folding fujin into an existing configuration.
+This is what `setup.sh` does, step by step. Follow it if you'd rather not run the
+script, or if you're folding fujin into an existing configuration.
 
-### 1. Build and place the wasm
+### 1. Place the wasm
 
 The wasm can live anywhere, but `~/.config/zellij` is the config directory on
-every OS, so keeping it there makes the setup steps environment-independent:
+every OS, so keeping it there makes the setup steps environment-independent.
 
 ```bash
-make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
+# from a release
+mkdir -p ~/.config/zellij/plugins
+curl -fsSL https://github.com/yo-goto/fujin/releases/latest/download/fujin.wasm \
+  -o ~/.config/zellij/plugins/fujin.wasm
+
+# or build it yourself (needs Rust)
+make install   # release build, copied to the same place
 ```
 
 To put it somewhere else: `make install PLUGIN_DIR=/path/to/plugins`.
@@ -217,8 +243,9 @@ zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 On first load you'll see a permission prompt — focus the pane and press `y` to
 approve (required permissions: `ReadApplicationState` / `ChangeApplicationState` /
 `ReadCliPipes` / `InterceptInput` / `MessageAndLaunchOtherPlugins` /
-`OpenTerminalsOrPlugins`). Approval is recorded per absolute path of the
-expanded wasm, so **moving the wasm means re-approving**.
+`OpenTerminalsOrPlugins`). Approval is recorded **per absolute path** of the
+expanded wasm, so overwriting it in place needs no re-approval, but **moving it
+somewhere else does**.
 
 The sidebar's width can be resized with zellij's standard resize keys
 (`Ctrl+n`, etc.) just like any other pane.
@@ -323,6 +350,55 @@ Register `extras/claude-hooks/fujin-hook.sh` as a hook (`make setup` copies it t
 - It's a no-op for Claude Code sessions running outside zellij (a plain
   terminal)
 - It's also a complete no-op when the sidebar isn't running (no side effects)
+
+## Troubleshooting
+
+### The sidebar doesn't show up
+
+Usually the layout isn't taking effect. Check that `~/.config/zellij/config.kdl`
+has `default_layout "fujin"` and that the layout defines `new_tab_template`
+(`setup.sh` reports which pieces are missing).
+
+To see what actually got loaded, run `zellij action dump-layout` inside the
+session.
+
+### Updated the wasm but the old behaviour persists
+
+**Swapping the wasm does not affect running sessions.** Existing instances keep
+running the old wasm — start a fresh session.
+
+### The keybinding (`Ctrl+y`, …) does nothing
+
+If you configured it without the alias, the layout side and the keybinding side
+may disagree on the plugin's configuration. See [Configuration](#configuration).
+Going through the alias makes this impossible by construction.
+
+### The permission prompt keeps coming back
+
+Approval is recorded **per absolute path**. Overwriting the wasm in place needs
+no re-approval, but moving it elsewhere counts as a new plugin.
+
+### It won't start, or behaves strangely
+
+Clear zellij's cache and try again.
+
+```bash
+rm -rf ~/Library/Caches/org.Zellij-Contributors.Zellij   # macOS
+rm -rf ~/.cache/zellij                                   # Linux
+```
+
+That also drops the recorded approvals (`permissions.kdl`), so the next launch
+asks again.
+
+### Trying it without changing any config
+
+It works as a floating pane:
+
+```bash
+zellij action new-pane --floating --width 40 --height 20 -p "fujin"
+```
+
+zellij's built-in plugin manager (`Ctrl+o` → `p`) can also load it by path.
 
 ## Usage
 

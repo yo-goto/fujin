@@ -39,25 +39,43 @@ zellij用サイドバープラグインです。タブ > ペインを縦並び�
 ## 必要なもの
 
 - zellij 0.44 以上
-- Rust + `rustup target add wasm32-wasip1`（ビルド時のみ）
+- `curl`（リリースから取得する場合）または Rust + `rustup target add wasm32-wasip1`（自分でビルドする場合）
 - `jq`（Claude Code フック用）
 
 ## クイックスタート
 
+ビルド済みの wasm をリリースから取得します（**Rust は要りません**）:
+
 ```bash
+curl -fsSLO https://github.com/yo-goto/fujin/releases/latest/download/setup.sh
+bash setup.sh --download
+```
+
+`setup.sh` がやること:
+
+- `fujin.wasm` とフック本体をリリースから `~/.config/zellij/plugins/` へダウンロードします
+- `~/.config/zellij/layouts/fujin.kdl` を生成します。手で書くと踏みやすい
+  `children` / `pane` の取り違えと `new_tab_template` の書き漏らし（[後述](#3-サイドバーの常駐レイアウト)）が、
+  生成物の側で起こりません
+- フック本体のパスを `~/.claude/settings.json` の10イベントへ登録します。同じパスを
+  10箇所に書き写す作業がなくなります
+- `config.kdl` に貼るべき設定を表示します（**このファイルは書き換えません**）
+
+<details>
+<summary>ソースからビルドする場合</summary>
+
+Rust と `rustup target add wasm32-wasip1` が要ります。
+
+```bash
+git clone https://github.com/yo-goto/fujin.git && cd fujin
 make install   # release ビルドして ~/.config/zellij/plugins/fujin.wasm へ配置
 make setup     # レイアウトを生成し、Claude Code フックを登録する
 ```
 
-`make setup`（実体は `extras/setup.sh`）がやること:
+`make setup` は `extras/setup.sh` を `--download` 無しで呼ぶだけです。追加の引数は
+`make setup SETUP_ARGS="--no-hooks"` のように渡せます。
 
-- `~/.config/zellij/layouts/fujin.kdl` を生成します。手で書くと踏みやすい
-  `children` / `pane` の取り違えと `new_tab_template` の書き漏らし（[後述](#3-サイドバーの常駐レイアウト)）が、
-  生成物の側で起こりません
-- `extras/claude-hooks/fujin-hook.sh` を `~/.config/zellij/plugins/` へコピーし、
-  そのパスを `~/.claude/settings.json` の10イベントへ登録します。同じパスを
-  10箇所に書き写す作業がなくなり、登録先がこのリポジトリの位置に依存しなくなります
-- `config.kdl` に貼るべき設定を表示します（**このファイルは書き換えません**）
+</details>
 
 あとは表示された内容を `~/.config/zellij/config.kdl` に貼るだけです:
 
@@ -86,15 +104,18 @@ zellij を起動し直すと左端にサイドバーが出ます。初回は権�
 
 | オプション | 内容 |
 |---|---|
+| `--download` | wasm とフック本体をリリースから取得する |
+| `--version TAG` | 取得するリリース（既定 `latest`） |
 | `--dry-run` | 何も書かずに、書き込む内容を表示する |
 | `--no-hooks` | Claude Code フックの登録をスキップする |
 | `--layout-only` / `--hooks-only` / `--config-only` | その処理だけ実行する |
 | `--width N` | サイドバーの幅（既定 32） |
 | `--force` | 既存のレイアウトファイルを確認なしで上書きする |
 
-再実行しても安全です（フック登録は冪等で、`settings.json` はバックアップを取ります）。
-リポジトリを移動したあとに `--hooks-only` で流し直すと、古い `fujin-hook.sh` の
-登録パスが新しい場所へ書き換わります。
+**更新するときも同じコマンドで済みます。** 再実行は安全で（フック登録は冪等、
+`settings.json` はバックアップを取ります）、レイアウトの上書きだけ確認を挟みます。
+フックの登録パスがずれている場合（`fujin-hook.sh` を移動したなど）は、再実行すると
+新しいパスへ書き換わります。
 
 > [!NOTE]
 > `config.kdl` だけはスクリプトが書き換えません。`plugins` / `keybinds` は既存ブロックへの
@@ -106,13 +127,19 @@ zellij を起動し直すと左端にサイドバーが出ます。初回は権�
 `make setup` が何をしているかの内訳です。スクリプトを使わずに手で設定する場合や、
 既存の設定へ部分的に取り込みたい場合はこちらを参照してください。
 
-### 1. ビルドして配置する
+### 1. wasm を配置する
 
 wasm はどこに置いてもかまいませんが、OS を問わず `~/.config/zellij` が config
-ディレクトリになるので、その配下にまとめておくと手順が環境に依存しません:
+ディレクトリになるので、その配下にまとめておくと手順が環境に依存しません。
 
 ```bash
-make install   # release ビルドして ~/.config/zellij/plugins/fujin.wasm へ配置
+# リリースから取得する場合
+mkdir -p ~/.config/zellij/plugins
+curl -fsSL https://github.com/yo-goto/fujin/releases/latest/download/fujin.wasm \
+  -o ~/.config/zellij/plugins/fujin.wasm
+
+# 自分でビルドする場合（要 Rust）
+make install   # release ビルドして同じ場所へ配置
 ```
 
 置き場所を変えたい場合は `make install PLUGIN_DIR=/path/to/plugins` としてください。
@@ -199,8 +226,8 @@ zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 初回ロード時に権限承認プロンプトが出るので、ペインにフォーカスして `y` で承認してください
 （要求権限: `ReadApplicationState` / `ChangeApplicationState` / `ReadCliPipes` /
 `InterceptInput` / `MessageAndLaunchOtherPlugins` / `OpenTerminalsOrPlugins`）。
-承認結果は展開後の wasm の絶対パスごとに記録されるので、**wasm を置き直すと
-再承認になります**。
+承認結果は展開後の wasm の**絶対パスごと**に記録されるので、同じ場所へ上書き更新する
+限り再承認は要りませんが、**置き場所を変えると再承認になります**。
 
 サイドバーの幅は zellij 標準の resize（`Ctrl+n` 等）でそのまま変更できます。
 
@@ -299,6 +326,55 @@ bind "Alt g" {
 - フックは**新しく起動した Claude Code セッションから**有効になります
 - zellij 外（素のターミナル）で動く Claude Code では何もしません（no-op）
 - サイドバーが起動していないときも完全な no-op です（副作用なし）
+
+## トラブルシューティング
+
+### サイドバーが出ない
+
+レイアウトが効いていないケースがほとんどです。`~/.config/zellij/config.kdl` に
+`default_layout "fujin"` があるか、レイアウトに `new_tab_template` が書かれているかを
+確認してください（`setup.sh` は未設定の項目を判定して教えてくれます）。
+
+いま何が読み込まれているかは、セッション内で `zellij action dump-layout` を実行すると
+確認できます。
+
+### 更新したのに古い挙動のまま
+
+**wasm の入れ替えは稼働中のセッションには反映されません。** 既存のインスタンスは古い
+wasm のまま動き続けるので、セッションを作り直してください。
+
+### キー（`Ctrl+y` など）が効かない
+
+エイリアスを使わずに設定している場合、レイアウト側とキーバインド側で設定
+（configuration）が食い違っている可能性があります。[設定](#設定)を参照してください。
+エイリアスに寄せておけば構造的に起きません。
+
+### 権限プロンプトが繰り返し出る
+
+承認結果は**展開後の絶対パスごと**に記録されます。同じ場所へ上書き更新する限り
+再承認は要りませんが、置き場所を変えると新しいパスとして扱われます。
+
+### 起動しない・挙動がおかしい
+
+zellij のキャッシュを消してから試してください。
+
+```bash
+rm -rf ~/Library/Caches/org.Zellij-Contributors.Zellij   # macOS
+rm -rf ~/.cache/zellij                                   # Linux
+```
+
+キャッシュを消すと承認結果（`permissions.kdl`）も消えるので、次の起動で承認をやり直します。
+
+### 設定を変えずに試したい
+
+常駐させずフローティングで開けます。
+
+```bash
+zellij action new-pane --floating --width 40 --height 20 -p "fujin"
+```
+
+zellij 組み込みのプラグインマネージャ（`Ctrl+o` → `p`）から wasm のパスを指定して
+読み込むこともできます。
 
 ## 使い方
 

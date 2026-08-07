@@ -24,11 +24,15 @@ hook_src="$script_dir/claude-hooks/fujin-hook.sh"
 
 # ---------------------------------------------------------------- defaults
 
+repo=yo-goto/fujin
+
 config_dir=${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}
 plugin_dir=
 layout_name=fujin
 sidebar_width=32
 claude_settings=$HOME/.claude/settings.json
+release_tag=latest
+do_download=0
 do_layout=1
 do_hooks=1
 do_config=1
@@ -39,8 +43,14 @@ usage() {
   cat <<'EOS'
 usage: setup.sh [options]
 
-Generates the zellij layout for fujin's sidebar and registers the Claude Code
-hooks. Never edits config.kdl -- it prints the snippet to paste instead.
+Sets fujin up: optionally downloads the plugin from GitHub releases, generates
+the zellij layout for the sidebar, and registers the Claude Code hooks.
+Never edits config.kdl -- it prints the snippet to paste instead.
+
+  -d, --download        download fujin.wasm and the hook from a GitHub release
+                        (needed when running this script on its own; without it,
+                        the wasm has to be in place already, e.g. via `make install`)
+      --version TAG     release tag to download (default: latest)
 
   --config-dir DIR      zellij config dir (default: $ZELLIJ_CONFIG_DIR or ~/.config/zellij)
   --plugin-dir DIR      where fujin.wasm lives (default: <config-dir>/plugins)
@@ -61,6 +71,8 @@ EOS
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    -d|--download) do_download=1; shift ;;
+    --version) release_tag=$2; shift 2 ;;
     --config-dir) config_dir=$2; shift 2 ;;
     --plugin-dir) plugin_dir=$2; shift 2 ;;
     --layout-name) layout_name=$2; shift 2 ;;
@@ -76,6 +88,12 @@ while [ $# -gt 0 ]; do
     *) printf 'setup.sh: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [ "$release_tag" = latest ]; then
+  release_base="https://github.com/$repo/releases/latest/download"
+else
+  release_base="https://github.com/$repo/releases/download/$release_tag"
+fi
 
 : "${plugin_dir:=$config_dir/plugins}"
 
@@ -116,6 +134,44 @@ confirm() {
 }
 
 wasm_location="file:$(tildify "$wasm_path")"
+
+# ---------------------------------------------------------------- download
+
+# リリースから wasm とフック本体を取ってくる。リポジトリを clone せず
+# setup.sh 単体を落として実行する経路のためにある。
+# 承認結果は展開後の絶対パス単位で記録されるので、同じ場所へ上書きする限り
+# 更新しても再承認にはならない（permissions.kdl のキーを実測して確認）
+download_assets() {
+  step "Download  $release_base"
+
+  command -v curl >/dev/null 2>&1 || die "curl is required for --download"
+
+  if [ "$dry_run" -eq 1 ]; then
+    info "would download fujin.wasm -> $wasm_path"
+    info "would download fujin-hook.sh -> $hook_dst"
+    return 0
+  fi
+
+  mkdir -p "$plugin_dir"
+
+  # 落としきってから差し替える。途中で失敗しても、動いている wasm を壊さない
+  local tmp="$wasm_path.download.$$"
+  curl -fsSL "$release_base/fujin.wasm" -o "$tmp" \
+    || { rm -f "$tmp"; die "failed to download fujin.wasm from $release_base"; }
+  mv "$tmp" "$wasm_path"
+  ok "downloaded $wasm_path"
+
+  if [ "$do_hooks" -eq 1 ]; then
+    tmp="$hook_dst.download.$$"
+    curl -fsSL "$release_base/fujin-hook.sh" -o "$tmp" \
+      || { rm -f "$tmp"; die "failed to download fujin-hook.sh from $release_base"; }
+    mv "$tmp" "$hook_dst"
+    chmod +x "$hook_dst"
+    ok "downloaded $hook_dst"
+    # 以降のコピー段はもう要らない
+    hook_src=$hook_dst
+  fi
+}
 
 # ---------------------------------------------------------------- layout
 
@@ -202,11 +258,16 @@ install_hooks() {
   step "Claude Code hooks  $claude_settings"
 
   command -v jq >/dev/null 2>&1 || die "jq is required for hook registration (brew install jq)"
-  [ -f "$hook_src" ] || die "hook script not found: $hook_src"
+  if [ ! -f "$hook_src" ]; then
+    die "hook script not found: $hook_src
+    (running setup.sh outside the repository? re-run with --download)"
+  fi
 
   # フック本体を wasm と同じ場所へ置く。settings.json に残るパスがこのリポジトリを
   # 指さなくなるので、リポジトリを移動・削除しても登録が壊れない
-  if [ "$dry_run" -eq 1 ]; then
+  if [ "$hook_src" = "$hook_dst" ]; then
+    : # --download が既にそこへ置いている
+  elif [ "$dry_run" -eq 1 ]; then
     info "would copy $hook_src -> $hook_dst"
   else
     mkdir -p "$(dirname "$hook_dst")"
@@ -335,6 +396,7 @@ else
   printf 'fujin setup\n'
 fi
 
+[ "$do_download" -eq 1 ] && download_assets
 [ "$do_layout" -eq 1 ] && install_layout
 [ "$do_hooks" -eq 1 ] && install_hooks
 [ "$do_config" -eq 1 ] && print_config
@@ -344,7 +406,7 @@ if [ "$do_layout" -eq 1 ] || [ "$do_config" -eq 1 ]; then
   if [ -f "$wasm_path" ]; then
     ok "$wasm_path is in place"
   else
-    todo "$wasm_path is missing -- run 'make install' first"
+    todo "$wasm_path is missing -- re-run with --download, or 'make install' from a clone"
   fi
   todo "approve the permission prompt on first load (focus the sidebar, press y)"
 fi

@@ -1,0 +1,75 @@
+# タグを打つとリリースを作り、wasm と導入用スクリプトを添付する。
+#
+# 添付物は3つで、これが「clone せずに導入する」経路の全部になる:
+#   fujin.wasm     プラグイン本体
+#   setup.sh       レイアウト生成 + Claude Code フック登録（--download で自分を賄う）
+#   fujin-hook.sh  setup.sh が --download のときに取りに来る
+#
+# 手順: CHANGELOG.md を更新（make changelog）してコミット → タグを打って push。
+#   git tag v0.1.0 && git push origin v0.1.0
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup target add wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+
+      # リリースするものが緑であることは最低限確かめる（push/PR 側の CI とは別口）
+      - name: Check
+        run: make check
+
+      - name: Build
+        run: make release
+
+      - name: Collect assets
+        run: |
+          mkdir -p dist
+          cp target/wasm32-wasip1/release/fujin.wasm dist/
+          cp extras/setup.sh dist/
+          cp extras/claude-hooks/fujin-hook.sh dist/
+          chmod +x dist/setup.sh dist/fujin-hook.sh
+
+      # CHANGELOG.md の該当バージョンの節をリリースノートにする。
+      # 見つからなければ GitHub の自動生成に任せる
+      - name: Extract release notes
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ -s release-notes.md ]; then
+            echo "have_notes=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "have_notes=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.notes.outputs.have_notes }}" = true ]; then
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
