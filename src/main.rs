@@ -132,6 +132,16 @@ struct State {
     // ここに畳んでおき、navモードの入退場はこの値だけを見る（問い合わせ系の
     // ホスト関数はテストから呼べないため、判定ロジックを切り離しておく）
     focused_pane: Option<u32>,
+    // 直近の実フォーカスがターミナルペインそのものだったか（決定34）。
+    // 問い合わせがプラグインペインを返して `focused_terminal_in_tab()` で
+    // 作業ペインを拾い直した場合は false。zellij のフォーカス枠はレイヤを
+    // またいで1枚しか点かない（実測）ので、この場合の作業ペインには
+    // フォーカス枠が点いていない ＝ 枠の抑制をする理由が無い
+    focus_on_terminal: bool,
+    // 枠の抑制中の作業ペイン（決定34）。退場時にここへ枠を戻す。
+    // 実フォーカスとは別に覚えるのは、navモード中に実フォーカスが動いても
+    // 抑制した当のペインへ確実に戻すため
+    frame_suppressed: Option<u32>,
     // 前面に出たあと、まだ実フォーカスを取り直せていない（要件: focus-sync）。
     // 非可視の間は PaneUpdate が届かず上の キャッシュが凍るため、タブを
     // 切り替えて戻ってきたときに「フォーカスは動いていない」と誤判定して
@@ -301,6 +311,10 @@ impl ZellijPlugin for State {
                     self.nav_mode = false;
                     clear_key_presses_intercepts();
                 }
+                // 枠の抑制は自分ではなく作業ペインに対する変更なので、
+                // 閉じられている最中でも戻して構わない（決定34）。ここで
+                // 戻し損ねると、その作業ペインの枠が二度と戻らなくなる
+                self.restore_focus_frame();
                 false
             }
             // 左クリックだけを扱う（要件: click-to-focus）。
@@ -490,6 +504,7 @@ impl State {
             // 動かすのは権威1つだけで、兄弟へは決定13の同期で配られる
             return false;
         }
+        self.focus_on_terminal = matches!(focused_pane, PaneId::Terminal(_));
         let focused = match focused_pane {
             PaneId::Terminal(id) => Some(id),
             // プラグインペインは selectable に無い。ただし諦めるのではなく
@@ -561,6 +576,26 @@ impl State {
             floating = Some(pane.id);
         }
         floating
+    }
+
+    // 指定ターミナルペインに枠が描かれているか（決定34）。
+    //
+    // `PaneInfo` に borderless の項目は無いので、ペイン全体と内容領域の座標差で
+    // 見る（枠があれば内容は1行下・1桁右へ寄る）。**元から枠が無いペインは
+    // 抑制の対象にしない** — 抑制と対で `set_pane_borderless(false)` を投げる
+    // 以上、レイアウトで `borderless=true` にしてあるペインや `pane_frames false`
+    // の環境では、退場時に元々無かった枠を生やしてしまう。
+    //
+    // 一覧が無い（まだ PaneUpdate が来ていない）ときは false ＝ 触らない側に倒す
+    pub(crate) fn pane_has_frame(&self, pane_id: u32) -> bool {
+        let Some(manifest) = self.panes.as_ref() else {
+            return false;
+        };
+        manifest.panes.values().flatten().any(|pane| {
+            !pane.is_plugin
+                && pane.id == pane_id
+                && (pane.pane_content_y > pane.pane_y || pane.pane_content_x > pane.pane_x)
+        })
     }
 
     // フッターに出す direct-keys のヒントを configuration から取り込む

@@ -1955,6 +1955,135 @@ fn owns_tab_only_matches_the_tab_holding_this_instance() {
     assert!(!state.owns_tab(2), "存在しないタブ");
 }
 
+// --- 枠の抑制（決定34） ---
+//
+// `set_pane_borderless()` は副作用だけのホストコマンドなのでテストから呼んでも
+// 安全だが、効き目は観測できない。したがって「どのペインに抑制をかけたか」を
+// 畳んだ State::frame_suppressed で、抑制と復帰の対応を見る。
+
+// 枠付きのターミナルペイン。枠の有無は PaneInfo に項目が無いので、
+// 内容領域が1行下・1桁右へ寄っていることで表す（決定34）
+fn framed_terminal_pane(id: u32, title: &str) -> PaneInfo {
+    PaneInfo {
+        pane_y: 0,
+        pane_content_y: 1,
+        pane_x: 0,
+        pane_content_x: 1,
+        pane_rows: 20,
+        pane_content_rows: 18,
+        ..terminal_pane(id, title)
+    }
+}
+
+// 枠付きペイン2枚のタブ1枚。実フォーカスはターミナル側にある状態
+fn state_with_framed_panes() -> State {
+    let mut state = State {
+        tabs: vec![tab(0, true)],
+        panes: Some(manifest(vec![(
+            0,
+            vec![
+                framed_terminal_pane(1, "pane1"),
+                framed_terminal_pane(2, "pane2"),
+            ],
+        )])),
+        permissions_granted: true,
+        focused_pane: Some(1),
+        focus_on_terminal: true,
+        ..Default::default()
+    };
+    state.rebuild_selectable();
+    state
+}
+
+#[test]
+fn pane_has_frame_reads_the_content_offset() {
+    let state = State {
+        panes: Some(manifest(vec![(
+            0,
+            vec![
+                framed_terminal_pane(1, "framed"),
+                terminal_pane(2, "borderless"),
+                plugin_pane(9, "fujin.wasm"),
+            ],
+        )])),
+        ..Default::default()
+    };
+
+    assert!(state.pane_has_frame(1));
+    assert!(
+        !state.pane_has_frame(2),
+        "元から枠が無いペインに枠を生やしてはいけない"
+    );
+    assert!(!state.pane_has_frame(9), "プラグインペインは対象外");
+    assert!(!state.pane_has_frame(99), "一覧に無いペイン");
+    // 一覧そのものが無いうちは触らない側に倒す
+    assert!(!State::default().pane_has_frame(1));
+}
+
+#[test]
+fn entering_nav_mode_suppresses_the_pane_frame_of_the_focused_pane() {
+    let mut state = state_with_framed_panes();
+
+    state.enter_nav_mode();
+    assert_eq!(state.frame_suppressed, Some(1));
+
+    state.handle_nav_key(key(BareKey::Esc));
+    assert_eq!(state.frame_suppressed, None, "退場で枠を戻す");
+}
+
+#[test]
+fn jumping_out_of_nav_mode_also_restores_the_pane_frame() {
+    // 退場は2系統ある（exit_nav_mode / leave_nav_mode）。ジャンプ側でも戻す
+    let mut state = state_with_framed_panes();
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.handle_nav_key(key(BareKey::Enter));
+
+    assert!(!state.nav_mode);
+    assert_eq!(state.frame_suppressed, None);
+}
+
+#[test]
+fn the_pane_frame_goes_back_to_the_pane_it_was_taken_from() {
+    // navモード中に実フォーカスが動いても、戻す相手は抑制をかけた当のペイン
+    let mut state = state_with_framed_panes();
+    state.enter_nav_mode();
+    assert_eq!(state.frame_suppressed, Some(1));
+
+    state.focused_pane = Some(2);
+    state.leave_nav_mode();
+    assert_eq!(state.frame_suppressed, None);
+
+    // 戻したあとの入場は、そのときのフォーカスに掛け直す
+    state.enter_nav_mode();
+    assert_eq!(state.frame_suppressed, Some(2));
+}
+
+#[test]
+fn a_pane_without_a_pane_frame_is_left_alone() {
+    // レイアウトの borderless=true や pane_frames false の環境。
+    // 抑制しなければ復帰も要らない（無かった枠を生やさない）
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.focus_on_terminal = true;
+
+    state.enter_nav_mode();
+    assert_eq!(state.frame_suppressed, None);
+}
+
+#[test]
+fn a_summoned_instance_leaves_the_work_pane_frame_alone() {
+    // 召喚インスタンスは自分がフォーカスを持つ（決定16）。zellij のフォーカス枠は
+    // レイヤをまたいで1枚しか点かない（実測）ので、作業ペイン側の枠はそもそも
+    // ハイライトされていない ＝ 落とす理由が無い
+    let mut state = state_with_framed_panes();
+    state.summoned = true;
+    state.focus_on_terminal = false;
+
+    state.enter_nav_mode();
+    assert_eq!(state.frame_suppressed, None);
+}
+
 // --- 検索サブモード（要件: docs/requirements/search-explorer/） ---
 //
 // match_one / match_pane の単体テストは src/search.rs 側にある。

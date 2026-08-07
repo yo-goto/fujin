@@ -44,7 +44,40 @@ impl State {
             self.select_pane_id(pane_id);
         }
         self.broadcast_selection();
+        self.suppress_focus_frame();
         intercept_key_presses();
+    }
+
+    // navモード中だけ、作業ペインからペイン枠を落とす（決定34）。
+    //
+    // navモードは実フォーカスを動かさないので、探索中もフォーカス枠は直前まで
+    // 作業していたペインに点いたままになる。サイドバーのハイライトと二重に
+    // 「ここが操作対象」を主張して紛らわしいため、navモードの間だけ枠を消す。
+    // フォーカス枠の色だけを消すAPIは無いので、枠ごと落とすしかない
+    fn suppress_focus_frame(&mut self) {
+        let Some(pane_id) = self.focused_pane else {
+            return;
+        };
+        // 実フォーカスがプラグインペイン側にあるなら（召喚インスタンス自身が
+        // フォーカスを持つ場合）、作業ペインにフォーカス枠は点いていない。
+        // 消す理由が無いうえ、消せば枠の消失ぶんの再描画だけが起きる
+        if !self.focus_on_terminal {
+            return;
+        }
+        if !self.pane_has_frame(pane_id) {
+            return;
+        }
+        set_pane_borderless(PaneId::Terminal(pane_id), true);
+        self.frame_suppressed = Some(pane_id);
+    }
+
+    // 抑制した枠を戻す（決定34）。退場の2系統（exit_nav_mode / leave_nav_mode）と
+    // プラグインの終了（Event::BeforeClose）のどこを通っても必ず戻すため、
+    // 「抑制した相手」を覚えておいて冪等に戻す
+    pub(crate) fn restore_focus_frame(&mut self) {
+        if let Some(pane_id) = self.frame_suppressed.take() {
+            set_pane_borderless(PaneId::Terminal(pane_id), false);
+        }
     }
 
     // 入場時に選択すべきペイン（要件: docs/requirements/focus-sync/）。
@@ -82,6 +115,10 @@ impl State {
         self.triage = None;
         // 番号ジャンプサブモードも同様。入力途中のバッファは持ち越さない
         self.jump = None;
+        // navモード中だけ落としていた作業ペインの枠を戻す（決定34）。
+        // 召喚インスタンスの自死（下）より前に置く — 自分を閉じたあとでは
+        // ホストコマンドが届くか分からない
+        self.restore_focus_frame();
         clear_key_presses_intercepts();
         // 召喚インスタンスは用が済んだら自分で退場する（決定16）。
         // 残すと作業ペインに重なり続ける。次の入場でまた呼べばよい
