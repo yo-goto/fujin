@@ -1473,19 +1473,78 @@ fn the_status_legend_lines_up_with_the_key_column() {
         .iter()
         .find(|line| line.ends_with("working"))
         .expect("凡例がある");
-    // アイコンはマルチバイトなので、バイト位置ではなく文字位置で見る
-    let column = |line: &str, needle: &str| {
-        line.find(needle)
-            .map(|byte| line[..byte].chars().count())
-            .expect("説明がある")
-    };
     assert_eq!(
-        column(legend, "working"),
-        column(key_entry, "this help"),
+        column_at(legend, "working"),
+        column_at(key_entry, "this help"),
         "説明の開始位置が揃っている: {:?} / {:?}",
         legend,
         key_entry
     );
+}
+
+#[test]
+fn the_help_headings_leave_the_mode_name_to_the_header() {
+    // ヘッダーの `▲ fujin [tri]` と重複するので、オーバーレイの見出しは
+    // 節名だけにする（決定30）
+    let mut nav = searchable_state();
+    let mut search = searchable_state();
+    search.handle_nav_key(key(BareKey::Char('/')));
+    let mut jump = searchable_state();
+    jump.handle_nav_key(key(BareKey::Char('n')));
+    let mut triage = triage_state();
+    set_agent_state(&mut triage, 1, AgentState::Working);
+    triage.handle_nav_key(key(BareKey::Char('p')));
+
+    for (label, state) in [
+        ("nav", &mut nav),
+        ("search", &mut search),
+        ("jump", &mut jump),
+        ("triage", &mut triage),
+    ] {
+        state.handle_nav_key(key(BareKey::Char('?')));
+        let lines = overlay_lines(state, SIDEBAR);
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("  keys"),
+            "{}",
+            label
+        );
+        for line in &lines {
+            assert!(
+                !line.contains('['),
+                "{}: モード名が残っている: {}",
+                label,
+                line
+            );
+        }
+    }
+}
+
+#[test]
+fn the_key_column_fits_the_widest_key_of_the_mode() {
+    // 17セル固定をやめ、モードごとの実測最大＋空白2にした（決定30）。
+    // いちばん長いキーのためだけに全行が空白を払う状態を解消する
+    let mut nav = state_with_panes(2);
+    nav.nav_mode = true;
+    nav.handle_nav_key(key(BareKey::Char('?')));
+    let nav_lines = overlay_lines(&nav, SIDEBAR);
+    let widest = nav_lines
+        .iter()
+        .find(|line| line.ends_with("jump & exit"))
+        .expect("いちばん長いキーの行がある");
+    // 左マージン2 + "enter"(5) + 空白2
+    assert_eq!(column_at(widest, "jump & exit"), 9);
+
+    // キーが長いモードでは列も広がる（`backspace` が最長）
+    let mut search = searchable_state();
+    search.handle_nav_key(key(BareKey::Char('/')));
+    search.handle_nav_key(key(BareKey::Char('?')));
+    let search_lines = overlay_lines(&search, SIDEBAR);
+    let delete = search_lines
+        .iter()
+        .find(|line| line.ends_with("delete char"))
+        .expect("backspace の行がある");
+    assert_eq!(column_at(delete, "delete char"), 2 + 9 + 2);
 }
 
 #[test]
@@ -1652,14 +1711,12 @@ fn the_help_overlay_opens_from_the_search_submode_too() {
         Some("alp"),
         "? はクエリに入らない"
     );
-    let title = state
-        .help_lines()
-        .first()
-        .map(|row| state.help_line(row, 32));
-    assert_eq!(
-        title.as_ref().map(|t| t.content()),
-        Some("  [search] keys"),
-        "検索サブモードのキーを出す"
+    let lines = overlay_lines(&state, SIDEBAR);
+    assert_eq!(lines.first().map(String::as_str), Some("  keys"));
+    assert!(
+        lines.iter().any(|line| line.contains("filter panes")),
+        "検索サブモードのキーを出す: {:?}",
+        lines
     );
 
     // 閉じたら開く前の表示（検索サブモード）に戻る。Esc も閉じるだけで、
@@ -3776,7 +3833,11 @@ fn the_triage_help_overlay_lists_its_own_keys() {
         .iter()
         .map(|row| state.help_line(row, SIDEBAR).content().to_string())
         .collect();
-    assert!(lines[0].contains("[tri]"), "{:?}", lines);
+    assert!(
+        lines.iter().any(|line| line.contains("back to tree")),
+        "トリアージモードのキーを出す: {:?}",
+        lines
+    );
     for line in &lines {
         assert!(!line.contains('…'), "幅32に収まらない: {}", line);
     }

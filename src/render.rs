@@ -85,9 +85,9 @@ pub(crate) enum Row<'a> {
 // 整形（キー列の幅・左マージン）と配色はこちら側で決める
 #[derive(Clone, Copy)]
 pub(crate) enum HelpRow {
-    // モード名とその添え字。例: ("[nav]", "keys")
-    Title(&'static str, &'static str),
-    // キー一覧に続く節の見出し。モード名を持たないので角括弧も付けない
+    // 節の見出し（`keys` / `status`）。**モード名は入れない** — ヘッダーの
+    // モードラベルと重複するうえ、節が2つに増えた今は片方だけモード名を
+    // 持つのが不揃いに見える（決定30）
     Section(&'static str),
     // キーと、それが何をするか
     Entry(&'static str, &'static str),
@@ -151,17 +151,15 @@ const RIGHT_MARGIN: usize = 2;
 fn content_cols(cols: usize) -> usize {
     cols.saturating_sub(RIGHT_MARGIN)
 }
-// キー列の幅（説明との間の空白を含む）。説明の開始位置をここで揃える。
-// いちばん長いキー（`j k up down tab`）と、いちばん長い説明（`cancel search`）が
-// 左マージン込みで幅32（決定3）にちょうど収まる値
-const HELP_KEY_COLUMN: usize = 17;
+// キー列と説明のあいだに空ける幅。キー列の幅自体は固定せず、**そのモードに
+// 出るキーの実測最大**で決める（決定30。カウンタ列と同じ考え方）。17セル固定に
+// していたころは、いちばん長い `j k up down tab` のために全行が空白を払っていた
+const HELP_KEY_GAP: usize = 2;
 
 // キー列に置いた文字の後ろに空ける幅。列幅を超える場合は空白1つだけ空けて
 // 続ける（列は崩れるが、説明が切り詰められて消えるよりはよい）
-fn help_key_pad(keys: &str) -> usize {
-    HELP_KEY_COLUMN
-        .saturating_sub(UnicodeWidthStr::width(keys))
-        .max(1)
+fn help_key_pad(keys: &str, column: usize) -> usize {
+    column.saturating_sub(UnicodeWidthStr::width(keys)).max(1)
 }
 
 // 文字に与える意味。zellij のテーマ側の色をそのまま借りる（決定11と同じ方針で、
@@ -170,7 +168,8 @@ fn help_key_pad(keys: &str) -> usize {
 enum Ink {
     // 既定の文字色。読ませたい本文
     Plain,
-    // モード名。ヘルプオーバーレイの見出しと検索クエリの先頭 `/` に使う
+    // 検索クエリの先頭 `/`。ヘルプオーバーレイの見出しも当初はこれだったが、
+    // モード名を落として dim の節見出しにした（決定30）
     //（ヘッダーのモードラベルは状態色なのでこちらではない・決定27）
     Tag,
     // キーそのもの。zellij 本体の status-bar がキーを強調するのに倣う
@@ -780,23 +779,29 @@ impl State {
         parts
     }
 
+    // キー列の幅。いま出ているキー一覧の実測最大で決めるので、モードによって
+    // 変わる（決定30）。凡例のアイコンは1文字なので、列幅を押し上げない
+    fn help_key_column(&self) -> usize {
+        self.help_lines()
+            .iter()
+            .filter_map(|row| match row {
+                HelpRow::Entry(keys, _) => Some(UnicodeWidthStr::width(*keys)),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+            + HELP_KEY_GAP
+    }
+
     // ヘルプオーバーレイの1行。左マージンは描画位置（x）ではなく行の中に
     // 持たせる — 画面座標を行ごとに変えると、行の並びと描画がずれやすい
     pub(crate) fn help_line(&self, row: &HelpRow, cols: usize) -> Text {
         let indent = " ".repeat(HELP_INDENT);
+        let column = self.help_key_column();
         match row {
-            HelpRow::Title(tag, rest) => compose(
-                &[
-                    (&indent, Ink::Plain),
-                    (tag, Ink::Tag),
-                    (" ", Ink::Plain),
-                    (rest, Ink::Muted),
-                ],
-                cols,
-            ),
             HelpRow::Section(label) => compose(&[(&indent, Ink::Plain), (label, Ink::Muted)], cols),
             HelpRow::Entry(keys, description) => {
-                let gap = " ".repeat(help_key_pad(keys));
+                let gap = " ".repeat(help_key_pad(keys, column));
                 compose(
                     &[
                         (&indent, Ink::Plain),
@@ -813,7 +818,7 @@ impl State {
                 // 状態色をそのまま乗せる — 意味と色を結びつけて見せるのが
                 // 凡例の目的そのものだから（決定25）
                 let icon = state.icon();
-                let gap = " ".repeat(help_key_pad(icon));
+                let gap = " ".repeat(help_key_pad(icon, column));
                 compose(
                     &[
                         (&indent, Ink::Plain),

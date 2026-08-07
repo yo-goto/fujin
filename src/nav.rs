@@ -480,12 +480,12 @@ impl State {
     // いるか」だけを持つ。矢印など幅の曖昧な文字は使わない — サイドバーの
     // 幅計算が文字数ベース（v1）なので、キー列の位置がずれるため
     pub(crate) fn help_lines(&self) -> &'static [HelpRow] {
-        use HelpRow::{Blank, Entry, Title};
+        use HelpRow::{Blank, Entry, Section};
         if self.triage.is_some() {
             self.triage_help_lines()
         } else if self.jump.is_some() {
             &[
-                Title("[jump]", "keys"),
+                Section("keys"),
                 Blank,
                 Entry("0-9", "narrow & jump"),
                 Entry("backspace", "delete digit"),
@@ -494,11 +494,11 @@ impl State {
             ]
         } else if self.search.is_some() {
             &[
-                Title("[search]", "keys"),
+                Section("keys"),
                 Blank,
                 Entry("type", "filter panes"),
                 Entry("backspace", "delete char"),
-                Entry("up down tab", "move cursor"),
+                Entry("up down", "move cursor"),
                 Entry("shift+tab", "move back"),
                 Entry("enter", "jump & exit"),
                 Entry("esc", "cancel search"),
@@ -506,16 +506,16 @@ impl State {
             ]
         } else {
             &[
-                Title("[nav]", "keys"),
+                Section("keys"),
                 Blank,
-                Entry("j k up down tab", "move"),
+                Entry("j k", "move"),
                 Entry("g G", "top / bottom"),
-                Entry("enter l space", "jump & exit"),
+                Entry("enter", "jump & exit"),
                 Entry("/", "search"),
                 Entry("p", "triage"),
                 Entry("n", "number jump"),
                 Entry("?", "this help"),
-                Entry("esc q", "exit"),
+                Entry("esc", "exit"),
             ]
         }
     }

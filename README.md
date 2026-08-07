@@ -281,7 +281,7 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `1`-`9` | jump straight to the nth item and exit the mode |
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
 | `/` | enter search sub-mode (below) |
-| `?` | open the full key help (below) |
+| `?` | open the key help (below) |
 | `Esc` / `q` | exit the mode |
 
 Any other key also exits the mode (a safety valve so you never get stuck with
@@ -305,7 +305,7 @@ as a hint for which field matched (a cwd match is shown on that row even if
 | `Backspace` | delete the last character of the query |
 | `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
 | `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
-| `?` | open the full key help (below; `?` is the one character that does not go into the query) |
+| `?` | open the key help (below; `?` is the one character that does not go into the query) |
 | `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
 
 The query is discarded every time you leave search, so it always starts empty
