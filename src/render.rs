@@ -21,6 +21,7 @@ use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
 use crate::deploy::TROOP;
+use crate::mark::MARK_GLYPH;
 use crate::search::{Field, Hit};
 use crate::{Selectable, State, DIRECT_KEY_HINTS};
 
@@ -269,6 +270,18 @@ impl CounterColumn {
     }
 }
 
+// ペイン行の先頭（状態アイコンの手前）に挟む列。どちらも**出すか出さないかは
+// フレーム単位**で決まり、中身だけが行ごとに変わる。並びは
+// 選択バー → 番号列 → マーク列 → アイコン → ペイン名（決定39）
+#[derive(Clone, Copy, Default)]
+pub(crate) struct HeadCells<'a> {
+    // 番号ジャンプサブモード中だけ Some（通し番号の表示と、番号入力バッファに
+    // 前方一致して候補に残っているか。決定29）
+    pub(crate) number: Option<(&'a str, bool)>,
+    // マーク列を出すフレームだけ Some（その行がマーク済みか。決定39）
+    pub(crate) mark: Option<bool>,
+}
+
 // ペイン行に出すカウンタの文字列。0 のときは出さない（決定11: 静かな行は静かに）
 fn counter_labels(agent: Option<&AgentInfo>) -> (String, String) {
     let Some(agent) = agent else {
@@ -288,6 +301,17 @@ fn counter_labels(agent: Option<&AgentInfo>) -> (String, String) {
 }
 
 impl State {
+    // このフレームにマーク列を出すか（決定39）。カウンタ列と同じく**そのフレームに
+    // 出る行の実測**で決める — 誰もマークしていないフレームでは列そのものが消え、
+    // ペイン名が幅をすべて使う。マーク済みの行が1つでもあれば、同じフレームの
+    // マークされていない行も空白で列ぶんを空けてアイコンの位置を揃える
+    pub(crate) fn mark_column(&self, rows: &[Row<'_>]) -> bool {
+        rows.iter().any(|row| match row {
+            Row::Pane { entry, .. } | Row::Triage { entry, .. } => self.is_marked(entry.pane_id),
+            _ => false,
+        })
+    }
+
     // このフレームのカウンタ列の幅。visible_rows() の結果から測るので、
     // 絞り込みで消えたペインは勘定に入らない
     pub(crate) fn counter_column(&self, rows: &[Row<'_>]) -> CounterColumn {
@@ -584,6 +608,9 @@ impl State {
         let column = self.counter_column(&screen);
         // トリアージ行のタブ名列も同じ理由でフレーム全体で1つ
         let tab_column = self.triage_tab_column(&screen, cols);
+        // マーク列を出すかもフレーム全体で1つ（決定39）。行ごとに決めると
+        // マーク済みの行だけアイコンの位置がずれる
+        let marks = self.mark_column(&screen);
         // カーソルは一覧から導出されるので、行ごとに引き直さず1度だけ求める
         let triage_cursor = self.triage_cursor();
         for (y, row) in screen.into_iter().enumerate() {
@@ -633,13 +660,17 @@ impl State {
                     let is_selected = self.row_is_selected(entry, flat_index);
                     // 番号ジャンプサブモード中だけ番号列が付く（決定29）
                     let number = self.jump_number(flat_index);
-                    let number = number.as_ref().map(|(n, m)| (n.as_str(), *m));
-                    let row = self.pane_row(entry, is_selected, hit, column, number, cols);
+                    let cells = HeadCells {
+                        number: number.as_ref().map(|(n, m)| (n.as_str(), *m)),
+                        mark: marks.then(|| self.is_marked(entry.pane_id)),
+                    };
+                    let row = self.pane_row(entry, is_selected, hit, column, cells, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Triage { entry, tab_name } => {
                     let is_selected = triage_cursor == Some(entry.pane_id);
-                    let row = self.triage_row(entry, tab_name, is_selected, tab_column, cols);
+                    let mark = marks.then(|| self.is_marked(entry.pane_id));
+                    let row = self.triage_row(entry, tab_name, is_selected, tab_column, mark, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Cwd {
@@ -775,8 +806,12 @@ impl State {
         // pane-close-kill）。**ペイン名は出さない** — 対象は選択行のハイライトで
         // 分かっており、この幅では名前の大半が切り詰められて識別の役に立たない
         if self.termination.is_some() {
-            let prompt = termination_prompt(inner.saturating_sub(HEADER_INDENT));
-            return compose(&[(&indent, Ink::Plain), (prompt, ink)], inner);
+            // マークが1件以上あれば件数を前置する（決定39）
+            let prompt = termination_prompt(
+                self.termination_marked_count(),
+                inner.saturating_sub(HEADER_INDENT),
+            );
+            return compose(&[(&indent, Ink::Plain), (&prompt, ink)], inner);
         }
         // 検索サブモード中はクエリ入力欄に転用する
         if let Some(search) = &self.search {
@@ -969,18 +1004,18 @@ impl State {
     // 右端に揃える。ペイン名はカウンタ列を除いた残り幅に収め、名前の長さで
     // サブエージェント数・未完了タスク数が消えないようにする（決定21）。
     //
-    // `number` は番号ジャンプサブモード中だけ Some になる番号列のセル
-    //（通し番号の表示と、候補に残っているか。決定29）。アイコンの前に挟むので、
-    // head が桁数ぶん伸びてペイン名の残り幅がそのぶん縮む
+    // `head` はアイコンの手前に挟む列（番号列・マーク列）。出すフレームでは
+    // head がそのぶん伸びて、ペイン名の残り幅が縮む
     pub(crate) fn pane_row(
         &self,
         entry: &Selectable,
         is_selected: bool,
         hit: Option<&Hit>,
         column: CounterColumn,
-        number: Option<(&str, bool)>,
+        cells: HeadCells<'_>,
         cols: usize,
     ) -> Text {
+        let HeadCells { number, mark } = cells;
         let agent = self.agents.get(&entry.pane_id);
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定32）
         let status = self.pane_status(entry.pane_id);
@@ -989,12 +1024,18 @@ impl State {
         // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
         // 番号列・状態アイコンの開始位置をずらさない）
         let prefix = if is_selected { "▌ " } else { "  " };
-        // "▌ {icon} " / "  {icon} "、番号ジャンプサブモード中は "▌ {番号} {icon} "
+        // マーク列は列を出すフレームでだけ1文字＋空白を占める（決定39）
+        let mark_cell = mark_cell(mark);
+        // "▌ {icon} " / "  {icon} "、番号ジャンプサブモード中は "▌ {番号} {icon} "。
+        // マーク列を出すフレームでは番号列とアイコンのあいだに "{✓|空白} " が入る
         let head = match number {
-            Some((digits, _)) => format!("{}{} {} ", prefix, digits, icon),
-            None => format!("{}{} ", prefix, icon),
+            Some((digits, _)) => format!("{}{} {}{} ", prefix, digits, mark_cell, icon),
+            None => format!("{}{}{} ", prefix, mark_cell, icon),
         };
         let head_width = UnicodeWidthStr::width(head.as_str());
+        // マーク印の文字位置（列を出すフレームだけ）。アイコンの2文字手前で、
+        // 番号列の有無に追従する
+        let mark_at = mark.map(|_| head.chars().count().saturating_sub(4));
         // 状態アイコンの文字位置。head の末尾は常に「アイコン(1文字)+空白」なので、
         // 番号列の有無で動いても末尾から数えれば追従できる
         let icon_at = head.chars().count().saturating_sub(2);
@@ -1081,6 +1122,11 @@ impl State {
                 text.dim_range(span)
             };
         }
+        if let (Some(at), Some(true)) = (mark_at, mark) {
+            // マーク印は「ユーザーが自分で指した」印なので、選択バーと同じレベル2。
+            // 状態アイコンの色（行ごとに変わる）とは役割が違う
+            text = text.color_range(2, at..at + 1);
+        }
         if let Some(indices) = highlight.filter(|i| !i.is_empty()) {
             // レベル1で固定（決定11のv1スコープ: 設定項目は増やさない）
             text = text.color_indices(1, indices);
@@ -1120,15 +1166,21 @@ impl State {
         tab_name: &str,
         is_selected: bool,
         tab_column: usize,
+        mark: Option<bool>,
         cols: usize,
     ) -> Text {
         let status = self.pane_status(entry.pane_id);
         let icon = status.map(|s| s.icon()).unwrap_or(" ");
-        // 選択行の左端バーはペイン行と同じ（幅2固定で、状態アイコンの
-        // color_range 2..3 をずらさない）
+        // 選択行の左端バーはペイン行と同じ（幅2固定）
         let prefix = if is_selected { "▌ " } else { "  " };
-        let head = format!("{}{} ", prefix, icon);
+        // マーク列もペイン行と同じ位置（アイコンの手前）に出す（決定39）。
+        // トリアージ一覧の上でもマークできる以上、印が見えないと積み上げられない
+        let mark_cell = mark_cell(mark);
+        let head = format!("{}{}{} ", prefix, mark_cell, icon);
         let head_width = UnicodeWidthStr::width(head.as_str());
+        // 状態アイコンの文字位置はマーク列の有無で動く（ペイン行と同じ数え方）
+        let icon_at = head.chars().count().saturating_sub(2);
+        let mark_at = mark.map(|_| head.chars().count().saturating_sub(4));
 
         let tab = truncate(tab_name, tab_column);
         let tab_width = UnicodeWidthStr::width(tab.as_str());
@@ -1172,7 +1224,10 @@ impl State {
             text = text.unbold_range(name_start..name_end);
         }
         if let Some(status) = status {
-            text = text.color_range(status.color(), 2..3);
+            text = text.color_range(status.color(), icon_at..icon_at + 1);
+        }
+        if let (Some(at), Some(true)) = (mark_at, mark) {
+            text = text.color_range(2, at..at + 1);
         }
         // タブ名は主役（状態アイコン・ペイン名）ではないので落として出す。
         // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる（cwd行と同じ）
@@ -1216,20 +1271,41 @@ fn input_footer(tag: &str, input: &str, indent: &str, ink: Ink, cols: usize) -> 
     compose(&segments, cols)
 }
 
+// ペイン行・トリアージ行のマーク列1つぶん（決定39）。列を出すフレームでは、
+// マークされていない行も空白で同じ幅を占めてアイコンの位置を揃える
+fn mark_cell(mark: Option<bool>) -> String {
+    match mark {
+        Some(true) => format!("{} ", MARK_GLYPH),
+        Some(false) => "  ".to_string(),
+        None => String::new(),
+    }
+}
+
 // 終了操作サブモードの確認プロンプト（決定35。要件: pane-close-kill）。
 //
 // 幅28セル（決定27）に3項目とも収める都合で、項目のあいだは他のヒントの半分の
 // 空白1つ。それでも収まらない幅ではキーだけに落とす — 項目の途中で切り詰めると
 // `キー:動作` の形が壊れて読めなくなる（direct-keys のヒントと同じ考え方）。
 //
+// `marked` が1件以上なら件数を前置する（決定39）。**幅が足りないときも件数だけは
+// 残す** — 何件消えるかは対象の数が1件のときと違って行のハイライトから読めず、
+// キーの意味（`c k x` の3択）より先に知りたい情報だから。マーク0件（選択行への
+// フォールバック）では単一版と同じ文言のままにする。
+//
 // Esc（取り消し）はここには出ない。3項目で幅を使い切っているので、行き先の説明は
 // ヘルプオーバーレイ側（termination_help_lines）が担う
-fn termination_prompt(budget: usize) -> &'static str {
+fn termination_prompt(marked: usize, budget: usize) -> String {
+    let count = match marked {
+        0 => String::new(),
+        1 => "1 pane  ".to_string(),
+        n => format!("{} panes  ", n),
+    };
+    let budget = budget.saturating_sub(UnicodeWidthStr::width(count.as_str()));
     let full = "c:close k:kill x:kill+close";
     if UnicodeWidthStr::width(full) <= budget {
-        full
+        format!("{}{}", count, full)
     } else {
-        "c k x"
+        format!("{}c k x", count)
     }
 }
 

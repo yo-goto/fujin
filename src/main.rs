@@ -17,7 +17,8 @@
 // - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
-// - termination — 終了操作サブモード（選択ペインの close / kill / kill→close）
+// - mark   — 複数選択（マーク。決定39）の集合と、その配布
+// - termination — 終了操作サブモード（対象ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
 // - render — サイドバーの描画
 // - sync   — インスタンス間の状態同期（決定13）
@@ -26,6 +27,7 @@
 mod agent;
 mod command;
 mod deploy;
+mod mark;
 mod nav;
 mod render;
 mod search;
@@ -69,6 +71,9 @@ const READ_CLEAR_PIPE: &str = "fujin_read";
 const COMMAND_STATE_PIPE: &str = "fujin_command";
 // 選択ペインIDの兄弟インスタンスへの配布（決定13）
 const SELECTION_PIPE: &str = "fujin_selection";
+// マーク（決定39）の兄弟インスタンスへの配布。選択と違い集合をまるごと運ぶ —
+// 差分で運ぶと、取りこぼした1通ぶんだけ集合が食い違ったまま直らない
+const MARK_PIPE: &str = "fujin_mark";
 // 取り残された召喚インスタンスの強制掃除（決定16）。navモードへ入れないまま
 // 取り残された召喚インスタンスはキーを横取りしておらず Esc が届かない。fujin は
 // unselectable でフォーカスできないので、ユーザーの普段のペイン操作でも消せない
@@ -142,6 +147,12 @@ struct State {
     // フラット化した選択対象
     selectable: Vec<Selectable>,
     selected: usize,
+    // マーク（決定39。要件: docs/requirements/pane-termination-multi-select/）。
+    // 一括操作の対象として選んだペインIDの集合で、タブをまたいでよい。
+    // 単一のナビゲーションカーソルである `selected` とは別概念なので、
+    // インデックスではなくペインIDで持つ（決定13と同じ理由）。
+    // navモードを退場しても保持し、兄弟インスタンスへも配る
+    marked: BTreeSet<u32>,
     visible: bool,
     own_plugin_id: Option<u32>,
     // 自分のwasm URL。実行時に判明する（同期の宛先・召喚の起動元に使う）
@@ -414,6 +425,7 @@ impl ZellijPlugin for State {
                 | READ_CLEAR_PIPE
                 | COMMAND_STATE_PIPE
                 | SELECTION_PIPE
+                | MARK_PIPE
                 | DISMISS_PIPE
         );
         // CLI pipe は即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
@@ -477,6 +489,15 @@ impl ZellijPlugin for State {
                     .as_deref()
                     .and_then(|p| p.trim().parse::<u32>().ok())
                     .map(|target| self.select_pane_id(target))
+                    .unwrap_or(false)
+            }
+            MARK_PIPE => {
+                // マークも選択と同じくペインIDで運ぶ（決定39）。集合まるごとを
+                // 受け取って置き換えるので、空ペイロードは全解除を意味する
+                pipe_message
+                    .payload
+                    .as_deref()
+                    .map(|raw| self.apply_marks(raw))
                     .unwrap_or(false)
             }
             READ_CLEAR_PIPE => {

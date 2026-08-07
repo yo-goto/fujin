@@ -74,7 +74,13 @@ impl State {
         // コマンド状態も一緒に配る（決定32）。導出できるのは PaneUpdate が届く
         // このインスタンスだけなので、新入りは押し付けられない限り一生知らない
         let commands = (!self.commands.is_empty()).then(|| self.command_dump());
+        // マークも配る（決定39）。タブをまたぐマークを許した以上、後からできた
+        // タブのサイドバーにだけ印が出ないと「どれを選んだか」が食い違う
+        let marked = !self.marked.is_empty();
         for id in newcomers {
+            if marked {
+                self.push_marks_to(id);
+            }
             if let Some(dump) = &dump {
                 pipe_message_to_plugin(
                     MessageToPlugin::new(SYNC_STATE_PIPE)

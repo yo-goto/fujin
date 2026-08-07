@@ -269,6 +269,12 @@ impl State {
             // close/kill/kill→close を独立キーにすると押し間違いのリスクが高い
             // ので、入場キー1つ＋確認プロンプトのミニフローに畳んである
             BareKey::Char('d') => self.enter_termination(),
+            // マークのトグルと全解除（要件:
+            // docs/requirements/pane-termination-multi-select/、決定39）。
+            // `m` は mark の頭文字で、navモード内で未使用だった。専用サブモードは
+            // 作らない — トグルだけの軽い操作なので、一覧の上で直接積み上げる
+            BareKey::Char('m') => self.toggle_mark(),
+            BareKey::Char('M') => self.clear_marks(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
@@ -292,6 +298,15 @@ impl State {
     // 検索サブモード中のキー解釈。navモードの安全弁（決定12）を検索サブモード用に
     // 引き直したもの。印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる
     fn handle_search_key(&mut self, key: KeyWithModifier) -> bool {
+        // 絞り込み結果の上でもマークできる（決定39）。ただしここは印字可能文字を
+        // すべてクエリに使う入力空間なので、navモード本体の `m` は使えない。
+        // **安全弁（下の has_hard_modifier）の唯一の例外**として Alt+m を通す。
+        // 全解除はこの例外を広げず navモード本体の `M` に置いたまま — Esc で
+        // 戻ってから押せばよく、取り消せなくなる操作ではない
+        if key.bare_key == BareKey::Char('m') && key.key_modifiers.contains(&KeyModifier::Alt) {
+            self.toggle_mark();
+            return true;
+        }
         // Shift だけは素通し（Shift付き印字可能文字と Shift+Tab のため）。
         // それ以外の修飾キーは安全弁 — 検索サブモードだけでなく navモードごと抜ける
         if has_hard_modifier(&key) {
@@ -590,6 +605,8 @@ impl State {
                 Blank,
                 Entry("type", "filter panes"),
                 Entry("backspace", "delete char"),
+                // クエリ入力と両立しないので、マークだけは Alt付き（決定39）
+                Entry("alt+m", "mark"),
                 Entry("up down", "move cursor"),
                 Entry("shift+tab", "move back"),
                 Entry("enter", "jump & exit"),
@@ -606,6 +623,7 @@ impl State {
                 Entry("/", "search"),
                 Entry("p", "triage"),
                 Entry("n", "number jump"),
+                Entry("m M", "mark / clear all"),
                 Entry("d", "terminate pane"),
                 Entry("?", "this help"),
                 Entry("esc", "exit"),
@@ -642,6 +660,10 @@ impl State {
         if self.selected >= self.selectable.len() {
             self.selected = self.selectable.len().saturating_sub(1);
         }
+        // 閉じられたペインのマークもここで落とす（決定39。選択のクランプと同じ
+        // 場所で済ませる）。一覧を組めなかった場合は上で return しているので、
+        // 一覧が空＝本当にペインが無いときにしか消えない
+        self.prune_marks();
         // 検索中にペインが増減したら絞り込みを引き直す。
         // 古い hits のままだと閉じたペインが結果に残り続ける
         if self.search.is_some() {

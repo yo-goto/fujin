@@ -1,6 +1,7 @@
 // 終了操作サブモード（決定35。要件: docs/requirements/pane-close-kill/）。
 //
-// 選択行のペインを閉じる（close）・killする（kill）・確実に閉じる（kill→close）。
+// 対象のペインを閉じる（close）・killする（kill）・確実に閉じる（kill→close）。
+// 対象はマーク（決定39）が1件以上あればマーク集合、0件なら選択行の1件。
 // 検索サブモード・番号ジャンプサブモードと同じく、navモードの内側で完結する
 // ミニフローとして乗る。入場キー（`d`）でフッターが確認プロンプトに転用され、
 // close(`c`) / kill(`k`) / kill→close(`x`) / 取消(`Esc`) を選ぶ。
@@ -54,23 +55,49 @@ impl Termination {
 //（決定14）にしか発生しないため、兄弟インスタンスへは配らない（決定13の範囲外）
 #[derive(Debug)]
 pub(crate) struct TerminationState {
-    // 入場時の選択行のペインID。確認の途中で `self.selected` が別のペインを
-    // 指すようになっても（兄弟インスタンスからの選択配布・ペインの増減による
-    // クランプ）、確認したときに見えていたペイン以外を kill しないため、
-    // インデックスではなくペインIDで捕まえておく
-    pub(crate) target: u32,
+    // 入場時に捕まえた対象ペインID。確認の途中で `self.selected` やマークが
+    // 別のペインを指すようになっても（兄弟インスタンスからの配布・ペインの
+    // 増減によるクランプ）、確認したときに見えていたペイン以外を kill しない
+    // ため、インデックスではなくペインIDで捕まえておく（決定39でマーク集合へ拡張）
+    pub(crate) targets: Vec<u32>,
+    // 対象がマーク集合か（false は選択行へのフォールバック）。確認プロンプトに
+    // 件数を前置するかの判断に使う（決定39: マーク0件のときは単一版と同じ文言）
+    pub(crate) from_marks: bool,
 }
 
 impl State {
-    // 入場（navモードの `d`）。選択行が無ければ入らない — 対象の無い確認
+    // 入場（navモードの `d`）。対象が無ければ入らない — 対象の無い確認
     // プロンプトを出しても、どのキーを押しても no-op にしかならない
     pub(crate) fn enter_termination(&mut self) {
-        let Some(entry) = self.selectable.get(self.selected) else {
-            return;
+        // マーク優先（決定39）。1件以上マークされていればマーク集合が対象になり、
+        // 0件なら選択行へフォールバックする。単一版のフローはマーク0件の特殊ケース
+        let marked = self.marked_in_tree_order();
+        let from_marks = !marked.is_empty();
+        let targets = if from_marks {
+            marked
+        } else {
+            self.selectable
+                .get(self.selected)
+                .map(|entry| vec![entry.pane_id])
+                .unwrap_or_default()
         };
+        if targets.is_empty() {
+            return;
+        }
         self.termination = Some(TerminationState {
-            target: entry.pane_id,
+            targets,
+            from_marks,
         });
+    }
+
+    // 確認プロンプトに前置する件数。マーク0件（選択行フォールバック）なら 0 ＝
+    // 件数を出さない（決定39）
+    pub(crate) fn termination_marked_count(&self) -> usize {
+        self.termination
+            .as_ref()
+            .filter(|t| t.from_marks)
+            .map(|t| t.targets.len())
+            .unwrap_or(0)
     }
 
     // 終了操作サブモード中のキー解釈。戻り値は再描画するか
@@ -97,18 +124,23 @@ impl State {
         true
     }
 
-    // 実行の内訳 `(対象ペインID, SIGKILLを送るか, ペインを閉じるか)`。
+    // 実行の内訳 `(対象ペインID, SIGKILLを送るか, ペインを閉じるか)` を対象ぶん。
     // ホスト関数を呼ぶ手前で畳んでおく — 副作用だけのホスト関数は結果を
-    // 観測できないので、ここまでをテストの検証対象にする
-    pub(crate) fn termination_plan(&self, kind: Termination) -> Option<(u32, bool, bool)> {
-        let target = self.termination.as_ref()?.target;
-        // 確認の途中で対象が閉じられていたら何もしない。閉じたペインのIDへ
-        // 送っても実害はないが、送らない側に倒す
-        if !self.selectable.iter().any(|e| e.pane_id == target) {
-            return None;
-        }
+    // 観測できないので、ここまでをテストの検証対象にする。
+    //
+    // **並びはツリー順で固定**（決定39）。`selectable` の側から回すことで、
+    // 確認の途中で閉じられた対象がそのまま落ちる ＝ そのペインだけ no-op になる
+    pub(crate) fn termination_plan(&self, kind: Termination) -> Vec<(u32, bool, bool)> {
+        let Some(termination) = self.termination.as_ref() else {
+            return Vec::new();
+        };
         let (sigkill, close) = kind.effects();
-        Some((target, sigkill, close))
+        self.selectable
+            .iter()
+            .map(|entry| entry.pane_id)
+            .filter(|pane_id| termination.targets.contains(pane_id))
+            .map(|pane_id| (pane_id, sigkill, close))
+            .collect()
     }
 
     // 選んだ終了操作を実行し、サブモードを抜けて navモードへ戻る
@@ -117,17 +149,20 @@ impl State {
         // 実行できたかによらずサブモードは畳む。プロンプトを出したまま
         // 残すと、次のキーがまた終了操作として解釈される
         self.termination = None;
-        let Some((pane_id, sigkill, close)) = plan else {
-            return;
-        };
-        let pane = PaneId::Terminal(pane_id);
-        // 順序は kill → close（決定35）。どちらのホスト関数も送りっぱなしで
-        // 応答を待たない（zellij-tile 0.44.3 の shim）
-        if sigkill {
-            send_sigkill_to_pane_id(pane);
-        }
-        if close {
-            close_pane_with_id(pane);
+        // マークは成功・no-op を問わずここで全クリアする（決定39）。対象は
+        // 入場時に捕まえてあるので、先に消しても実行するペインは変わらない。
+        // 取り消し（Esc）の経路はここを通らない ＝ マークは保持される
+        self.clear_marks();
+        for (pane_id, sigkill, close) in plan {
+            let pane = PaneId::Terminal(pane_id);
+            // 順序は kill → close（決定35）。どちらのホスト関数も送りっぱなしで
+            // 応答を待たない（zellij-tile 0.44.3 の shim）
+            if sigkill {
+                send_sigkill_to_pane_id(pane);
+            }
+            if close {
+                close_pane_with_id(pane);
+            }
         }
     }
 

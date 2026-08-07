@@ -135,6 +135,10 @@ impl State {
             BareKey::Tab => self.move_triage_cursor(!shifted),
             BareKey::Char('g') => self.jump_triage_cursor(false),
             BareKey::Char('G') => self.jump_triage_cursor(true),
+            // マークはトリアージ一覧の上でも同じキーで積み上げる（決定39）。
+            // 対象はカーソル位置のペイン
+            BareKey::Char('m') => self.toggle_mark(),
+            BareKey::Char('M') => self.clear_marks(),
             // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
             _ => self.leave_nav_mode(),
         }
@@ -184,6 +188,7 @@ impl State {
             Entry("j k", "move"),
             Entry("g G", "top / bottom"),
             Entry("enter", "jump & exit"),
+            Entry("m M", "mark / clear all"),
             Entry("esc", "back to tree"),
             Entry("?", "this help"),
         ]
