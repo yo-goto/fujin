@@ -56,13 +56,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;92.400 742.092 622.295;92.400 742.092 622.295" keyTimes="0;0.173333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(875.978,544.250)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-40.64,-1012.98;-334.71,-1793.09;-334.71,-1793.09" keyTimes="0;0.191111;0.319444;0.424444;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-108.13,-1008.75;-453.77,-1768.09;-453.77,-1768.09" keyTimes="0;0.191111;0.319444;0.424444;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-190.57;-190.57" keyTimes="0;0.173333;0.208889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-194.39;-194.39" keyTimes="0;0.173333;0.208889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.000000;0.031111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M38.339,-22.136L0.000,44.271L-38.340,-22.136Z" opacity="0" style="fill:rgb(254,254,254);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.000000;0.031111;0.580000;0.691111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.000000;0.031111;0.546667;0.631111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -70,13 +70,14 @@
             </g>
           </g>
           <g transform="rotate(92.400,742.092,622.295)">
-            <g transform="translate(541.266,-1248.844)">
+            <g transform="translate(422.209,-1223.837)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.424444;0.580000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.424444;0.546667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.424444;0.580000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M38.339,-22.136L0.000,44.271L-38.340,-22.136Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.424444;0.437778;0.580000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.424444;0.546667;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M38.339,-22.136L0.000,44.271L-38.340,-22.136Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.424444;0.437778;0.546667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.424444;0.546667;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -86,13 +87,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;76.400 742.092 622.295;76.400 742.092 622.295" keyTimes="0;0.128889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(911.593,621.847)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-167.56,-639.46;-132.73,-1181.97;-132.73,-1181.97" keyTimes="0;0.146667;0.275000;0.380000;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-22.37,-759.90;156.98,-1358.80;156.98,-1358.80" keyTimes="0;0.146667;0.275000;0.380000;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-186.41;-186.41" keyTimes="0;0.128889;0.164444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-173.41;-173.41" keyTimes="0;0.128889;0.164444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.057778;0.080000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M24.561,-14.181L0.000,28.361L-24.562,-14.181Z" opacity="0" style="fill:rgb(123,120,117);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.057778;0.080000;0.535556;0.646667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.057778;0.080000;0.502222;0.586667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -100,13 +101,14 @@
             </g>
           </g>
           <g transform="rotate(76.400,742.092,622.295)">
-            <g transform="translate(778.864,-560.120)">
+            <g transform="translate(1068.569,-736.956)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.380000;0.535556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.380000;0.502222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.380000;0.535556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M24.561,-14.181L0.000,28.361L-24.562,-14.181Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.380000;0.393333;0.535556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.380000;0.502222;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M24.561,-14.181L0.000,28.361L-24.562,-14.181Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.380000;0.393333;0.502222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.380000;0.502222;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -116,13 +118,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;79.200 742.092 622.295;79.200 742.092 622.295" keyTimes="0;0.136667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(826.249,474.028)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;262.02,-718.88;280.35,-1347.84;280.35,-1347.84" keyTimes="0;0.154444;0.282778;0.387778;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;234.72,-793.01;212.55,-1472.76;212.55,-1472.76" keyTimes="0;0.154444;0.282778;0.387778;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-168.25;-168.25" keyTimes="0;0.136667;0.172222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-171.79;-171.79" keyTimes="0;0.136667;0.172222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.065556;0.087778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M24.562,-14.181L-0.000,28.361L-24.561,-14.181Z" opacity="0" style="fill:rgb(123,120,117);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.065556;0.087778;0.543333;0.654444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.065556;0.087778;0.510000;0.594444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -130,13 +132,14 @@
             </g>
           </g>
           <g transform="rotate(79.200,742.092,622.295)">
-            <g transform="translate(1106.596,-873.812)">
+            <g transform="translate(1038.802,-998.728)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.387778;0.543333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.387778;0.510000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.387778;0.543333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M24.562,-14.181L-0.000,28.361L-24.561,-14.181Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.387778;0.401111;0.543333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.387778;0.510000;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M24.562,-14.181L-0.000,28.361L-24.561,-14.181Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.387778;0.401111;0.510000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.387778;0.510000;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -148,13 +151,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;96.400 742.092 622.295;96.400 742.092 622.295" keyTimes="0;0.184444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(607.777,544.250)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;84.49,-1179.12;-154.94,-2121.33;-154.94,-2121.33" keyTimes="0;0.202222;0.330556;0.435556;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;6.08,-1331.84;-334.11,-2372.92;-334.11,-2372.92" keyTimes="0;0.202222;0.330556;0.435556;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-184.18;-184.18" keyTimes="0;0.184444;0.220000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-188.01;-188.01" keyTimes="0;0.184444;0.220000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.011111;0.042222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M-38.339,-22.136L38.340,-22.136L-0.000,44.271Z" opacity="0" style="fill:rgb(254,254,254);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.011111;0.042222;0.591111;0.702222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.011111;0.042222;0.557778;0.642222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -162,13 +165,14 @@
             </g>
           </g>
           <g transform="rotate(96.400,742.092,622.295)">
-            <g transform="translate(452.833,-1577.076)">
+            <g transform="translate(273.671,-1828.673)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.435556;0.591111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.435556;0.557778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.435556;0.591111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M-38.339,-22.136L38.340,-22.136L-0.000,44.271Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.435556;0.448889;0.591111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.435556;0.557778;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M-38.339,-22.136L38.340,-22.136L-0.000,44.271Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.435556;0.448889;0.557778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.435556;0.557778;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -178,13 +182,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;82.000 742.092 622.295;82.000 742.092 622.295" keyTimes="0;0.144444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(657.171,474.608)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-108.37,-846.22;26.21,-1534.77;26.21,-1534.77" keyTimes="0;0.162222;0.290556;0.395556;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-109.71,-1124.11;95.79,-2029.90;95.79,-2029.90" keyTimes="0;0.162222;0.290556;0.395556;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-179.02;-179.02" keyTimes="0;0.144444;0.180000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-177.30;-177.30" keyTimes="0;0.144444;0.180000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.073333;0.095556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M-24.562,-14.181L24.561,-14.181L0.000,28.361Z" opacity="0" style="fill:rgb(123,120,117);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.073333;0.095556;0.551111;0.662222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.073333;0.095556;0.517778;0.602222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -192,13 +196,14 @@
             </g>
           </g>
           <g transform="rotate(82.000,742.092,622.295)">
-            <g transform="translate(683.378,-1060.158)">
+            <g transform="translate(752.965,-1555.292)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.395556;0.551111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.395556;0.517778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.395556;0.551111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M-24.562,-14.181L24.561,-14.181L0.000,28.361Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.395556;0.408889;0.551111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.395556;0.517778;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M-24.562,-14.181L24.561,-14.181L0.000,28.361Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.395556;0.408889;0.517778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.395556;0.517778;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -208,13 +213,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;84.800 742.092 622.295;84.800 742.092 622.295" keyTimes="0;0.152222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(571.827,622.427)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;226.84,-547.72;262.05,-1033.98;262.05,-1033.98" keyTimes="0;0.170000;0.298333;0.403333;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;286.07,-556.39;365.26,-1064.75;365.26,-1064.75" keyTimes="0;0.170000;0.298333;0.403333;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-165.78;-165.78" keyTimes="0;0.152222;0.187778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-161.07;-161.07" keyTimes="0;0.152222;0.187778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.081111;0.103333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M-24.561,-14.181L24.562,-14.181L-0.000,28.361Z" opacity="0" style="fill:rgb(123,120,117);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.081111;0.103333;0.558889;0.670000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.081111;0.103333;0.525556;0.610000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -222,13 +227,14 @@
             </g>
           </g>
           <g transform="rotate(84.800,742.092,622.295)">
-            <g transform="translate(833.875,-411.549)">
+            <g transform="translate(937.089,-442.321)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.403333;0.558889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.403333;0.525556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.403333;0.558889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M-24.561,-14.181L24.562,-14.181L-0.000,28.361Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.403333;0.416667;0.558889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.403333;0.525556;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M-24.561,-14.181L24.562,-14.181L-0.000,28.361Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.403333;0.416667;0.525556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.403333;0.525556;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -240,13 +246,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;100.400 742.092 622.295;100.400 742.092 622.295" keyTimes="0;0.195556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(741.877,776.518)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-73.36,-864.66;-354.55,-1520.53;-354.55,-1520.53" keyTimes="0;0.213333;0.341667;0.446667;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;18.16,-1246.25;-290.43,-2223.66;-290.43,-2223.66" keyTimes="0;0.213333;0.341667;0.446667;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-193.13;-193.13" keyTimes="0;0.195556;0.231111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-187.44;-187.44" keyTimes="0;0.195556;0.231111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.022222;0.053333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M-0.000,44.271L-38.339,-22.135L38.340,-22.135Z" opacity="0" style="fill:rgb(254,254,254);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.022222;0.053333;0.602222;0.713333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.022222;0.053333;0.568889;0.653333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -254,13 +260,14 @@
             </g>
           </g>
           <g transform="rotate(100.400,742.092,622.295)">
-            <g transform="translate(387.324,-744.017)">
+            <g transform="translate(451.449,-1447.144)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.446667;0.602222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.446667;0.568889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.446667;0.602222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M-0.000,44.271L-38.339,-22.135L38.340,-22.135Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.446667;0.460000;0.602222;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.446667;0.568889;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M-0.000,44.271L-38.339,-22.135L38.340,-22.135Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.446667;0.460000;0.568889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.446667;0.568889;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -270,13 +277,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;87.600 742.092 622.295;87.600 742.092 622.295" keyTimes="0;0.160000;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(656.869,768.563)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-205.96,-1223.43;-49.86,-2231.66;-49.86,-2231.66" keyTimes="0;0.177778;0.306111;0.411111;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;-176.78,-885.61;-85.40,-1622.62;-85.40,-1622.62" keyTimes="0;0.177778;0.306111;0.411111;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-181.28;-181.28" keyTimes="0;0.160000;0.195556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-183.01;-183.01" keyTimes="0;0.160000;0.195556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.088889;0.111111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M0.000,28.361L-24.561,-14.180L24.561,-14.180Z" opacity="0" style="fill:rgb(123,120,117);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.088889;0.111111;0.566667;0.677778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.088889;0.111111;0.533333;0.617778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -284,13 +291,14 @@
             </g>
           </g>
           <g transform="rotate(87.600,742.092,622.295)">
-            <g transform="translate(607.006,-1463.099)">
+            <g transform="translate(571.471,-854.053)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.411111;0.566667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.411111;0.533333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.411111;0.566667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M0.000,28.361L-24.561,-14.180L24.561,-14.180Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.411111;0.424444;0.566667;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.411111;0.533333;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M0.000,28.361L-24.561,-14.180L24.561,-14.180Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.411111;0.424444;0.533333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.411111;0.533333;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
@@ -300,13 +308,13 @@
             <animateTransform attributeName="transform" type="rotate" values="30.000 742.092 622.295;90.400 742.092 622.295;90.400 742.092 622.295" keyTimes="0;0.167778;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
             <g transform="translate(827.556,768.563)">
               <g>
-                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;193.14,-1423.54;-24.78,-2584.66;-24.78,-2584.66" keyTimes="0;0.185556;0.313889;0.418889;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="translate" values="0,0;0,0;211.60,-1516.38;-15.97,-2754.72;-15.97,-2754.72" keyTimes="0;0.185556;0.313889;0.418889;1" calcMode="spline" keySplines="0 0 1 1;0.35 0 0.75 0.55;0.25 0.45 0.65 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="rotate" values="0;0;-180.55;-180.55" keyTimes="0;0.167778;0.203333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="rotate" values="0;0;-180.33;-180.33" keyTimes="0;0.167778;0.203333;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   <g>
                     <animateTransform attributeName="transform" type="scale" values="0.55;0.55;1;1" keyTimes="0;0.096667;0.118889;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     <path d="M0.000,28.361L-24.562,-14.180L24.561,-14.180Z" opacity="0" style="fill:rgb(123,120,117);">
-                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.096667;0.118889;0.574444;0.685556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.096667;0.118889;0.541111;0.625556;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                     </path>
                   </g>
                 </g>
@@ -314,13 +322,14 @@
             </g>
           </g>
           <g transform="rotate(90.400,742.092,622.295)">
-            <g transform="translate(802.776,-1816.096)">
+            <g transform="translate(811.589,-1986.161)">
               <g>
-                <animateTransform attributeName="transform" type="rotate" values="0;0;55.0;55.0" keyTimes="0;0.418889;0.574444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                <animateTransform attributeName="transform" type="rotate" values="0;0;40.0;40.0" keyTimes="0;0.418889;0.541111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                 <g>
-                  <animateTransform attributeName="transform" type="scale" values="0.35;0.35;2.6;2.6" keyTimes="0;0.418889;0.574444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
-                  <path d="M0.000,28.361L-24.562,-14.180L24.561,-14.180Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);stroke-width:6px;">
-                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.418889;0.432222;0.574444;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <animateTransform attributeName="transform" type="scale" values="1.0;1.0;3.4;3.4" keyTimes="0;0.418889;0.541111;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                  <path d="M0.000,28.361L-24.562,-14.180L24.561,-14.180Z" opacity="0" style="fill:none;stroke:rgb(13,242,40);" stroke-width="8.0">
+                    <animate attributeName="opacity" values="0;0;0.85;0;0" keyTimes="0;0.418889;0.432222;0.541111;1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
+                    <animate attributeName="stroke-width" values="8.0;8.0;2.0;2.0" keyTimes="0;0.418889;0.541111;1" calcMode="spline" keySplines="0 0 1 1;0.1 0.75 0.3 1;0 0 1 1" dur="4.5s" begin="0.375s" repeatCount="indefinite" />
                   </path>
                 </g>
               </g>
