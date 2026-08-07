@@ -985,6 +985,15 @@ impl State {
         });
 
         let mut text = Text::new(&label);
+        // ペイン名は通常ウェイトに落とす（決定36）。全行bold・同色だと状態アイコンの
+        // 色や選択行の背景が相対的に沈み、一覧のメリハリが弱くなるため。
+        // **選択行（実フォーカスのペイン）はboldのまま残す** — 実機で確認したところ
+        // 選択行まで落とすと「いまどこにいるか」が弱まった（決定36改訂）
+        if !is_selected {
+            let name_start = head.chars().count();
+            let name_end = name_start + title.chars().count();
+            text = text.unbold_range(name_start..name_end);
+        }
         if let Some(status) = status {
             // 状態アイコン部分に状態色（位置は番号列の有無に追従する）
             text = text.color_range(status.color(), icon_at..icon_at + 1);
@@ -1084,6 +1093,13 @@ impl State {
         }
 
         let mut text = Text::new(&label);
+        // ペイン名は通常ウェイトに落とす（決定36改訂。ペイン行と同じ扱いで、選択行は
+        // boldのまま残す）
+        if !is_selected {
+            let name_start = head.chars().count();
+            let name_end = name_start + title.chars().count();
+            text = text.unbold_range(name_start..name_end);
+        }
         if let Some(status) = status {
             text = text.color_range(status.color(), 2..3);
         }
