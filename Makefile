@@ -10,7 +10,7 @@ HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 # 解決されるので、その配下を既定にしておく（zellij 側にプラグインの置き場所の規約は無い）
 PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
 
-.PHONY: all build release install test fmt fmt-check lint check clean
+.PHONY: all build release install test fmt fmt-check lint check clean changelog
 
 all: check
 
@@ -45,3 +45,8 @@ check: fmt-check lint test
 
 clean:
 	cargo clean
+
+# Conventional Commits に沿ったコミットから CHANGELOG.md を再生成する
+# （git-cliff が必要: brew install git-cliff）。生成後は内容を確認してコミットすること
+changelog:
+	git-cliff -o CHANGELOG.md
