@@ -2,8 +2,11 @@
 name = "fujin"
 version = "0.1.0"
 edition = "2021"
-description = "Zellij plugin for herding multiple agent workspaces (panes/tabs/sessions)"
+description = "A zellij sidebar plugin that visualizes AI agent status across panes and lets you jump to them"
 license = "MIT"
+repository = "https://github.com/yo-goto/fujin"
+keywords = ["zellij", "terminal", "multiplexer", "tui", "ai-agent"]
+categories = ["wasm", "development-tools", "visualization"]
 
 [dependencies]
 unicode-width = "0.2.2"

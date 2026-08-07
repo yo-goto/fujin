@@ -48,6 +48,17 @@ fn plugin_pane(id: u32, url: &str) -> PaneInfo {
     }
 }
 
+// フォーカスしたまま滞在猶予（READ_DELAY）が満ちるまで居座る
+//（docs/issues/transit-focus-clears-read-state.md）。
+//
+// 実機では 0.15 秒刻みで Timer が届くが、期限は経過時間で見るので
+// 1回にまとめてよい。**目的地としてフォーカスした**ことの表明として、
+// 既読を期待するテストはこれを挟む
+fn settle_read(state: &mut State) {
+    state.elapsed += READ_DELAY;
+    state.apply_pending_reads();
+}
+
 // 召喚インスタンス（決定16）。常駐との違いはフローティングかどうか
 fn floating_plugin_pane(id: u32, url: &str) -> PaneInfo {
     PaneInfo {
@@ -329,6 +340,7 @@ fn background_subagent_keeps_the_pane_working() {
 
     // done になった後はこれまで通り既読化できる
     state.apply_read_model(&manifest(vec![(0, vec![focused])]));
+    settle_read(&mut state);
     assert_eq!(state.agents[&1].state, AgentState::Idle);
 }
 
@@ -534,10 +546,128 @@ fn focusing_a_pane_marks_it_read() {
     };
     let manifest = manifest(vec![(0, vec![focused, terminal_pane(2, "pane2")])]);
     state.apply_read_model(&manifest);
+    settle_read(&mut state);
 
     assert_eq!(state.agents[&1].state, AgentState::Idle);
     // フォーカスしていないペインは既読にしない
     assert_eq!(state.agents[&2].state, AgentState::Done);
+}
+
+// --- 滞在猶予（docs/issues/transit-focus-clears-read-state.md） ---
+//
+// zellijネイティブのペイン移動（`Alt+矢印` 等）はキー1打ごとに実フォーカスを
+// 確定させるので、目的地までに経由したペインにも本物のフォーカスが一瞬当たる。
+// 通過と到着はフォーカスの有無だけでは区別できないため、滞在時間で分ける
+
+#[test]
+fn passing_through_a_pane_keeps_its_state() {
+    let mut state = state_with_panes(3);
+    state.apply_status(status(2, "Stop"));
+
+    // 経由: ペイン2に一瞬フォーカスが当たる
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![
+            terminal_pane(1, "pane1"),
+            focused(terminal_pane(2, "pane2")),
+            terminal_pane(3, "pane3"),
+        ],
+    )]));
+    assert_eq!(
+        state.agents[&2].state,
+        AgentState::Done,
+        "フォーカスした瞬間には既読にしない"
+    );
+
+    // 猶予が満ちる前に目的地のペイン3へ抜ける
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![
+            terminal_pane(1, "pane1"),
+            terminal_pane(2, "pane2"),
+            focused(terminal_pane(3, "pane3")),
+        ],
+    )]));
+    settle_read(&mut state);
+    assert_eq!(
+        state.agents[&2].state,
+        AgentState::Done,
+        "通過しただけのペインの状態は残る"
+    );
+}
+
+#[test]
+fn passing_through_a_finished_command_pane_keeps_its_state() {
+    // コマンド状態も同じ既読モデルに乗る（決定32）ので、猶予も同じく効く
+    let mut state = state_with_command_panes(vec![exited_command_pane(1, "make", Some(0))]);
+
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![focused(exited_command_pane(1, "make", Some(0)))],
+    )]));
+    // 猶予が満ちる前に離れる
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![
+            exited_command_pane(1, "make", Some(0)),
+            focused(terminal_pane(2, "zsh")),
+        ],
+    )]));
+    settle_read(&mut state);
+
+    assert_eq!(
+        state.pane_status(1),
+        Some(PaneStatus::Command(CommandState::Done)),
+        "通過しただけのコマンドペインの状態も残る"
+    );
+}
+
+#[test]
+fn the_read_grace_does_not_slide_while_focused() {
+    // フォーカスしたまま PaneUpdate が何度も届いても期限は先送りしない。
+    // 延ばすと、留まっているのにいつまでも既読にならない
+    let mut state = state_with_panes(1);
+    state.apply_status(status(1, "Stop"));
+    let there = manifest(vec![(0, vec![focused(terminal_pane(1, "pane1"))])]);
+
+    state.apply_read_model(&there);
+    let deadline = state.pending_reads[&1];
+    state.elapsed += READ_DELAY / 2.0;
+    state.apply_read_model(&there);
+
+    assert_eq!(state.pending_reads[&1], deadline, "期限は据え置き");
+}
+
+#[test]
+fn the_timer_chain_stops_once_nothing_is_pending() {
+    // 猶予が済めば鎖は切れる（静かなときにタイマーを回し続けない）
+    let mut state = state_with_panes(1);
+    state.apply_status(status(1, "Stop"));
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![focused(terminal_pane(1, "pane1"))],
+    )]));
+    assert!(state.timer_armed, "保留があるあいだは鎖を繋ぐ");
+
+    state.on_timer(READ_DELAY);
+
+    assert_eq!(state.agents[&1].state, AgentState::Idle, "留まったので既読");
+    assert!(state.pending_reads.is_empty());
+    assert!(!state.timer_armed, "保留が無くなれば鎖は切れる");
+}
+
+#[test]
+fn a_pane_without_anything_to_read_gets_no_grace() {
+    // 倒せる状態が無いペインに保留を作ると、何も起きないのにタイマーだけが回る
+    let mut state = state_with_panes(1);
+    state.apply_status(status(1, "UserPromptSubmit"));
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![focused(terminal_pane(1, "pane1"))],
+    )]));
+
+    assert!(state.pending_reads.is_empty(), "working は既読の対象外");
+    assert!(!state.timer_armed);
 }
 
 #[test]
@@ -3777,6 +3907,7 @@ fn a_triage_jump_clears_the_read_state_through_the_usual_path() {
             terminal_pane(3, "charlie"),
         ],
     )]));
+    settle_read(&mut state);
     assert_eq!(
         state.agents[&2].state,
         AgentState::Idle,
@@ -4182,6 +4313,7 @@ fn focusing_a_finished_command_pane_marks_it_read() {
         ..exited_command_pane(1, "make", Some(0))
     };
     state.apply_read_model(&manifest(vec![(0, vec![focused])]));
+    settle_read(&mut state);
 
     assert_eq!(state.pane_status(1), None, "既読は状態を持たない側へ戻る");
 }
@@ -4196,6 +4328,7 @@ fn a_read_command_state_does_not_come_back() {
         ..exited_command_pane(1, "make", Some(0))
     };
     state.apply_read_model(&manifest(vec![(0, vec![focused])]));
+    settle_read(&mut state);
 
     state.apply_command_states(&manifest(vec![(
         0,
@@ -4327,6 +4460,7 @@ fn the_command_dump_round_trips() {
         ..exited_command_pane(1, "make", Some(0))
     };
     state.apply_read_model(&manifest(vec![(0, vec![focused])]));
+    settle_read(&mut state);
     let dump = state.command_dump();
 
     let mut peer = State::default();
@@ -4472,6 +4606,7 @@ fn leaving_the_pane_keeps_the_icon_and_coming_back_clears_it() {
     )]);
     state.apply_command_states(&back);
     state.apply_read_model(&back);
+    settle_read(&mut state);
     assert_eq!(state.pane_status(1), None);
 }
 
@@ -4498,6 +4633,7 @@ fn another_tab_counts_as_having_left_the_pane() {
     ]);
     state.apply_command_states(&back);
     state.apply_read_model(&back);
+    settle_read(&mut state);
     assert_eq!(state.pane_status(1), None);
 }
 

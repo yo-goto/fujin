@@ -77,6 +77,20 @@ const DISMISS_PIPE: &str = "fujin_dismiss";
 // "true" で起動したインスタンスは、準備でき次第 navモードへ入る
 const SUMMONED_CONFIG_KEY: &str = "summoned";
 
+// 滞在猶予（docs/issues/transit-focus-clears-read-state.md）。フォーカスされてから
+// この秒数だけ留まって初めて既読にする。
+//
+// zellijネイティブのペイン移動（`Alt+矢印` 等）はキー1打ごとに実フォーカスを
+// 確定させるので、目的地までに経由したペインにも本物のフォーカスが一瞬当たる。
+// 猶予が無いと、通過しただけのペインの注意を引く状態が消える。**通過と到着は
+// フォーカスの有無だけでは原理的に区別できない**ので、滞在時間で分ける。
+//
+// 決定4が退けた「時間ベースのヒューリスティック」とは別物として扱う。あちらは
+// 状態そのものを時間から推測する話で、こちらは状態を消す操作を遅らせるだけ。
+// 猶予が短すぎても長すぎても失うのは既読のタイミングだけで、状態は捏造されない。
+// 実機での調整が残っている暫定値
+const READ_DELAY: f64 = 0.6;
+
 // 非フォーカス時のフッターに出す direct-keys のヒント（決定27・決定28。要件:
 // docs/requirements/sidebar-tree/sidebar-footer.feature）。
 // `(configuration キー, 動作の説明, 幅が足りないときの代替表記)` で、
@@ -205,6 +219,17 @@ struct State {
     // なる。None は基準をまだ持っていない状態で、次の観測は基準を作るだけ
     //（起動直後と、見ていない間の検出を遡って演出しないため）
     known_panes: Option<BTreeSet<u32>>,
+    // 届いた `Event::Timer` の経過時間を積んだ値。プラグインからは壁時計を引けない
+    // ので、滞在猶予の期限判定はこれを時刻の代わりに使う（単調増加しかしない）
+    elapsed: f64,
+    // タイマーの鎖が繋がっているか。`set_timeout()` はキャンセルできず、二重に
+    // 張ると Timer が二重に届く（配置演出のフレームが倍速になる）ので、
+    // 繋がっていないときだけ張る
+    timer_armed: bool,
+    // 既読を保留しているペイン -> 既読にしてよくなる時刻（`elapsed` 基準）。
+    // 通過しただけのペインの状態を消さないための猶予
+    //（docs/issues/transit-focus-clears-read-state.md）
+    pending_reads: BTreeMap<u32, f64>,
     // direct-keys方式（決定6）の configuration キー -> 画面に出すキー表記。
     // フッターのヒントに使う（決定27・決定28）。書かれていない項目は持たない
     // ＝ヒントからその項目だけが省かれる
@@ -353,9 +378,10 @@ impl ZellijPlugin for State {
                 self.release_parked_focus(true);
                 false
             }
-            // 配置演出のフレーム送り（要件: header-animation）。
-            // 演出が終われば鎖が切れ、次のタイマーは来ない
-            Event::Timer(_) => self.advance_deployment(),
+            // 配置演出のフレーム送りと滞在猶予の期限判定。どちらも同じ鎖に
+            // 相乗りする（Timer にはどのタイマーが発火したかの区別が無い）。
+            // 仕事が無くなれば鎖が切れ、次のタイマーは来ない
+            Event::Timer(elapsed) => self.on_timer(elapsed),
             // 左クリックだけを扱う（要件: click-to-focus）。
             // ダブルクリック・ドラッグ・右クリックはv1対象外
             Event::Mouse(Mouse::LeftClick(line, _column)) => self.handle_click(line),
@@ -520,6 +546,33 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    // タイマーの鎖を繋ぐ。
+    //
+    // `set_timeout()` はキャンセルできないので、繋がっている間は張り直さない —
+    // 二重に張ると Timer が二重に届き、配置演出のフレームが倍速になる。刻みは
+    // 配置演出のフレーム間隔で、滞在猶予の期限判定はそこへ相乗りする（既読側は
+    // 経過時間で期限を見るので、刻みが細かくても判定はずれない）
+    pub(crate) fn arm_timer(&mut self) {
+        if !self.timer_armed {
+            set_timeout(deploy::FRAME_INTERVAL);
+            self.timer_armed = true;
+        }
+    }
+
+    // タイマー1回ぶん進める。再描画が要るかを返す
+    fn on_timer(&mut self, elapsed: f64) -> bool {
+        self.timer_armed = false;
+        // 壁時計は引けないので、届いた経過時間を積んだ値を時刻の代わりに使う
+        self.elapsed += elapsed;
+        let mut render = self.advance_deployment();
+        render |= self.apply_pending_reads();
+        // 仕事が残っているあいだだけ鎖を繋ぎ直す。静かなときは回し続けない
+        if self.deployment.is_some() || !self.pending_reads.is_empty() {
+            self.arm_timer();
+        }
+        render
+    }
+
     // フォーカス情報をサーバへ1回だけ問い合わせて、
     //  - 観測したフォーカスを取り込み、navモード外なら選択行を追従させる
     //    （要件: docs/requirements/focus-sync/）

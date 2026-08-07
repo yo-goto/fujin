@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use zellij_tile::prelude::*;
 
-use crate::State;
+use crate::{State, READ_DELAY};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum AgentState {
@@ -288,12 +288,65 @@ impl State {
             })
             .map(|pane| pane.id)
             .collect();
-        // 猶予を解くのはフォーカスから外れているコマンドペインだけなので、
-        // 下の既読ループとは対象が重ならない（同じフレームで解いて既読にする、
-        // という取りこぼしは起きない）
+        // 既読の猶予（決定32）を解くのはフォーカスから外れているコマンドペイン
+        // だけなので、下の保留ループとは対象が重ならない（同じフレームで解いて
+        // 既読にする、という取りこぼしは起きない）
         self.release_read_grace(&focused);
-        let mut cleared = Vec::new();
+        // フォーカスを外れたペインの保留は捨てる。**通過しただけのペインは
+        // 滞在猶予が満ちる前に必ずここへ来る**ので、注意を引く状態はそのまま残る
+        //（決定37。docs/issues/transit-focus-clears-read-state.md）
+        self.pending_reads
+            .retain(|pane_id, _| focused.contains(pane_id));
         for pane_id in focused {
+            // 倒せる状態を持たないペインに保留を作らない。何も起きないのに
+            // タイマーだけが回り続けるのを避ける
+            if !self.has_unread(pane_id) {
+                continue;
+            }
+            // 既に保留があるなら期限は延ばさない。フォーカスしたまま
+            // PaneUpdate が届くたびに期限が先送りされると、留まっていても
+            // いつまでも既読にならない
+            self.pending_reads
+                .entry(pane_id)
+                .or_insert(self.elapsed + READ_DELAY);
+        }
+        if !self.pending_reads.is_empty() {
+            self.arm_timer();
+        }
+    }
+
+    // 既読にできる状態を持っているか（`mark_read` が何かを倒せるか）。
+    // コマンド状態の再フォーカス待ち（決定32の猶予）は、解けるまで倒せないので
+    // 持っていない扱いにする
+    fn has_unread(&self, pane_id: u32) -> bool {
+        let agent = self
+            .agents
+            .get(&pane_id)
+            .is_some_and(|agent| agent.state.is_waiting());
+        let command = self
+            .commands
+            .get(&pane_id)
+            .is_some_and(|info| info.is_unread() && !info.awaiting_refocus);
+        agent || command
+    }
+
+    // 滞在猶予が満ちた保留を既読にする（決定10・決定37）。再描画が要るかを返す。
+    //
+    // ここまで来たペインは、滞在猶予のあいだフォーカスされ続けていた
+    // ＝通過点ではなく目的地だったとみなす
+    pub(crate) fn apply_pending_reads(&mut self) -> bool {
+        let due: Vec<u32> = self
+            .pending_reads
+            .iter()
+            .filter(|(_, deadline)| **deadline <= self.elapsed)
+            .map(|(pane_id, _)| *pane_id)
+            .collect();
+        if due.is_empty() {
+            return false;
+        }
+        let mut cleared = Vec::new();
+        for pane_id in due {
+            self.pending_reads.remove(&pane_id);
             // コマンド状態も同じ既読モデルに乗る（決定32）。エージェント登録が
             // あるペインはそちらが優先されて表示に出ないが、両方を既読にしても
             // 実害は無いので、ソースを気にせず倒す
@@ -308,11 +361,13 @@ impl State {
                 cleared.push(pane_id);
             }
         }
+        let cleared_any = !cleared.is_empty();
         // 非可視インスタンスには PaneUpdate が届かず、状態はイベント駆動なので
         // 見逃した変化は永久にずれたままになる（実測: サイドバー3つのセッションで
         // クリアを実行したのは1つだけ）。観測できた可視インスタンスから
         // 兄弟インスタンスへ配る
         self.broadcast_read_clears(&cleared);
+        cleared_any
     }
 
     // 対応を待っているペインの数。エージェント状態とコマンド状態の両方を数える

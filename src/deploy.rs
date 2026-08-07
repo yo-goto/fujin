@@ -16,14 +16,14 @@
 
 use std::collections::BTreeSet;
 
-use zellij_tile::prelude::*;
-
 use crate::State;
 
 // 兵の記号。ヘッダーの本陣 `▲` と対をなす、白抜きの小さい三角
 pub(crate) const TROOP: &str = "▵";
 
-// フレーム間隔（秒）。実機での見え方はまだ詰めていない暫定値
+// フレーム間隔（秒）。実機での見え方はまだ詰めていない暫定値。
+// タイマーの鎖の刻みでもある（`State::arm_timer`）ので、滞在猶予の判定粒度も
+// これで決まる
 pub(crate) const FRAME_INTERVAL: f64 = 0.15;
 
 // 1フレームで兵が進むセル数
@@ -152,23 +152,24 @@ impl State {
             Some(deployment) => deployment.reinforce(troops),
             None => {
                 self.deployment = Some(Deployment::new(troops));
-                set_timeout(FRAME_INTERVAL);
+                self.arm_timer();
             }
         }
     }
 
-    // タイマー1回ぶん進める。再描画が要るかを返す
+    // タイマー1回ぶん進める。再描画が要るかを返す。
+    //
+    // 鎖を繋ぎ直すのは呼び出し元（`State::on_timer`）の役目 — 滞在猶予も同じ
+    // タイマーに相乗りするので、次を張るかはここだけでは決められない
     pub(crate) fn advance_deployment(&mut self) -> bool {
         let (launch, width) = self.troop_field(self.viewport_cols);
         let Some(deployment) = &mut self.deployment else {
-            // 演出が終わった後に取り残されたタイマー。鎖は繋ぎ直さない
+            // 演出はもう終わっている。滞在猶予のほうのタイマーが来ただけ
             return false;
         };
         deployment.advance();
         if deployment.is_over(launch, width) {
             self.deployment = None;
-        } else {
-            set_timeout(FRAME_INTERVAL);
         }
         true
     }

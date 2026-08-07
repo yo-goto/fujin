@@ -317,11 +317,16 @@ impl CommandInfo {
     // 猶予を無視して既読にする。兄弟インスタンスから配られた既読クリア用
     //（送り手の可視インスタンスが猶予込みで判断済みなので、受け手は従う）
     pub(crate) fn force_read(&mut self) -> bool {
-        if self.read || !matches!(self.state, CommandState::Done | CommandState::Error) {
+        if !self.is_unread() {
             return false;
         }
         self.read = true;
         true
+    }
+
+    // まだ既読にしていない注意を引く状態を持っているか（猶予は見ない）
+    pub(crate) fn is_unread(&self) -> bool {
+        !self.read && matches!(self.state, CommandState::Done | CommandState::Error)
     }
 }
 
