@@ -275,19 +275,37 @@ impl State {
         let Some(panes) = manifest.panes.get(&active_tab.position) else {
             return;
         };
+        // いまフォーカスされている作業ペイン。既読の対象であると同時に、
+        // ここに居ないコマンドペインは「ユーザーが離れた」ことの観測になる
+        let focused: BTreeSet<u32> = panes
+            .iter()
+            .filter(|pane| {
+                !pane.is_plugin
+                    && !pane.is_suppressed
+                    && pane.is_focused
+                    // フローティング層を表示中は、その層のフォーカスのみ有効
+                    && pane.is_floating == active_tab.are_floating_panes_visible
+            })
+            .map(|pane| pane.id)
+            .collect();
+        // 猶予を解くのはフォーカスから外れているコマンドペインだけなので、
+        // 下の既読ループとは対象が重ならない（同じフレームで解いて既読にする、
+        // という取りこぼしは起きない）
+        self.release_read_grace(&focused);
         let mut cleared = Vec::new();
-        for pane in panes {
-            if pane.is_plugin || pane.is_suppressed || !pane.is_focused {
-                continue;
+        for pane_id in focused {
+            // コマンド状態も同じ既読モデルに乗る（決定32）。エージェント登録が
+            // あるペインはそちらが優先されて表示に出ないが、両方を既読にしても
+            // 実害は無いので、ソースを気にせず倒す
+            let mut was_cleared = false;
+            if let Some(agent) = self.agents.get_mut(&pane_id) {
+                was_cleared |= agent.mark_read();
             }
-            // フローティング層を表示中は、その層のフォーカスのみ有効
-            if pane.is_floating != active_tab.are_floating_panes_visible {
-                continue;
+            if let Some(info) = self.commands.get_mut(&pane_id) {
+                was_cleared |= info.mark_read();
             }
-            if let Some(agent) = self.agents.get_mut(&pane.id) {
-                if agent.mark_read() {
-                    cleared.push(pane.id);
-                }
+            if was_cleared {
+                cleared.push(pane_id);
             }
         }
         // 非可視インスタンスには PaneUpdate が届かず、状態はイベント駆動なので
@@ -297,23 +315,21 @@ impl State {
         self.broadcast_read_clears(&cleared);
     }
 
-    // 対応を待っているエージェントペインの数。
+    // 対応を待っているペインの数。エージェント状態とコマンド状態の両方を数える
+    //（決定32）。
     //
-    // 一覧に出るペイン（`selectable`）だけを数える。`agents` を直接数えないのは、
+    // 一覧に出るペイン（`selectable`）だけを数える。状態の入れ物を直接数えないのは、
     // 閉じたペインの状態が prune されるまでの一瞬、画面に無いものを数えてしまうため。
     //
     // **いまは表示の受け皿が無い。** 決定27でヘッダーの待ち件数表示を廃止したが、
-    // 概念としては残すと決めた — docs/issues/command-status-notification.md が
-    // 「コマンド状態も待ち件数へ統合する」方向で検討中で、集計ごと消すと
-    // その実装余地を潰してしまうため
+    // 概念としては残すと決めた（決定32でコマンド状態も含む形に広げた）
     #[allow(dead_code)] // 上記の理由で、呼び出し元が無くても残す
     pub(crate) fn waiting_count(&self) -> usize {
         self.selectable
             .iter()
             .filter(|entry| {
-                self.agents
-                    .get(&entry.pane_id)
-                    .is_some_and(|info| info.state.is_waiting())
+                self.pane_status(entry.pane_id)
+                    .is_some_and(|status| status.is_waiting())
             })
             .count()
     }
@@ -332,5 +348,10 @@ impl State {
             .collect();
         self.agents.retain(|id, _| live.contains(id));
         self.pane_cwds.retain(|id, _| live.contains(id));
+        // コマンド状態は「コマンドペインでなくなったら捨てる」まで見る。
+        // ペインは残っていてもコマンドペインでなくなることがある（実際には
+        // 起こらないが、判定条件を導出側と揃えておく）
+        let live_commands = crate::command::live_command_ids(manifest);
+        self.prune_stale_commands(&live_commands);
     }
 }

@@ -537,7 +537,10 @@ impl State {
                     self.selectable.push(Selectable {
                         tab_position: position,
                         pane_id: pane.id,
-                        title: pane.title.clone(),
+                        // ペイン名が空のコマンドペインはコマンド文字列を名前に
+                        // 使う（決定32）。ここで畳んでおくと、検索・切り詰め・
+                        // ハイライトの経路が普通のペイン名と同じままで済む
+                        title: crate::command::fallback_title(pane),
                         is_floating: pane.is_floating,
                     });
                 }

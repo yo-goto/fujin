@@ -30,16 +30,16 @@ impl State {
     // 呼び直され、そのフレームの並びがそのまま結果になる。「緊急なものが
     // 上に上がってくる」動きそのものがトリアージUIの価値なので、間引かない
     pub(crate) fn triage_entries(&self) -> Vec<&Selectable> {
-        // エージェント状態を持たないペイン（フック通知を一度も受けていないシェル）と
-        // `idle`（既読）は載せない。載せると「もう何も待っていないペイン」が
-        // 一覧に常駐し、既読モデル（決定10）が消したはずの濁りが戻る
+        // 状態を持たないペイン（フック通知を一度も受けていないシェル・コマンド
+        // ペインでないペイン）と `idle`（既読）は載せない。載せると「もう何も
+        // 待っていないペイン」が一覧に常駐し、既読モデル（決定10）が消したはずの
+        // 濁りが戻る。コマンド状態（決定32）も同じ優先度階層に混ぜて並べる
         let mut entries: Vec<(&Selectable, u8, u64)> = self
             .selectable
             .iter()
             .filter_map(|entry| {
-                let info = self.agents.get(&entry.pane_id)?;
-                let rank = info.state.triage_rank()?;
-                Some((entry, rank, info.state_change_seq))
+                let rank = self.pane_status(entry.pane_id)?.triage_rank()?;
+                Some((entry, rank, self.status_seq(entry.pane_id)))
             })
             .collect();
         // 優先度階層（error > blocked > working > done）が先。同一階層内は

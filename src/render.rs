@@ -911,7 +911,9 @@ impl State {
         cols: usize,
     ) -> Text {
         let agent = self.agents.get(&entry.pane_id);
-        let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
+        // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定32）
+        let status = self.pane_status(entry.pane_id);
+        let icon = status.map(|s| s.icon()).unwrap_or(" ");
         // 選択行は左端にバーを立てる。テーマの選択色が沈む配色でも
         // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
         // 番号列・状態アイコンの開始位置をずらさない）
@@ -983,9 +985,9 @@ impl State {
         });
 
         let mut text = Text::new(&label);
-        if let Some(a) = agent {
+        if let Some(status) = status {
             // 状態アイコン部分に状態色（位置は番号列の有無に追従する）
-            text = text.color_range(a.state.color(), icon_at..icon_at + 1);
+            text = text.color_range(status.color(), icon_at..icon_at + 1);
         }
         if let Some((digits, matches)) = number {
             // 番号は「そのまま打つ文字」なのでキーの色で出す（ヘルプの
@@ -1040,8 +1042,8 @@ impl State {
         tab_column: usize,
         cols: usize,
     ) -> Text {
-        let agent = self.agents.get(&entry.pane_id);
-        let icon = agent.map(|a| a.state.icon()).unwrap_or(" ");
+        let status = self.pane_status(entry.pane_id);
+        let icon = status.map(|s| s.icon()).unwrap_or(" ");
         // 選択行の左端バーはペイン行と同じ（幅2固定で、状態アイコンの
         // color_range 2..3 をずらさない）
         let prefix = if is_selected { "▌ " } else { "  " };
@@ -1082,8 +1084,8 @@ impl State {
         }
 
         let mut text = Text::new(&label);
-        if let Some(a) = agent {
-            text = text.color_range(a.state.color(), 2..3);
+        if let Some(status) = status {
+            text = text.color_range(status.color(), 2..3);
         }
         // タブ名は主役（状態アイコン・ペイン名）ではないので落として出す。
         // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる（cwd行と同じ）

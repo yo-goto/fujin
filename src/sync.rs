@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
-use crate::{State, READ_CLEAR_PIPE, SELECTION_PIPE, SYNC_STATE_PIPE};
+use crate::{State, COMMAND_STATE_PIPE, READ_CLEAR_PIPE, SELECTION_PIPE, SYNC_STATE_PIPE};
 
 impl State {
     // 自分のwasm URLを知る（get_plugin_ids() には入っていない）
@@ -67,16 +67,28 @@ impl State {
             .collect();
         let newcomers: Vec<u32> = siblings.difference(&self.known_siblings).copied().collect();
         self.known_siblings = siblings;
-        if self.agents.is_empty() {
+        if newcomers.is_empty() {
             return;
         }
-        let dump = self.state_dump();
+        let dump = (!self.agents.is_empty()).then(|| self.state_dump());
+        // コマンド状態も一緒に配る（決定32）。導出できるのは PaneUpdate が届く
+        // このインスタンスだけなので、新入りは押し付けられない限り一生知らない
+        let commands = (!self.commands.is_empty()).then(|| self.command_dump());
         for id in newcomers {
-            pipe_message_to_plugin(
-                MessageToPlugin::new(SYNC_STATE_PIPE)
-                    .with_destination_plugin_id(id)
-                    .with_payload(dump.clone()),
-            );
+            if let Some(dump) = &dump {
+                pipe_message_to_plugin(
+                    MessageToPlugin::new(SYNC_STATE_PIPE)
+                        .with_destination_plugin_id(id)
+                        .with_payload(dump.clone()),
+                );
+            }
+            if let Some(commands) = &commands {
+                pipe_message_to_plugin(
+                    MessageToPlugin::new(COMMAND_STATE_PIPE)
+                        .with_destination_plugin_id(id)
+                        .with_payload(commands.clone()),
+                );
+            }
         }
     }
 

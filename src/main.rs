@@ -13,6 +13,7 @@
 //
 // モジュール構成:
 // - agent  — フックイベントの解釈とエージェント状態の遷移
+// - command — コマンドペインのライフサイクルからのコマンド状態の導出（決定32）
 // - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
@@ -21,6 +22,7 @@
 // - summon — フローティングでの臨時召喚（決定16）
 
 mod agent;
+mod command;
 mod nav;
 mod render;
 mod search;
@@ -38,6 +40,7 @@ use std::str::FromStr;
 use zellij_tile::prelude::*;
 
 use agent::{AgentInfo, StatusPayload};
+use command::CommandInfo;
 use nav::{JumpState, SearchState};
 use triage::TriageState;
 
@@ -55,6 +58,9 @@ const NAV_MODE_PIPE: &str = "fujin_mode";
 const SYNC_STATE_PIPE: &str = "fujin_sync_state";
 // 既読クリアの兄弟インスタンスへの配布（決定13）
 const READ_CLEAR_PIPE: &str = "fujin_read";
+// コマンド状態の兄弟インスタンスへの配布（決定32）。導出できるのは PaneUpdate が
+// 届く可視インスタンスだけなので、エージェント状態と違って自前では揃わない
+const COMMAND_STATE_PIPE: &str = "fujin_command";
 // 選択ペインIDの兄弟インスタンスへの配布（決定13）
 const SELECTION_PIPE: &str = "fujin_selection";
 // 取り残された召喚インスタンスの強制掃除（決定16）。navモードへ入れないまま
@@ -100,6 +106,10 @@ struct State {
     panes: Option<PaneManifest>,
     // key: ターミナルペインID
     agents: BTreeMap<u32, AgentInfo>,
+    // コマンドペインの状態（決定32）。key は同じくターミナルペインID。
+    // エージェント状態とは別の入れ物に持つ — 同じペインに両方が付いたときは
+    // エージェント状態を優先する（`State::pane_status`）ため、混ぜられない
+    commands: BTreeMap<u32, CommandInfo>,
     // フラット化した選択対象
     selectable: Vec<Selectable>,
     selected: usize,
@@ -264,6 +274,10 @@ impl ZellijPlugin for State {
                 true
             }
             Event::PaneUpdate(manifest) => {
+                // コマンド状態の導出は既読モデルより先（決定32）。導出した状態が
+                // その場で既読になってしまう問題は、既読の猶予
+                //（`CommandInfo::awaiting_refocus`）が防ぐ
+                self.apply_command_states(&manifest);
                 self.apply_read_model(&manifest);
                 self.panes = Some(manifest);
                 self.rebuild_selectable();
@@ -311,6 +325,7 @@ impl ZellijPlugin for State {
                 | NAV_MODE_PIPE
                 | SYNC_STATE_PIPE
                 | READ_CLEAR_PIPE
+                | COMMAND_STATE_PIPE
                 | SELECTION_PIPE
                 | DISMISS_PIPE
         );
@@ -385,10 +400,21 @@ impl ZellijPlugin for State {
                         if let Some(agent) = self.agents.get_mut(&pane_id) {
                             changed |= agent.mark_read();
                         }
+                        // コマンド状態も同じ既読モデルに乗る（決定32）。
+                        // 猶予（`awaiting_refocus`）は見ない — 送り手の可視
+                        // インスタンスが猶予込みで判断した結果がここへ来る
+                        if let Some(info) = self.commands.get_mut(&pane_id) {
+                            changed |= info.force_read();
+                        }
                     }
                 }
                 changed
             }
+            COMMAND_STATE_PIPE => pipe_message
+                .payload
+                .as_deref()
+                .map(|raw| self.apply_command_dump(raw))
+                .unwrap_or(false),
             SYNC_STATE_PIPE => {
                 // 空のときだけ取り込む。既に自前の状態を持っているなら、
                 // 古いダンプで上書きしてしまわないよう無視する

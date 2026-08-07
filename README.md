@@ -43,6 +43,12 @@ incomplete tasks.
 `done` / `blocked` / `error` are **cleared automatically once you focus that
 pane** (a read-receipt model). Only the ones you haven't attended to stay lit.
 
+**Command panes get the same icons.** Anything started as a command pane
+(`zellij run -- docker build .`, a `command` block in a layout, …) shows `»`
+while it runs and `●` / `×` when it exits, so a long build tells you it is done
+the same way an agent does. No hook or setup is needed — zellij already knows
+the command. Panes with no name show the command line instead.
+
 ## Requirements
 
 - zellij 0.44 or later
@@ -414,8 +420,8 @@ zellij pipe --name fujin_status -- '{
 
 The only pipe names meant for external use are `fujin_status` and the
 keybinding ones, `fujin_up` / `_down` / `_go` / `_mode`. `fujin_sync_state` /
-`_read` / `_selection` are an internal protocol for syncing between instances
-— don't call them from outside.
+`_read` / `_selection` / `_command` are an internal protocol for syncing between
+instances — don't call them from outside.
 
 > [!IMPORTANT]
 > Don't pass the `--plugin` option. Doing so makes zellij launch
