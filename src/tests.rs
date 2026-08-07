@@ -3258,6 +3258,37 @@ fn enter_jumps_from_the_triage_list_and_leaves_nav_mode() {
 }
 
 #[test]
+fn a_triage_jump_clears_the_read_state_through_the_usual_path() {
+    // 既読クリアは「PaneUpdate でのフォーカス変化を見る」汎用の仕組みに乗せる。
+    // トリアージモード専用のクリア処理を別に書くと、決定13が踏んだ配り漏れの
+    // 罠を再発明することになる（要件: triage-mode-entry-exit.feature）
+    let mut state = triage_state();
+    set_agent_state(&mut state, 2, AgentState::Blocked);
+    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Enter));
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+
+    // ジャンプでフォーカスが移った結果が PaneUpdate として返ってくる
+    let focused = PaneInfo {
+        is_focused: true,
+        ..terminal_pane(2, "bravo")
+    };
+    state.apply_read_model(&manifest(vec![(
+        0,
+        vec![
+            terminal_pane(1, "alpha"),
+            focused,
+            terminal_pane(3, "charlie"),
+        ],
+    )]));
+    assert_eq!(
+        state.agents[&2].state,
+        AgentState::Idle,
+        "ジャンプ先は既読になる"
+    );
+}
+
+#[test]
 fn the_triage_cursor_moves_within_the_list() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
@@ -3294,6 +3325,31 @@ fn the_triage_cursor_starts_at_the_most_urgent_row() {
     state.selected = 0; // alpha（working。一覧では2番目）
     state.handle_nav_key(key(BareKey::Char('p')));
     assert_eq!(state.triage_cursor(), Some(2));
+}
+
+#[test]
+fn the_triage_cursor_does_not_move_the_selection() {
+    // カーソルの移動は兄弟インスタンスへ配らない（要件: triage-cursor.feature）。
+    // 配布そのものはホスト関数なのでテストから覗けないため、配る材料である
+    // 選択（`selected`）が動かないことで押さえる。動くのは Enter の確定時だけ
+    let mut state = triage_state();
+    set_agent_state(&mut state, 1, AgentState::Working);
+    set_agent_state(&mut state, 3, AgentState::Working);
+    state.selected = 1; // bravo（一覧には出ないペイン）
+    state.handle_nav_key(key(BareKey::Char('p')));
+
+    // 一覧は [3, 1]
+    assert_eq!(state.triage_cursor(), Some(3));
+    assert_eq!(state.selected, 1, "入場では選択を動かさない");
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.triage_cursor(), Some(1));
+    assert_eq!(state.selected, 1, "カーソルの移動では選択を動かさない");
+
+    state.handle_nav_key(key(BareKey::Enter));
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 1,
+        "確定したときだけ選択が動く"
+    );
 }
 
 #[test]
@@ -3405,6 +3461,46 @@ fn a_long_pane_name_does_not_push_the_tab_name_off_the_row() {
         "右端は揃える: {}",
         content
     );
+}
+
+#[test]
+fn triage_rows_drop_the_counter_column_and_the_cwd_row() {
+    // サイドバー幅32にタブ名とカウンタ列の両方は載らないので、タブ名を優先する。
+    // cwd行も同じ理由で出さない（要件: triage-list-display.feature）
+    let mut state = triage_state();
+    state.show_cwd = true;
+    state.pane_cwds.insert(4, "/work/oss/fujin".to_string());
+    set_agent_state(&mut state, 4, AgentState::Working);
+    state.apply_status(status(4, "SubagentStart")); // サブエージェント数 +1
+    state.apply_status(status(4, "TaskCreated")); // 未完了タスク数 [1]
+    state.handle_nav_key(key(BareKey::Char('p')));
+
+    let rows = state.visible_rows();
+    assert!(
+        !rows.iter().any(|r| matches!(r, Row::Cwd { .. })),
+        "cwd行は出さない"
+    );
+    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
+        panic!("トリアージ行が無い: {}", rows.len());
+    };
+    let content = state
+        .triage_row(entry, tab_name, false, tab_column, SIDEBAR)
+        .content()
+        .to_string();
+    assert_eq!(state.agents[&4].subagents, 1, "カウンタ自体は数えている");
+    assert_eq!(state.agents[&4].open_tasks, 1);
+    assert!(
+        !content.contains("+1"),
+        "サブエージェント数は出さない: {}",
+        content
+    );
+    assert!(
+        !content.contains("[1]"),
+        "未完了タスク数は出さない: {}",
+        content
+    );
+    assert!(content.ends_with("tab2"), "タブ名を優先する: {}", content);
 }
 
 #[test]
