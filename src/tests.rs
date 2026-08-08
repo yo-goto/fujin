@@ -4709,14 +4709,33 @@ fn truncate_start_leaves_short_strings_alone() {
 
 #[test]
 fn truncate_start_drops_the_head_within_budget() {
+    // "/bb" までは境界候補だが幅に収まらないので、収まる直近の境界 "/cc" へ丸める
     let (folded, dropped) = truncate_start("/aa/bb/cc", 5);
-    assert_eq!(folded, "…b/cc");
-    assert_eq!(dropped, 5);
-    assert_eq!(folded.chars().count(), 5);
-    // 全角は2セルぶん食う
+    assert_eq!(folded, "…/cc");
+    assert_eq!(dropped, 6);
+    // 収まる `/` 境界が無いときだけ、従来どおり文字幅で機械的に末尾を残す
+    // （全角は2セルぶん食う）
     let (folded, dropped) = truncate_start("/あ/いう", 5);
     assert_eq!(folded, "…いう");
     assert_eq!(dropped, 3);
+}
+
+#[test]
+fn truncate_start_rounds_to_a_slash_boundary() {
+    // ディレクトリ名の途中で切らず、`…` の直後が必ず `/` になるように
+    // 収まる範囲でいちばん手前の区切りへ丸める（中途半端な文字列を避ける調整）
+    let (folded, dropped) = truncate_start("/Users/example/development/oss/zellij-plugins/fujin", 24);
+    assert_eq!(folded, "…/zellij-plugins/fujin");
+    assert_eq!(dropped, 28);
+}
+
+#[test]
+fn truncate_start_falls_back_to_character_width_when_no_boundary_fits() {
+    // 区切りが無い（か、区切りまで残しても収まらない）ほど1セグメントが
+    // 長いときは、`…/` を諦めて文字幅で機械的に末尾を残す
+    let (folded, dropped) = truncate_start("/aaaaaaaaaa", 5);
+    assert_eq!(folded, "…aaaa");
+    assert_eq!(dropped, 7);
 }
 
 #[test]

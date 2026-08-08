@@ -1669,6 +1669,11 @@ fn pad_left(s: &str, width: usize) -> String {
 }
 
 // 表示セル幅ベースの先頭省略。先頭を落として `…` に畳み、末尾を残す（決定22）。
+// `/` の位置で丸め、`…` の直後が必ず `/` になるようにする（`…/development/…`
+// のような形。ディレクトリ名の途中で切れて中途半端な文字列になるのを避ける
+// ための調整。詳細は docs/issues/sidebar-cwd-path-boundary.md）。
+// どのセグメント境界でも収まらないほど狭いときだけ、従来どおり文字幅で
+// 機械的に末尾を残す。
 // 返り値は (畳んだ文字列, 落とした文字数)
 pub(crate) fn truncate_start(s: &str, max: usize) -> (String, usize) {
     let total = s.chars().count();
@@ -1679,7 +1684,11 @@ pub(crate) fn truncate_start(s: &str, max: usize) -> (String, usize) {
     if UnicodeWidthStr::width(s) <= max {
         return (s.to_string(), 0);
     }
-    // 省略記号（幅1）ぶんの余地を残しながら、末尾から幅が max-1 を超える手前まで拾う
+    if let Some((dropped, tail)) = truncate_start_at_boundary(s, max) {
+        return (format!("…{tail}"), dropped);
+    }
+    // フォールバック: 最後のセグメント自体が `…/` を付けても収まらないほど
+    // 長い。区切りでは畳めないので、文字幅で機械的に末尾を残す
     let limit = max.saturating_sub(1);
     let mut kept = 0;
     let mut width = 0;
@@ -1695,6 +1704,23 @@ pub(crate) fn truncate_start(s: &str, max: usize) -> (String, usize) {
     let mut out = String::from("…");
     out.extend(s.chars().skip(dropped));
     (out, dropped)
+}
+
+// `/` の位置（先頭自身を除く）を境界候補として、末尾からいちばん多く残せる
+// 境界を探す。境界の文字（`/`自身）ごと残すので、`…` の直後は必ず `/` になる
+fn truncate_start_at_boundary(s: &str, max: usize) -> Option<(usize, String)> {
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if i == 0 || c != '/' {
+            continue;
+        }
+        let tail: String = chars[i..].iter().collect();
+        // 省略記号（幅1）ぶんの余地を残して収まるか
+        if UnicodeWidthStr::width(tail.as_str()) < max {
+            return Some((i, tail));
+        }
+    }
+    None
 }
 
 // 表示セル幅ベースの切り詰め。全角文字（CJK）は2セル分として数える
