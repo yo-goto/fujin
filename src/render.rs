@@ -151,6 +151,12 @@ const FLOATING_BRACKETS: usize = 2;
 // 右端に常に空ける幅。文字がサイドバーの縁に貼り付くと窮屈に見える。
 // 左マージン（選択バーぶんの2セル）と揃えてある
 const RIGHT_MARGIN: usize = 2;
+// プレビュー用フローティングペイン（決定42）で、本文より上に固定される行数
+//（見出し・境界線）
+const PREVIEW_HEAD: usize = 2;
+// 対象ペイン名がまだ届いていないときに見出しへ出す文言。開いた直後の一瞬だけ
+// 通る。UI文言は英語で統一する（ui-design.md）
+const PREVIEW_PLACEHOLDER: &str = "preview";
 
 // 文字を置いてよい幅。選択行の背景は右マージンも含めて塗るので、
 // 背景のパディング（pad_to_width）はこれではなく cols を使うこと
@@ -587,6 +593,12 @@ impl State {
     }
 
     pub(crate) fn draw(&self, rows: usize, cols: usize) {
+        // プレビュー用フローティングペイン（決定42）はサイドバーの枠組みを持たない。
+        // 一覧も状態も持っていないので、共通の描画へ落とすと空の枠だけが出る
+        if self.is_preview {
+            self.draw_preview(rows, cols);
+            return;
+        }
         if !self.permissions_granted {
             print_text_with_coordinates(
                 Text::new("permissions required (press y)"),
@@ -683,6 +695,54 @@ impl State {
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
             }
+        }
+    }
+
+    // プレビュー用フローティングペインの描画（決定42。要件: preview）。
+    //
+    // 見出し（対象ペイン名）＋境界線＋スナップショット本文だけの簡素な作り。
+    // サイドバーの枠組み（ヘッダー・フッター・階段状の字下げ）は持ち込まない —
+    // ここに出るのは fujin の一覧ではなく**他のペインの画面そのもの**なので、
+    // 装飾を足すほど元の見え方から遠ざかる。
+    //
+    // 本文は右マージンも取らず幅いっぱいを使う（同じ理由）。取れるのは装飾を
+    // 持たないプレーンテキストだけで、色付きの再現はできない（決定42の技術調査）
+    fn draw_preview(&self, rows: usize, cols: usize) {
+        if !self.permissions_granted || rows == 0 {
+            return;
+        }
+        let indent = " ".repeat(HEADER_INDENT);
+        let title = if self.preview_content.title.is_empty() {
+            PREVIEW_PLACEHOLDER
+        } else {
+            self.preview_content.title.as_str()
+        };
+        print_text_with_coordinates(
+            compose(
+                &[(&indent, Ink::Plain), (title, Ink::Muted)],
+                content_cols(cols),
+            ),
+            0,
+            0,
+            None,
+            None,
+        );
+        if rows < PREVIEW_HEAD {
+            return;
+        }
+        print_text_with_coordinates(divider_line(cols), 0, 1, None, None);
+        for (index, line) in self
+            .preview_body(rows.saturating_sub(PREVIEW_HEAD))
+            .iter()
+            .enumerate()
+        {
+            print_text_with_coordinates(
+                Text::new(truncate(line, cols)),
+                0,
+                PREVIEW_HEAD + index,
+                None,
+                None,
+            );
         }
     }
 

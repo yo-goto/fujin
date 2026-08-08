@@ -158,6 +158,12 @@ impl State {
         // 終了操作サブモードも同様。確認を経ていない終了操作は実行しない
         //（要件: pane-close-kill）
         self.termination = None;
+        // プレビューも畳んでフローティングペインを閉じる（決定42）。ジャンプ・
+        // 退場のどちらの経路もここを通る。navモードの外にプレビューだけ残すのは
+        // 決定34（フォーカスの預かり）の設計と整合しない。
+        // **預かったフォーカスを返すより前**に閉じる — 閉じる順が逆だと、
+        // 返した先のフォーカスがプレビューの後始末で持って行かれかねない
+        self.close_preview();
         // 預かっていたフォーカスを作業ペインへ返す（決定34）。召喚インスタンスの
         // 自死（下）より前に置く — 自分を閉じたあとではホストコマンドが届くか
         // 分からない
@@ -275,6 +281,15 @@ impl State {
             // 作らない — トグルだけの軽い操作なので、一覧の上で直接積み上げる
             BareKey::Char('m') => self.toggle_mark(),
             BareKey::Char('M') => self.clear_marks(),
+            // プレビューのトグルと、プレビュー中の既読化（要件:
+            // docs/requirements/preview/、決定42）。`v` は view、`r` は read の
+            // 頭文字で、どちらも navモード内で未使用だった。マークと同じく専用
+            // サブモードは作らない — トグルだけの軽い横断的操作なので、
+            // 一覧の上で直接切り替える。
+            // `r` はプレビューがオフの間、未定義キーとして安全弁に倒れる
+            //（判定は mark_preview_read の中）
+            BareKey::Char('v') => self.toggle_preview(),
+            BareKey::Char('r') => self.mark_preview_read(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
@@ -292,6 +307,9 @@ impl State {
         }
         // 横取り中の移動は自分にしか起きないので、都度配る
         self.broadcast_selection();
+        // プレビューがオンなら表示を光っている行へ追従させる（決定42）。
+        // 退場した後は preview を畳んであるので何も起きない
+        self.refresh_preview();
         true
     }
 
@@ -305,6 +323,13 @@ impl State {
         // 戻ってから押せばよく、取り消せなくなる操作ではない
         if key.bare_key == BareKey::Char('m') && key.key_modifiers.contains(&KeyModifier::Alt) {
             self.toggle_mark();
+            return true;
+        }
+        // プレビューのトグルも同じ事情でここだけ Alt付き（決定42）。
+        // **既読化キーはこの例外を広げない** — 既読化は取り消せない操作なので、
+        // マークの全解除（`M`）と同じく Esc で navモード本体へ戻ってから押す
+        if key.bare_key == BareKey::Char('v') && key.key_modifiers.contains(&KeyModifier::Alt) {
+            self.toggle_preview();
             return true;
         }
         // Shift だけは素通し（Shift付き印字可能文字と Shift+Tab のため）。
@@ -342,6 +367,10 @@ impl State {
         // Esc で「検索前の位置に戻す」以上、途中経過を配ると兄弟だけが
         // 取り消せない位置に取り残される（決定13）。配るのは確定時
         //（confirm_search）だけ
+        //
+        // プレビューは配布ではなく自分の表示なので、絞り込みのカーソルにも
+        // そのまま追従させる（決定42）
+        self.refresh_preview();
         true
     }
 
@@ -405,6 +434,10 @@ impl State {
         }
         // 番号入力の途中経過は兄弟インスタンスへ配らない（決定29。検索サブモードと
         // 同じ扱い）。確定時のジャンプは push_jump_digit 側で配る
+        //
+        // プレビューも更新しない（決定42）。候補を絞っているあいだは対象ペインが
+        // 定まらないので、オンのまま入ってきた場合は直前の表示を保つ
+        //（`refresh_preview` が番号ジャンプサブモード中は何もしない）
         true
     }
 
@@ -605,13 +638,34 @@ impl State {
                 Blank,
                 Entry("type", "filter panes"),
                 Entry("backspace", "delete char"),
-                // クエリ入力と両立しないので、マークだけは Alt付き（決定39）
+                // クエリ入力と両立しないので、マークとプレビューは Alt付き
+                //（決定39・決定42）
                 Entry("alt+m", "mark"),
+                Entry("alt+v", "preview"),
                 Entry("up down", "move cursor"),
                 Entry("shift+tab", "move back"),
                 Entry("enter", "jump & exit"),
                 Entry("esc", "cancel search"),
                 Entry("?", "this help"),
+            ]
+        } else if self.preview.is_some() {
+            // プレビュー中だけ既読化キーが増える（決定42）。オフの間は
+            // 未定義キー扱いなので、押せないキーをヘルプに残さない
+            &[
+                Section("keys"),
+                Blank,
+                Entry("j k", "move"),
+                Entry("g G", "top / bottom"),
+                Entry("enter", "jump & exit"),
+                Entry("/", "search"),
+                Entry("p", "triage"),
+                Entry("n", "number jump"),
+                Entry("m M", "mark / clear all"),
+                Entry("v", "preview off"),
+                Entry("r", "mark read"),
+                Entry("d", "terminate pane"),
+                Entry("?", "this help"),
+                Entry("esc", "exit"),
             ]
         } else {
             &[
@@ -624,6 +678,7 @@ impl State {
                 Entry("p", "triage"),
                 Entry("n", "number jump"),
                 Entry("m M", "mark / clear all"),
+                Entry("v", "preview"),
                 Entry("d", "terminate pane"),
                 Entry("?", "this help"),
                 Entry("esc", "exit"),

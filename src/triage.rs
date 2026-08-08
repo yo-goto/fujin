@@ -139,11 +139,17 @@ impl State {
             // 対象はカーソル位置のペイン
             BareKey::Char('m') => self.toggle_mark(),
             BareKey::Char('M') => self.clear_marks(),
+            // プレビューもトリアージ一覧の上で同じキーで効く（決定42）。
+            // 対象はマークと同じくカーソル位置のペイン
+            BareKey::Char('v') => self.toggle_preview(),
+            BareKey::Char('r') => self.mark_preview_read(),
             // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
             _ => self.leave_nav_mode(),
         }
         // 検索サブモードと同じく、カーソルの移動は兄弟インスタンスへ配らない。
-        // 選択が動くのは Enter で確定したときだけ
+        // 選択が動くのは Enter で確定したときだけ。
+        // プレビューは自分の表示なのでカーソルに追従させる（決定42）
+        self.refresh_preview();
         true
     }
 
@@ -182,6 +188,21 @@ impl State {
     // ヘルプオーバーレイに出すキー一覧（要件: nav-mode-hints）
     pub(crate) fn triage_help_lines(&self) -> &'static [HelpRow] {
         use HelpRow::{Blank, Entry, Section};
+        // navモード本体と同じく、既読化キーはプレビュー中だけ出す（決定42）
+        if self.preview.is_some() {
+            return &[
+                Section("keys"),
+                Blank,
+                Entry("j k", "move"),
+                Entry("g G", "top / bottom"),
+                Entry("enter", "jump & exit"),
+                Entry("m M", "mark / clear all"),
+                Entry("v", "preview off"),
+                Entry("r", "mark read"),
+                Entry("esc", "back to tree"),
+                Entry("?", "this help"),
+            ];
+        }
         &[
             Section("keys"),
             Blank,
@@ -189,6 +210,7 @@ impl State {
             Entry("g G", "top / bottom"),
             Entry("enter", "jump & exit"),
             Entry("m M", "mark / clear all"),
+            Entry("v", "preview"),
             Entry("esc", "back to tree"),
             Entry("?", "this help"),
         ]

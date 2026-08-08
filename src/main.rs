@@ -19,6 +19,7 @@
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
 // - mark   — 複数選択（マーク。決定39）の集合と、その配布
+// - preview — プレビュー（決定42。選択行のペインの内容を覗き見る）
 // - termination — 終了操作サブモード（対象ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
 // - render — サイドバーの描画
@@ -31,6 +32,7 @@ mod config;
 mod deploy;
 mod mark;
 mod nav;
+mod preview;
 mod render;
 mod search;
 mod summon;
@@ -50,6 +52,7 @@ use command::CommandInfo;
 use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
 use nav::{JumpState, SearchState};
+use preview::{PreviewContent, PreviewState};
 use termination::TerminationState;
 use triage::TriageState;
 
@@ -86,6 +89,10 @@ const SELECTION_PIPE: &str = "fujin_selection";
 // マーク（決定39）の兄弟インスタンスへの配布。選択と違い集合をまるごと運ぶ —
 // 差分で運ぶと、取りこぼした1通ぶんだけ集合が食い違ったまま直らない
 const MARK_PIPE: &str = "fujin_mark";
+// プレビュー用フローティングペインへのスナップショットの送りつけ（決定42）。
+// プラグインは自分のペインの外を描けないので、権威インスタンスが撮った内容を
+// 描き手のインスタンスへ渡す。1行目が対象ペイン名、2行目以降が内容
+const PREVIEW_PIPE: &str = "fujin_preview";
 // 取り残された召喚インスタンスの強制掃除（決定16）。navモードへ入れないまま
 // 取り残された召喚インスタンスはキーを横取りしておらず Esc が届かない。fujin は
 // unselectable でフォーカスできないので、ユーザーの普段のペイン操作でも消せない
@@ -219,6 +226,16 @@ struct State {
     // 終了操作サブモード中か否かも同じく is_some() で表す
     //（要件: pane-close-kill、決定35）。中身は入場時に捕まえた対象ペイン
     termination: Option<TerminationState>,
+    // プレビューがオンか否かも同じく is_some() で表す（要件: preview、決定42）。
+    // モードではなく navモード内のトグル可能な横断的表示状態なので、キー解釈は
+    // 変わらない。中身は開いたフローティングペインと、直近に送った対象ペイン
+    preview: Option<PreviewState>,
+    // 自分がプレビュー用フローティングペインとして起動されたインスタンスか
+    //（決定42）。真なら一覧もエージェント状態も持たず、配られたスナップショットを
+    // 描くだけに徹する
+    is_preview: bool,
+    // 描くスナップショット（プレビュー用フローティングペインでのみ埋まる）
+    preview_content: PreviewContent,
     // 状態変化のたびに進む単調増加のカウンタ。トリアージ一覧の tie-break に使う
     //（要件: triage-mode）。値そのものに意味はなく、比べられればよい
     state_seq: u64,
@@ -266,6 +283,9 @@ register_plugin!(State);
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.apply_config(&configuration);
+        // プレビュー用フローティングペインとして開かれたか（決定42）。
+        // 一覧も navモードも持たない描き手専用のインスタンスになる
+        self.is_preview = config::is_preview(&configuration);
         // 別インスタンスに召喚されたフローティングなら、入場pipeを取り逃している。
         // 押し直させずに済むよう、準備でき次第こちらから navモードへ入る（決定16）
         self.summoned = config::summoned(&configuration);
@@ -309,6 +329,12 @@ impl ZellijPlugin for State {
     }
 
     fn update(&mut self, event: Event) -> bool {
+        // プレビュー用フローティングペインは配られたスナップショットを描くだけ
+        //（決定42）。一覧の再構築も権威判定も要らないうえ、走らせると兄弟
+        // インスタンスとして状態の配布に混ざってしまう
+        if self.is_preview {
+            return self.update_as_preview(event);
+        }
         match event {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
@@ -316,6 +342,8 @@ impl ZellijPlugin for State {
                     // フローティングで起動されていたら召喚インスタンスとして自覚する
                     //（決定16。下の set_selectable の分岐に効くので、ここより前に）
                     self.adopt_floating_as_summoned();
+                    // プレビュー用フローティングペインは configuration で自覚済み
+                    // なので、この経路には来ない（`is_preview` で先に分岐している）
                     // フォーカス巡回にサイドバーが混ざらないようにする（決定6）。
                     //
                     // **臨時召喚は例外**（決定16）。unselectable なペインは
@@ -394,6 +422,10 @@ impl ZellijPlugin for State {
                     self.nav_mode = false;
                     clear_key_presses_intercepts();
                 }
+                // 開いたままのプレビュー用フローティングペインは道連れにする
+                //（決定42）。閉じるのは自分ではなく別のペインなので、
+                // 二重解放（上のコメント）には当たらない
+                self.close_preview();
                 // 預かっているフォーカスは作業ペインへ返す（決定34）。返し先は
                 // 自分ではなく作業ペインなので、閉じられている最中でも投げて
                 // よい。リロードの場合はここで返さないと、ユーザーは
@@ -433,12 +465,19 @@ impl ZellijPlugin for State {
                 | COMMAND_STATE_PIPE
                 | SELECTION_PIPE
                 | MARK_PIPE
+                | PREVIEW_PIPE
                 | DISMISS_PIPE
         );
         // CLI pipe は即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
         // フックのレイテンシに直結する（実測でroute.rsのタイムアウトを確認済み）
         if is_ours && matches!(pipe_message.source, PipeSource::Cli(_)) {
             unblock_cli_pipe_input(&pipe_message.name);
+        }
+        // プレビュー用フローティングペイン（決定42）が扱うのはスナップショットだけ。
+        // 状態通知や同期まで取り込むと、描くのに使わない状態を溜め込んだうえに
+        // 兄弟インスタンスとして配布の輪に混ざる
+        if self.is_preview && pipe_message.name != PREVIEW_PIPE {
+            return false;
         }
         match pipe_message.name.as_str() {
             STATUS_PIPE => {
@@ -520,6 +559,19 @@ impl ZellijPlugin for State {
                     .as_deref()
                     .and_then(|p| p.trim().parse::<u32>().ok())
                     .map(|target| self.select_pane_id(target))
+                    .unwrap_or(false)
+            }
+            PREVIEW_PIPE => {
+                // 描き手（プレビュー用フローティングペイン）だけが受け取る。
+                // 宛先はプラグインIDで指定しているので他へは飛ばないが、
+                // 取り違えても描くものが無いだけで済むよう役割で弾いておく
+                if !self.is_preview {
+                    return false;
+                }
+                pipe_message
+                    .payload
+                    .as_deref()
+                    .map(|raw| self.apply_preview_snapshot(raw))
                     .unwrap_or(false)
             }
             MARK_PIPE => {
@@ -604,6 +656,26 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    // プレビュー用フローティングペイン（決定42）のイベント処理。
+    //
+    // 描き手に徹するので、見るのは自分が描けるようになったか（権限）だけ。
+    // 一覧・エージェント状態・navモードには一切関わらない
+    fn update_as_preview(&mut self, event: Event) -> bool {
+        let Event::PermissionRequestResult(status) = event else {
+            return false;
+        };
+        self.permissions_granted = matches!(status, PermissionStatus::Granted);
+        if self.permissions_granted {
+            // 常駐サイドバーと違い `set_selectable(false)` は呼ばない。
+            // 臨時召喚（決定16）と同じ理由で、一時的に出ているだけのペインは
+            // 「必ず自分で消せる」ほうを取る
+            if let Some(id) = self.own_plugin_id {
+                rename_plugin_pane(id, "preview");
+            }
+        }
+        true
+    }
+
     // タイマーの鎖を繋ぐ。
     //
     // `set_timeout()` はキャンセルできないので、繋がっている間は張り直さない —
@@ -697,10 +769,13 @@ impl State {
             return false;
         }
         self.focus_on_terminal = matches!(focused_pane, PaneId::Terminal(_));
-        let own_pane_focused = matches!(
-            (focused_pane, self.own_plugin_id),
-            (PaneId::Plugin(id), Some(own_id)) if id == own_id
-        );
+        // **プレビュー用フローティングペインは自分の一部として数える**（決定42）。
+        // 開いた直後は実フォーカスがそちらへ移るので、別ペイン扱いにすると
+        // 「ユーザーがフォーカスを持って行った」と誤読して navモードを抜けてしまう
+        let own_pane_focused = match (focused_pane, self.own_plugin_id) {
+            (PaneId::Plugin(id), Some(own_id)) => id == own_id || self.is_preview_pane(id),
+            _ => false,
+        };
         // 預かりが成立したのを観測しておく（決定34。`park_taken_over` が使う）
         if own_pane_focused && self.focus_parked.is_some() {
             self.park_confirmed = true;

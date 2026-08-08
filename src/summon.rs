@@ -18,8 +18,9 @@ use zellij_tile::prelude::*;
 use crate::config::SUMMONED_KEY;
 use crate::{State, SYNC_STATE_PIPE};
 
-// 召喚するフローティングの幅。レイアウトの常駐サイドバー（size=32）に合わせる
-const SIDEBAR_WIDTH: usize = 32;
+// 召喚するフローティングの幅。レイアウトの常駐サイドバー（size=32）に合わせる。
+// プレビュー用フローティングペインの左端もここから決める（決定42）
+pub(crate) const SIDEBAR_WIDTH: usize = 32;
 
 impl State {
     pub(crate) fn summon_floating_if_absent(&mut self) {

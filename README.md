@@ -438,6 +438,9 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `n` | enter number jump sub-mode (below) |
 | `p` | enter triage mode (panes that need attention, most urgent first) |
 | `d` | enter the pane termination sub-mode (below) |
+| `m` / `M` | mark / unmark a pane, or clear every mark (targets for termination) |
+| `v` | toggle the preview (below) |
+| `r` | mark the previewed pane as read (only while the preview is up) |
 | `?` | open the key help (below) |
 | `Esc` / `q` | exit the mode |
 
@@ -519,7 +522,30 @@ closes the pane on its own; a command pane (`zellij run -- …`) stays on screen
 after its command dies, which is what `x` is for. Killing a command pane whose
 command has already exited does nothing.
 
-Only the selected pane is affected — there is no multi-select yet.
+The targets are every pane you marked with `m`, or just the selected pane if
+nothing is marked. Marks may span tabs, and `M` clears them all at once.
+
+### Preview (`v` inside nav mode)
+
+Pressing `v` opens a preview to the right of the sidebar showing the contents of
+the selected pane (or, in the filtered results and the triage list, the pane
+under the cursor). The focus does not move, so you can keep walking the list
+with `j` / `k` and see what each pane is up to. Pressing `v` again — or jumping,
+or leaving nav mode — closes it.
+
+| Key | Action |
+|---|---|
+| `v` | toggle the preview (`alt+v` inside the search sub-mode) |
+| `r` | mark the previewed pane as read (`done` / `blocked` / `error` only) |
+
+What you get is a **snapshot taken when the selection moved**. The pane may keep
+running behind it, but the preview will not change until you move the selection
+again — there is no polling. Zellij also only hands plugins the plain text of a
+pane, so colours and bold are not reproduced. This is for getting the gist, not
+a faithful reproduction.
+
+Looking at a pane does not mark it read (the focus never moves there). Press `r`
+to say you have seen it.
 
 ### Help (`?` inside nav mode)
 

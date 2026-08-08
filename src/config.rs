@@ -28,6 +28,11 @@ use zellij_tile::prelude::{BareKey, KeyWithModifier};
 // "true" で起動したインスタンスは、準備でき次第 navモードへ入る
 pub(crate) const SUMMONED_KEY: &str = "summoned";
 
+// プレビュー用フローティングペインに渡す**内部用**の configuration キー（決定42）。
+// `SUMMONED_KEY` と同じくユーザーが書くものではないので `SETTINGS` には載せない。
+// "true" で起動したインスタンスは、配られたスナップショットを描くだけに徹する
+pub(crate) const PREVIEW_KEY: &str = "preview";
+
 // 設定値の種類。受け口の広さと、README の「値」列の書き方がこれで決まる
 #[derive(Clone, Copy)]
 pub(crate) enum Kind {
@@ -198,6 +203,15 @@ impl Config {
 pub(crate) fn summoned(configuration: &BTreeMap<String, String>) -> bool {
     configuration
         .get(SUMMONED_KEY)
+        .map(|v| normalize_value(v) == "true")
+        .unwrap_or(false)
+}
+
+// プレビュー用フローティングペインとして起動されたか（決定42）。
+// 内部用キーなので `SETTINGS` は通さない（`summoned` と同じ扱い）
+pub(crate) fn is_preview(configuration: &BTreeMap<String, String>) -> bool {
+    configuration
+        .get(PREVIEW_KEY)
         .map(|v| normalize_value(v) == "true")
         .unwrap_or(false)
 }
