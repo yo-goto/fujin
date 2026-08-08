@@ -21,11 +21,15 @@ use crate::{State, MARK_PIPE};
 pub(crate) const MARK_GLYPH: &str = "✓";
 
 impl State {
-    // マークの対象になるペイン ＝ いま光っている行。トリアージ一覧・検索の
-    // 絞り込み結果ではそれぞれのカーソル、ツリー表示では選択行を引く
-    //（番号ジャンプサブモード中はここへ来ない。数字専用の入力空間の安全弁が
-    // 先に効いて navモードごと退場する）
-    fn mark_cursor(&self) -> Option<u32> {
+    // いま光っている行のペイン（注目ペイン）。トリアージ一覧・検索の絞り込み
+    // 結果ではそれぞれのカーソル、ツリー表示では選択行を引く。
+    //
+    // マーク（決定39）とプレビュー（決定42）という**一覧を問わず同じキーで働く
+    // 横断的操作**が、どの一覧に居るかを気にせず対象を引くための1本。
+    // 番号ジャンプサブモード中のマークはここへ来ない（数字専用の入力空間の
+    // 安全弁が先に効いて navモードごと退場する）が、プレビューはオンのまま
+    // 番号ジャンプへ入れるので、呼び出し側が更新を止める（決定42）
+    pub(crate) fn highlighted_pane(&self) -> Option<u32> {
         if self.triage.is_some() {
             return self.triage_cursor();
         }
@@ -37,7 +41,7 @@ impl State {
 
     // マークのトグル。同じキーで付け外しする
     pub(crate) fn toggle_mark(&mut self) {
-        let Some(pane_id) = self.mark_cursor() else {
+        let Some(pane_id) = self.highlighted_pane() else {
             return;
         };
         if !self.marked.remove(&pane_id) {
