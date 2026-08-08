@@ -542,7 +542,7 @@ it as a command. Nav mode stays active the whole time.
 That is the only supported place to put them (see
 [Only the alias route is supported](#only-the-alias-route-is-supported)).
 
-These four settings are all there is.
+The settings below are all there is.
 
 <!-- settings:begin -->
 <!-- Generated from SETTINGS in repos/main/src/config.rs. Don't edit by hand; run `make readme` -->
@@ -550,10 +550,11 @@ These four settings are all there is.
 ```kdl
 plugins {
     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
-        show_cwd "true"
-        up_key   "Alt u"
-        down_key "Alt d"
-        go_key   "Alt g"
+        show_cwd              "true"
+        show_deploy_animation "false"
+        up_key                "Alt u"
+        down_key              "Alt d"
+        go_key                "Alt g"
     }
 }
 ```
@@ -561,6 +562,7 @@ plugins {
 | Key | Value | Default | What it does |
 | --- | --- | --- | --- |
 | `show_cwd` | `"true"` / `"false"` | `false` | Show cwd under each pane row (only for panes with the hook set up) |
+| `show_deploy_animation` | `"true"` / `"false"` | `true` | Play the deployment animation in the header when new agents appear |
 | `up_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_up` (footer hint only) |
 | `down_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_down` (footer hint only) |
 | `go_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_go` (footer hint only) |

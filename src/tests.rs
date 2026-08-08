@@ -16,6 +16,7 @@
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
 use crate::command::{CommandState, PaneStatus};
+use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::render::{
     cwd_row, divider_line, fold_highlight_indices, overflow_row, pad_to_width, reconcile_scroll,
@@ -1918,6 +1919,29 @@ fn a_flag_setting_takes_only_true_and_false() {
         state.apply_config(&plugin_config(&[("show_cwd", value)]));
         assert!(!state.show_cwd, "{}", value);
         assert_eq!(state.config_warnings, vec!["show_cwd"], "{}", value);
+    }
+}
+
+#[test]
+fn every_flag_setting_reaches_the_config() {
+    // `SETTINGS` に Flag を足したのに `Config::set_flag` へ配線し忘れると、
+    // その設定は警告も出さずに黙って無視される。既定値のずれもここで落ちる
+    for setting in &SETTINGS {
+        let Kind::Flag { default } = setting.kind else {
+            continue;
+        };
+        assert_eq!(
+            Config::parse(&plugin_config(&[(setting.key, &default.to_string())])),
+            Config::default(),
+            "既定と同じ値を書いたのに既定と違う結果になる: {}",
+            setting.key
+        );
+        assert_ne!(
+            Config::parse(&plugin_config(&[(setting.key, &(!default).to_string())])),
+            Config::default(),
+            "既定と逆の値が効いていない（配線漏れ）: {}",
+            setting.key
+        );
     }
 }
 
@@ -5551,6 +5575,24 @@ fn every_detected_agent_gets_a_troop() {
             detected
         );
     }
+}
+
+#[test]
+fn show_deploy_animation_can_switch_the_animation_off() {
+    // 演出は情報を運ばないので、切っても見える情報は変わらない（決定40）
+    let mut state = sidebar_state();
+    state.apply_config(&plugin_config(&[("show_deploy_animation", "false")]));
+    observe_panes(&mut state, &[1]);
+    observe_panes(&mut state, &[1, 2]);
+
+    assert!(state.deployment.is_none(), "配置演出は再生されない");
+    assert_eq!(state.header_line(SIDEBAR).content(), "▲ fujin");
+
+    // 検出そのものは動いている。切っている間の増加ぶんが基準に入っているので、
+    // 戻したあとの検出は「新しく増えた1体」だけになる
+    state.apply_config(&plugin_config(&[("show_deploy_animation", "true")]));
+    observe_panes(&mut state, &[1, 2, 3]);
+    assert_eq!(state.deployment.map(|d| d.troops), Some(1));
 }
 
 #[test]

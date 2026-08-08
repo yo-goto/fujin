@@ -86,6 +86,10 @@ impl State {
         if self.show_cwd {
             config.insert("show_cwd".to_string(), "true".to_string());
         }
+        // 既定が真の設定なので、渡すのは切ってあるときだけ
+        if !self.show_deploy_animation.0 {
+            config.insert("show_deploy_animation".to_string(), "false".to_string());
+        }
         let summoned = open_plugin_pane_floating(
             &own_url,
             config,

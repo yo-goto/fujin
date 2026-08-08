@@ -31,8 +31,12 @@ pub(crate) const SUMMONED_KEY: &str = "summoned";
 // 設定値の種類。受け口の広さと、README の「値」列の書き方がこれで決まる
 #[derive(Clone, Copy)]
 pub(crate) enum Kind {
-    // 真偽値。`"true"` のときだけ真（決定40）
-    Flag,
+    // 真偽値。`"true"` のときだけ真（決定40）。
+    // `default` は書かれなかったときの値で、README の「既定」列にも出る
+    Flag {
+        #[allow(dead_code)] // 読むのは README 生成と配線テスト（どちらもテスト時のみ）
+        default: bool,
+    },
     // フッターに出す direct-keys のキー表記（決定28）。
     // `label` はヒントの動作名、`arrow` は幅が足りないときの代替表記
     DirectKey {
@@ -56,13 +60,21 @@ pub(crate) struct Setting {
 
 // 公開する設定の全部。**並び順がそのまま README の表と、フッターの
 // direct-keys ヒントの表示順になる**（決定27・28）
-pub(crate) const SETTINGS: [Setting; 4] = [
+pub(crate) const SETTINGS: [Setting; 5] = [
     Setting {
         key: "show_cwd",
-        kind: Kind::Flag,
+        kind: Kind::Flag { default: false },
         example: "true",
         summary_ja: "ペイン行の下に cwd を表示します（フック設定済みのペインのみ）",
         summary_en: "Show cwd under each pane row (only for panes with the hook set up)",
+    },
+    Setting {
+        key: "show_deploy_animation",
+        kind: Kind::Flag { default: true },
+        // 既定が真なので、例に出す意味があるのは切るほうの値
+        example: "false",
+        summary_ja: "新規エージェントを検出したときヘッダーで配置演出を再生します",
+        summary_en: "Play the deployment animation in the header when new agents appear",
     },
     Setting {
         key: "up_key",
@@ -99,10 +111,25 @@ pub(crate) const SETTINGS: [Setting; 4] = [
     },
 ];
 
+// 配置演出を出すか（設定 `show_deploy_animation`。要件: header-animation）。
+//
+// **素の `bool` にしないのは既定値が真だから。** `Config` も `State` も
+// `#[derive(Default)]` で作られるので、`bool` のままだと設定を書いていない
+// インスタンスで演出が消える。既定を型側に持たせて、両方の Default に効かせる
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShowDeployAnimation(pub(crate) bool);
+
+impl Default for ShowDeployAnimation {
+    fn default() -> Self {
+        ShowDeployAnimation(true)
+    }
+}
+
 // 取り込んだ設定。解釈できなかった項目は `warnings` に残す
-#[derive(Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Config {
     pub(crate) show_cwd: bool,
+    pub(crate) show_deploy_animation: ShowDeployAnimation,
     // configuration キー -> 画面に出すキー表記。書かれていない項目は持たない
     // ＝フッターのヒントからその項目だけが省かれる
     pub(crate) direct_keys: BTreeMap<String, String>,
@@ -123,9 +150,9 @@ impl Config {
                 continue;
             }
             match setting.kind {
-                Kind::Flag => match value {
-                    "true" => config.show_cwd = true,
-                    "false" => {}
+                Kind::Flag { .. } => match value {
+                    "true" => config.set_flag(setting.key, true),
+                    "false" => config.set_flag(setting.key, false),
                     _ => config.warnings.push(setting.key),
                 },
                 Kind::DirectKey { .. } => {
@@ -141,6 +168,17 @@ impl Config {
             }
         }
         config
+    }
+
+    // `Kind::Flag` の設定を対応するフィールドへ落とす。**`SETTINGS` に Flag を
+    // 足したらここにも足すこと** — 配線し忘れると設定が黙って効かなくなる
+    //（tests.rs の `every_flag_setting_reaches_the_config` が検出する）
+    fn set_flag(&mut self, key: &str, on: bool) {
+        match key {
+            "show_cwd" => self.show_cwd = on,
+            "show_deploy_animation" => self.show_deploy_animation = ShowDeployAnimation(on),
+            _ => {}
+        }
     }
 }
 
@@ -296,7 +334,7 @@ pub(crate) mod doc {
 
     fn value_column(setting: &Setting, lang: Lang) -> &'static str {
         match (setting.kind, lang) {
-            (Kind::Flag, _) => "`\"true\"` / `\"false\"`",
+            (Kind::Flag { .. }, _) => "`\"true\"` / `\"false\"`",
             (Kind::DirectKey { .. }, Lang::Ja) => "キー表記（`\"Alt u\"` / `\"alt+u\"`）",
             (Kind::DirectKey { .. }, Lang::En) => "Key spelling (`\"Alt u\"` / `\"alt+u\"`)",
         }
@@ -304,7 +342,8 @@ pub(crate) mod doc {
 
     fn default_column(setting: &Setting, lang: Lang) -> &'static str {
         match (setting.kind, lang) {
-            (Kind::Flag, _) => "`false`",
+            (Kind::Flag { default: true }, _) => "`true`",
+            (Kind::Flag { default: false }, _) => "`false`",
             (Kind::DirectKey { .. }, Lang::Ja) => "未設定（そのヒントを出さない）",
             (Kind::DirectKey { .. }, Lang::En) => "unset (the hint is omitted)",
         }

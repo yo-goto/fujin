@@ -509,7 +509,7 @@ kill は何も起こしません。
 設定を書く場所として fujin がサポートするのはここだけです（→
 [サポートするのはエイリアス経由だけです](#サポートするのはエイリアス経由だけです)）。
 
-設定はこの4項目がすべてです。
+設定は下の一覧がすべてです。
 
 <!-- settings:begin -->
 <!-- ここは repos/main/src/config.rs の SETTINGS から生成しています。手で直さず `make readme` を実行してください -->
@@ -517,10 +517,11 @@ kill は何も起こしません。
 ```kdl
 plugins {
     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
-        show_cwd "true"
-        up_key   "Alt u"
-        down_key "Alt d"
-        go_key   "Alt g"
+        show_cwd              "true"
+        show_deploy_animation "false"
+        up_key                "Alt u"
+        down_key              "Alt d"
+        go_key                "Alt g"
     }
 }
 ```
@@ -528,6 +529,7 @@ plugins {
 | キー | 値 | 既定 | 説明 |
 | --- | --- | --- | --- |
 | `show_cwd` | `"true"` / `"false"` | `false` | ペイン行の下に cwd を表示します（フック設定済みのペインのみ） |
+| `show_deploy_animation` | `"true"` / `"false"` | `true` | 新規エージェントを検出したときヘッダーで配置演出を再生します |
 | `up_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_up` に割り当てたキーの表記（フッターのヒント用・表示専用） |
 | `down_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_down` に割り当てたキーの表記（フッターのヒント用・表示専用） |
 | `go_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_go` に割り当てたキーの表記（フッターのヒント用・表示専用） |

@@ -47,7 +47,7 @@ use zellij_tile::prelude::*;
 
 use agent::{AgentInfo, StatusPayload};
 use command::CommandInfo;
-use config::Config;
+use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
 use nav::{JumpState, SearchState};
 use termination::TerminationState;
@@ -145,6 +145,9 @@ struct State {
     own_plugin_url: Option<String>,
     permissions_granted: bool,
     show_cwd: bool,
+    // 配置演出を出すか（設定 `show_deploy_animation`、既定は出す）。
+    // 既定値を型に持たせてある理由は config.rs 側のコメント参照
+    show_deploy_animation: ShowDeployAnimation,
     // ペインID -> cwd（フックのペイロード由来）
     pane_cwds: BTreeMap<u32, String>,
     // navモード中か。全キーを横取りしているインスタンスだけが true になる
@@ -792,6 +795,7 @@ impl State {
     pub(crate) fn apply_config(&mut self, configuration: &BTreeMap<String, String>) {
         let config = Config::parse(configuration);
         self.show_cwd = config.show_cwd;
+        self.show_deploy_animation = config.show_deploy_animation;
         self.direct_keys = config.direct_keys;
         self.config_warnings = config.warnings;
         // フッターは幅32でキー名しか出せない。何が悪かったのかを追える形は

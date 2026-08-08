@@ -146,6 +146,11 @@ impl State {
     }
 
     fn begin_deployment(&mut self, troops: usize) {
+        // 無効化されていても検出（`detect_new_agents` の基準更新）はそのまま
+        // 動かす。ここで再生だけを落とす（要件: show_deploy_animation）
+        if !self.show_deploy_animation.0 {
+            return;
+        }
         match &mut self.deployment {
             // 再生中の検出は同じ演出へ合流させる。検出のたびに発火させると
             // 演出が重なって騒がしくなる（要件: まとめて1回）
