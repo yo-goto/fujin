@@ -237,12 +237,15 @@ fn compose(segments: &[(&str, Ink)], cols: usize) -> Text {
     text
 }
 
-// カウンタ列の幅（決定22）。サブエージェント数 `+N`・未完了タスク数 `[M]` を
-// それぞれ固定幅のフィールドに右揃えで置き、行をまたいで桁を揃える。
+// カウンタ列の幅（決定22、2026-08-08追記）。サブエージェント数 `+N`・未完了タスク数
+// `[M]` をそれぞれ固定幅のフィールドに右揃えで置き、**カウンタを持つ行同士**で
+// 桁を揃える。
 //
 // 幅は**そのフレームに出るペイン行の実測最大**で決める。誰もカウンタを持っていない
-// フレームでは 0 になり、ペイン名が幅をすべて使える。固定幅で常に予約すると、
-// 静かなときにも右端が空白のまま失われる
+// フレームでは 0 になる。ただし「列の幅がいくつか」と「その幅ぶんの余白をこの行が
+// 実際に負うか」は別の話 — 後者は行自身が `+N`/`[M]` のどちらかを持つかどうかで
+// 決まる（`render()`）。持たない行は同じフレームの他行の状態に関わらずペイン名が
+// 幅をすべて使う
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub(crate) struct CounterColumn {
     subagents: usize,
@@ -250,19 +253,11 @@ pub(crate) struct CounterColumn {
 }
 
 impl CounterColumn {
-    // 列全体の表示幅。両方あるときだけ、あいだに空白1つを挟む
-    fn width(&self) -> usize {
-        match (self.subagents, self.open_tasks) {
-            (0, 0) => 0,
-            (s, 0) | (0, s) => s,
-            (s, t) => s + 1 + t,
-        }
-    }
-
-    // この列に載る1行ぶんの文字列。持っていないカウンタのフィールドは空白で埋め、
-    // 桁の位置を行ごとにずらさない
+    // この列に載る1行ぶんの文字列。自分自身が `+N`/`[M]` のどちらも持たない行は
+    // 空文字列を返す — 他のペインがカウンタを持っていてもこの行は影響を受けない。
+    // 片方だけ持つ行では、もう片方のフィールドは空白で埋めて桁の位置をずらさない
     fn render(&self, subagents: &str, open_tasks: &str) -> String {
-        if self.width() == 0 {
+        if subagents.is_empty() && open_tasks.is_empty() {
             return String::new();
         }
         let mut out = pad_left(subagents, self.subagents);
@@ -1096,8 +1091,9 @@ impl State {
         } else {
             0
         };
-        // カウンタ列を持つフレームでは、この行に数字が無くても列ぶんは空けておく。
-        // 空けないと、右端に揃えたはずの桁が行によってずれる
+        // この行自身がカウンタを持つときだけ列ぶんを確保する（決定22、2026-08-08追記）。
+        // 他のペインがカウンタを持っていても、この行が持たなければ counters は
+        // 空文字列のまま — フレーム内の他行の状態に巻き込まれない
         let reserved = if counters.is_empty() {
             head_width + brackets
         } else {

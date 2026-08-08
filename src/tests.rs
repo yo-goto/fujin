@@ -3763,9 +3763,12 @@ fn every_tree_row_leaves_a_right_margin() {
 }
 
 #[test]
-fn the_counter_column_is_shared_by_every_row() {
+fn rows_with_any_counter_still_share_the_frames_column_width() {
     // サブエージェント数だけのペインと、未完了タスク数だけのペイン。
-    // 桁がずれると一覧を縦に舐められないので、列はフレーム全体で共有する
+    // 桁がずれると一覧を縦に舐められないので、**カウンタを持つ行同士**は列を共有する
+    // （2026-08-08改訂: 以前は「フレーム全体」で共有していたが、カウンタを一切
+    // 持たない行まで巻き込んでいたのは不具合だった。そちらは
+    // `a_counter_less_row_is_unaffected_by_other_rows_counters` で検証する）
     let mut state = state_with_panes(0);
     state.panes = Some(manifest(vec![(
         0,
@@ -3800,6 +3803,55 @@ fn the_counter_column_is_shared_by_every_row() {
         !second.content().contains('+'),
         "サブエージェント数を持たない行は、その位置を空けたままにする: {}",
         second.content()
+    );
+}
+
+#[test]
+fn a_counter_less_row_is_unaffected_by_other_rows_counters() {
+    // 「+1」のようなカウンタが1行にでも出ると、それを持たない他の行まで右端が
+    // 削られていた不具合の回帰テスト
+    // （docs/issues/counter-column-collateral-truncation.md）。
+    // 同じ行を「静かな列（ゼロ幅）」と「実測した列（非ゼロ幅）」の両方で描画し、
+    // 自分自身がカウンタを持たなければ結果が完全に一致することを確認する
+    let mut state = state_with_panes(0);
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![
+            terminal_pane(1, "要件定義とドキュメント整理タスクの続き"),
+            terminal_pane(2, "bravo"),
+        ],
+    )]));
+    state.rebuild_selectable();
+    repeat_status(&mut state, 2, "SubagentStart", 12);
+
+    let quiet_column = CounterColumn::default();
+    let noisy_column = column_of(&state);
+    assert_ne!(
+        noisy_column, quiet_column,
+        "このフレームは他のペインがカウンタを持っている前提"
+    );
+
+    let without_counters = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        quiet_column,
+        HeadCells::default(),
+        SIDEBAR,
+    );
+    let with_counters = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        noisy_column,
+        HeadCells::default(),
+        SIDEBAR,
+    );
+
+    assert_eq!(
+        without_counters.content(),
+        with_counters.content(),
+        "カウンタを持たない行は、他の行がカウンタを持っていても表示が変わらない"
     );
 }
 
