@@ -145,6 +145,9 @@ const COLUMN_GAP: usize = 1;
 // トリアージ行のタブ名列に使ってよい幅の割合（内容幅の 1/N）。
 // タブ名が長くてもペイン名を潰さないための上限
 const TRIAGE_TAB_SHARE: usize = 3;
+// フローティングペインのペイン名を囲む丸括弧が占める幅（前後で2セル。
+// 要件: docs/requirements/floating-pane-indicator/）
+const FLOATING_BRACKETS: usize = 2;
 // 右端に常に空ける幅。文字がサイドバーの縁に貼り付くと窮屈に見える。
 // 左マージン（選択バーぶんの2セル）と揃えてある
 const RIGHT_MARGIN: usize = 2;
@@ -1086,12 +1089,19 @@ impl State {
         let (subagents, open_tasks) = counter_labels(agent);
         let counters = column.render(&subagents, &open_tasks);
         let counters_width = UnicodeWidthStr::width(counters.as_str());
+        // フローティングペインの丸括弧もカウンタ列と同じく先に確保する（決定21の
+        // 考え方。畳むのはペイン名の側）
+        let brackets = if entry.is_floating {
+            FLOATING_BRACKETS
+        } else {
+            0
+        };
         // カウンタ列を持つフレームでは、この行に数字が無くても列ぶんは空けておく。
         // 空けないと、右端に揃えたはずの桁が行によってずれる
         let reserved = if counters.is_empty() {
-            head_width
+            head_width + brackets
         } else {
-            head_width + COLUMN_GAP + counters_width
+            head_width + brackets + COLUMN_GAP + counters_width
         };
 
         // 右マージンぶんは文字を置かない。カウンタ列もそこまでで揃える
@@ -1101,8 +1111,9 @@ impl State {
         let source = fallback.unwrap_or(&entry.title);
         let title_original_len = source.chars().count();
         let (title, title_dropped) = fold_to_width(source, title_budget);
+        let (open, close) = floating_brackets(entry, &title);
 
-        let mut label = format!("{}{}", head, title);
+        let mut label = format!("{}{}{}{}", head, open, title, close);
         if !counters.is_empty() {
             // ペイン名の長さに関わらず、カウンタ列は右端で揃える
             let filler =
@@ -1135,7 +1146,8 @@ impl State {
                 &title,
                 title_dropped,
                 title_original_len,
-                head.chars().count(),
+                // 丸括弧のぶんだけペイン名の開始位置が右へずれる
+                head.chars().count() + open.chars().count(),
             )
         });
 
@@ -1146,7 +1158,10 @@ impl State {
         // 選択行まで落とすと「いまどこにいるか」が弱まった（決定36改訂）
         if !is_selected {
             let name_start = head.chars().count();
-            let name_end = name_start + title.chars().count();
+            // 丸括弧もペイン名の一部として同じ太さで出す（要件:
+            // floating-pane-indicator。括弧だけ別扱いにはしない）
+            let name_end =
+                name_start + open.chars().count() + title.chars().count() + close.chars().count();
             text = text.unbold_range(name_start..name_end);
         }
         if let Some(status) = status {
@@ -1228,16 +1243,25 @@ impl State {
         let tab = truncate(tab_name, tab_column);
         let tab_width = UnicodeWidthStr::width(tab.as_str());
         let inner = content_cols(cols);
+        // フローティングペインの丸括弧はペイン行と同じ扱い（先に確保する）。
+        // トリアージ行はカウンタ列・cwd行を持たないが、括弧はペイン名に直接付く
+        // 要素なのでこの制約とは独立に出す（要件: floating-pane-indicator）
+        let brackets = if entry.is_floating {
+            FLOATING_BRACKETS
+        } else {
+            0
+        };
         // タブ名を持たない行があっても列ぶんは空けておく（桁が行ごとにずれないため）
         let reserved = if tab.is_empty() {
-            head_width
+            head_width + brackets
         } else {
-            head_width + COLUMN_GAP + tab_column
+            head_width + brackets + COLUMN_GAP + tab_column
         };
         // ペイン行と同じく、ペイン名が空なら cwd を代わりに出す（決定26）
         let (title, _) = fold_to_width(self.display_title(entry), inner.saturating_sub(reserved));
+        let (open, close) = floating_brackets(entry, &title);
 
-        let mut label = format!("{}{}", head, title);
+        let mut label = format!("{}{}{}{}", head, open, title, close);
         let mut tab_span = None;
         if !tab.is_empty() {
             let filler = inner.saturating_sub(UnicodeWidthStr::width(label.as_str()) + tab_width);
@@ -1263,7 +1287,8 @@ impl State {
         // boldのまま残す）
         if !is_selected {
             let name_start = head.chars().count();
-            let name_end = name_start + title.chars().count();
+            let name_end =
+                name_start + open.chars().count() + title.chars().count() + close.chars().count();
             text = text.unbold_range(name_start..name_end);
         }
         if let Some(status) = status {
@@ -1312,6 +1337,23 @@ fn input_footer(tag: &str, input: &str, indent: &str, ink: Ink, cols: usize) -> 
         segments.push((hint, ink));
     }
     compose(&segments, cols)
+}
+
+// フローティングペインのペイン名を囲む丸括弧（要件:
+// docs/requirements/floating-pane-indicator/）。フローティング層ごと隠れうる
+// ペインを、一覧の上で見分けられるようにするための印。
+//
+// 色・dim は乗せない — ペイン名の色は落とさない（決定36）うえ、色は状態・モードへ
+// 割り当ててある（ui-design.md 原則1・2）ので、この軸には記号だけを使う。
+// 角括弧はモードラベル、山括弧は zellij のキーバインド表記と衝突するため丸括弧。
+//
+// 囲むものが無い行（ペイン名も cwd も空）では括弧も出さない
+fn floating_brackets(entry: &Selectable, title: &str) -> (&'static str, &'static str) {
+    if entry.is_floating && !title.is_empty() {
+        ("(", ")")
+    } else {
+        ("", "")
+    }
 }
 
 // ペイン行・トリアージ行のマーク列1つぶん（決定39）。列を出すフレームでは、

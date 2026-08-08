@@ -108,7 +108,9 @@ struct Selectable {
     tab_position: usize,
     pane_id: u32,
     title: String,
-    // フォーカス時の should_float_if_hidden に使う（決定14）
+    // フォーカス時の should_float_if_hidden に使う（決定14）。
+    // ペイン名を丸括弧で囲むかの判定も兼ねる
+    //（要件: docs/requirements/floating-pane-indicator/）
     is_floating: bool,
 }
 
