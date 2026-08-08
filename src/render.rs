@@ -1474,7 +1474,8 @@ pub(crate) fn reconcile_scroll(
 }
 
 // cwd行1行ぶんの Text（決定22）。ペイン行の続きとして読めるよう字下げして dim で出す。
-// 非選択時は通常ウェイトにも落とす（決定36を拡張）。
+// zellij側の実装制約でdimはboldを打ち消さないため、非選択時も見た目上はbold+dimになる
+// （決定36の対象外。詳細は docs/issues/sidebar-cwd-bold.md）。
 //
 // パスは末尾のディレクトリ名のほうが識別に効くので、収まらないときは
 // 切り詰め（末尾 `…`）ではなく先頭省略で畳む
@@ -1495,10 +1496,12 @@ pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usi
     let end = label.chars().count();
     if !is_selected && end > CWD_INDENT {
         // cwd は主役（ペイン名・カウンタ列）ではないので落として出す。
-        // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる
+        // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる。
+        // unbold_range は併用しない — zellij側の実装
+        // （zellij-server/src/ui/components/text.rs の color_index_character）が
+        // dim/unboldを同じindexに対して if/else if で排他的に処理しており、
+        // unboldを足すとdimが無視されて通常表示に戻ってしまう（実測・ソース確認済み）
         text = text.dim_range(CWD_INDENT..end);
-        // ペイン名と同じく通常ウェイトに落とす（決定36を拡張。選択行はboldのまま残す）
-        text = text.unbold_range(CWD_INDENT..end);
     }
 
     if let Some(hit) = hit {
