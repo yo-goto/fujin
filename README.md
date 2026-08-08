@@ -299,7 +299,15 @@ bind "Alt d" {
 bind "Alt g" {
     MessagePlugin "fujin" { name "fujin_go"; }
 }
+bind "Alt c" {
+    MessagePlugin "fujin" { name "fujin_toggle_cwd"; }
+}
 ```
+
+`fujin_toggle_cwd` doesn't move anything — it flips the cwd rows (`show_cwd`) on
+and off at runtime. That makes the `show_cwd` setting the **startup default**:
+flipping the rows needs neither a `config.kdl` edit nor a restart. Every tab's
+sidebar flips together, and tabs created later inherit the current state.
 
 > [!CAUTION]
 > Don't bind `Alt Enter`. Claude Code's Shift+Enter relies on a terminal-side
@@ -555,6 +563,7 @@ plugins {
         up_key                "Alt u"
         down_key              "Alt d"
         go_key                "Alt g"
+        toggle_cwd_key        "Alt c"
     }
 }
 ```
@@ -566,6 +575,7 @@ plugins {
 | `up_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_up` (footer hint only) |
 | `down_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_down` (footer hint only) |
 | `go_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_go` (footer hint only) |
+| `toggle_cwd_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_toggle_cwd` (footer hint only) |
 
 <!-- settings:end -->
 
@@ -584,8 +594,8 @@ have the hook configured.
 
 ### Footer key hints
 
-`up_key` / `down_key` / `go_key` are display-only: they tell the footer what to
-print, they don't bind anything. Bind the keys as usual (see
+`up_key` / `down_key` / `go_key` / `toggle_cwd_key` are display-only: they tell
+the footer what to print, they don't bind anything. Bind the keys as usual (see
 [Direct keys](#direct-keys-no-mode)) and repeat them here.
 
 Yes, that means writing the same key twice. fujin can't read the binding back:
@@ -644,9 +654,9 @@ zellij pipe --name fujin_status -- '{
 - `cwd` / `detail`: optional
 
 The only pipe names meant for external use are `fujin_status` and the
-keybinding ones, `fujin_up` / `_down` / `_go` / `_mode`. `fujin_sync_state` /
-`_read` / `_selection` / `_command` are an internal protocol for syncing between
-instances — don't call them from outside.
+keybinding ones, `fujin_up` / `_down` / `_go` / `_mode` / `_toggle_cwd`.
+`fujin_sync_state` / `_read` / `_selection` / `_command` are an internal protocol
+for syncing between instances — don't call them from outside.
 
 > [!IMPORTANT]
 > Don't pass the `--plugin` option. Doing so makes zellij launch

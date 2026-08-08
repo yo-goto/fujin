@@ -18,7 +18,9 @@ use std::collections::BTreeSet;
 use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
-use crate::{State, COMMAND_STATE_PIPE, READ_CLEAR_PIPE, SELECTION_PIPE, SYNC_STATE_PIPE};
+use crate::{
+    State, COMMAND_STATE_PIPE, READ_CLEAR_PIPE, SELECTION_PIPE, SYNC_STATE_PIPE, TOGGLE_CWD_PIPE,
+};
 
 impl State {
     // 自分のwasm URLを知る（get_plugin_ids() には入っていない）
@@ -78,6 +80,9 @@ impl State {
         // タブのサイドバーにだけ印が出ないと「どれを選んだか」が食い違う
         let marked = !self.marked.is_empty();
         for id in newcomers {
+            // cwd表示の現在値も配る（docs/issues/toggle-cwd-key.md）。他と違って
+            // 無条件に送る理由は push_show_cwd_to 側のコメントに書いてある
+            self.push_show_cwd_to(id);
             if marked {
                 self.push_marks_to(id);
             }
@@ -96,6 +101,21 @@ impl State {
                 );
             }
         }
+    }
+
+    // 新入りへ cwd表示の現在値を伝える（docs/issues/toggle-cwd-key.md）。
+    //
+    // 新入りは起動時のconfig既定値からしか出発できないので、実行中にトグルされて
+    // いれば新入りだけ食い違う。他の配布物（状態ダンプ・マーク）と違って**中身が
+    // 空かどうかで送るか決められない** — 既定値と同じ値であっても、相手には
+    // 「トグルして既定へ戻した」のか「一度も触っていない」のか区別が付かないので、
+    // 無条件に押し付ける
+    fn push_show_cwd_to(&self, plugin_id: u32) {
+        pipe_message_to_plugin(
+            MessageToPlugin::new(TOGGLE_CWD_PIPE)
+                .with_destination_plugin_id(plugin_id)
+                .with_payload(self.show_cwd.to_string()),
+        );
     }
 
     // 1ペイン1行のTSV。区切りにタブと改行を使うのは、パス（cwd）にも

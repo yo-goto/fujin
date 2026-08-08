@@ -78,12 +78,14 @@
 // 代替: モードなしの直接キー
 // ============================================================
 // モードに入らず1打鍵で動かしたい場合。navモードと併用してもよい。
+// `fujin_toggle_cwd` は移動ではなく、cwd行（`show_cwd`）の表示を実行中に反転する。
 //
 // keybinds {
 //     shared_except "locked" {
 //         bind "Alt Up"    { MessagePlugin "fujin" { name "fujin_up"; }; }
 //         bind "Alt Down"  { MessagePlugin "fujin" { name "fujin_down"; }; }
 //         bind "Alt g"     { MessagePlugin "fujin" { name "fujin_go"; }; }
+//         bind "Alt c"     { MessagePlugin "fujin" { name "fujin_toggle_cwd"; }; }
 //     }
 // }
 //

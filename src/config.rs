@@ -60,7 +60,7 @@ pub(crate) struct Setting {
 
 // 公開する設定の全部。**並び順がそのまま README の表と、フッターの
 // direct-keys ヒントの表示順になる**（決定27・28）
-pub(crate) const SETTINGS: [Setting; 5] = [
+pub(crate) const SETTINGS: [Setting; 6] = [
     Setting {
         key: "show_cwd",
         kind: Kind::Flag { default: false },
@@ -108,6 +108,17 @@ pub(crate) const SETTINGS: [Setting; 5] = [
         example: "Alt g",
         summary_ja: "`fujin_go` に割り当てたキーの表記（フッターのヒント用・表示専用）",
         summary_en: "Spelling of the key bound to `fujin_go` (footer hint only)",
+    },
+    Setting {
+        key: "toggle_cwd_key",
+        kind: Kind::DirectKey {
+            label: "cwd",
+            // `cwd` に対応する矢印記号は無い
+            arrow: None,
+        },
+        example: "Alt c",
+        summary_ja: "`fujin_toggle_cwd` に割り当てたキーの表記（フッターのヒント用・表示専用）",
+        summary_en: "Spelling of the key bound to `fujin_toggle_cwd` (footer hint only)",
     },
 ];
 

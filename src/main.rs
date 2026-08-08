@@ -63,6 +63,17 @@ const NAV_DOWN_PIPE: &str = "fujin_down";
 const NAV_GO_PIPE: &str = "fujin_go";
 // navモードへの入場（zellijのモードキーと同じ使い勝手）
 const NAV_MODE_PIPE: &str = "fujin_mode";
+// cwd表示のトグル（docs/issues/toggle-cwd-key.md）。show_cwd はどのインスタンスで
+// 反転しても同じ結果になるので、NAV_UP_PIPE等と違って可視インスタンスの権威
+//（決定14）が要らない — 全インスタンスが独立に反転する。payload無し＝ユーザーの
+// キー操作（反転）、payload `"true"`/`"false"`＝新入りインスタンスへの現在値push
+//（決定13。そのままセット）。
+//
+// **反転した値を兄弟へbroadcastして補強してはいけない。** 明示セットが「まだ
+// キー操作のpipeを処理していない兄弟」へ先に届くと、その兄弟は押し付けられた値から
+// さらに反転して逆を向く。pipeを取りこぼしたインスタンスを救う効果より、
+// 順序で足並みを崩す危険の方が高い
+const TOGGLE_CWD_PIPE: &str = "fujin_toggle_cwd";
 // インスタンス間の状態同期（決定13）
 const SYNC_STATE_PIPE: &str = "fujin_sync_state";
 // 既読クリアの兄弟インスタンスへの配布（決定13）
@@ -416,6 +427,7 @@ impl ZellijPlugin for State {
                 | NAV_DOWN_PIPE
                 | NAV_GO_PIPE
                 | NAV_MODE_PIPE
+                | TOGGLE_CWD_PIPE
                 | SYNC_STATE_PIPE
                 | READ_CLEAR_PIPE
                 | COMMAND_STATE_PIPE
@@ -464,6 +476,30 @@ impl ZellijPlugin for State {
                     self.focus_selected();
                 }
                 false
+            }
+            TOGGLE_CWD_PIPE => {
+                let requested = match pipe_message.payload.as_deref().map(str::trim) {
+                    // ユーザーのキー操作。全インスタンスが同じ値から出発している
+                    // 前提で、各自が独立に反転すれば権威なしで足並みが揃う。
+                    // 空文字も未設定と同じ扱い（config.rs の正規化に揃える） —
+                    // CLI から `zellij pipe` で叩くと payload が空で届きうる
+                    None | Some("") => !self.show_cwd,
+                    // 新入りインスタンスへの現在値push（決定13）。反転ではなく
+                    // 明示セット — 反転にすると押し付けのたびに向きがずれる
+                    Some("true") => true,
+                    Some("false") => false,
+                    // 真偽値の受け口は広げない（決定40。config.rs と同じ方針）。
+                    // 黙って false へ倒すと「cwd が消えた」結果だけが残る
+                    Some(raw) => {
+                        eprintln!("fujin: unparsable toggle_cwd payload: {}", raw);
+                        return false;
+                    }
+                };
+                if self.show_cwd == requested {
+                    return false;
+                }
+                self.show_cwd = requested;
+                true
             }
             DISMISS_PIPE => {
                 // 召喚された本人は自分で退場し、常駐サイドバーは

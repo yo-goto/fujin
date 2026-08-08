@@ -1609,7 +1609,9 @@ fn plugin_config(settings: &[(&str, &str)]) -> BTreeMap<String, String> {
         .collect()
 }
 
-// READMEが例示している direct-keys の割り当て（Alt Up / Alt Down / Alt g）
+// READMEが例示している direct-keys の移動キー（Alt Up / Alt Down / Alt g）。
+// `toggle_cwd_key` は入れない — 幅の詰め方（矢印への退避・末尾の省略）を見る
+// テストが多く、移動キー3つで既に幅32を超えるため
 fn with_direct_keys(state: &mut State) {
     state.apply_config(&plugin_config(&[
         ("up_key", "alt+up"),
@@ -1802,6 +1804,15 @@ fn the_footer_shows_the_configured_direct_keys() {
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
     assert_eq!(footer, "  f1:up  f2:down  f3:jump");
+}
+
+#[test]
+fn the_footer_shows_the_toggle_cwd_key_hint() {
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[("toggle_cwd_key", "alt+c")]));
+
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert_eq!(footer, "  alt+c:cwd");
 }
 
 #[test]
@@ -3571,6 +3582,15 @@ fn pipe_message(name: &str, payload: &str) -> PipeMessage {
     }
 }
 
+// キーバインドからの `fujin_toggle_cwd` はユーザー操作なので payload を持たない
+//（NAV_UP_PIPE等と同じ）。同期用の明示セットとの分岐を試すのに必要
+fn pipe_message_no_payload(name: &str) -> PipeMessage {
+    PipeMessage {
+        payload: None,
+        ..pipe_message(name, "")
+    }
+}
+
 #[test]
 fn status_pipe_applies_the_payload() {
     let mut state = State::default();
@@ -3629,6 +3649,69 @@ fn sync_pipe_only_fills_an_empty_state() {
     populated.apply_status(status(1, "UserPromptSubmit"));
     assert!(!populated.pipe(pipe_message(SYNC_STATE_PIPE, dump)));
     assert_eq!(populated.agents[&1].state, AgentState::Working);
+}
+
+#[test]
+fn toggle_cwd_pipe_flips_the_local_value_when_unprompted() {
+    // ユーザーのキー操作からはpayloadが付かない（決定6）。全インスタンスが
+    // 同じ値から出発している前提で、権威を立てず各自が独立に反転する
+    // （docs/issues/toggle-cwd-key.md）
+    let mut state = State::default();
+    assert!(!state.show_cwd);
+
+    assert!(state.pipe(pipe_message_no_payload(TOGGLE_CWD_PIPE)));
+    assert!(state.show_cwd);
+
+    assert!(state.pipe(pipe_message_no_payload(TOGGLE_CWD_PIPE)));
+    assert!(!state.show_cwd);
+}
+
+#[test]
+fn toggle_cwd_pipe_applies_an_explicit_sync_value() {
+    // 新入りインスタンスへの現在値push（決定13）は明示セット。反転にすると
+    // 押し付けるたびに向きがずれる
+    let mut state = State::default();
+    assert!(state.pipe(pipe_message(TOGGLE_CWD_PIPE, "true")));
+    assert!(state.show_cwd);
+
+    // 既に同じ値なら再描画不要
+    assert!(!state.pipe(pipe_message(TOGGLE_CWD_PIPE, "true")));
+
+    assert!(state.pipe(pipe_message(TOGGLE_CWD_PIPE, "false")));
+    assert!(!state.show_cwd);
+}
+
+#[test]
+fn toggle_cwd_pipe_treats_an_empty_payload_as_a_key_press() {
+    // CLI から `zellij pipe` で叩くと payload が空文字で届きうる。config.rs の
+    // 正規化と同じく未設定扱いにして、キー操作（反転）として読む
+    let mut state = State::default();
+    for payload in ["", "  ", "\n"] {
+        let before = state.show_cwd;
+        assert!(
+            state.pipe(pipe_message(TOGGLE_CWD_PIPE, payload)),
+            "{payload:?}"
+        );
+        assert_eq!(state.show_cwd, !before, "{payload:?}");
+    }
+}
+
+#[test]
+fn toggle_cwd_pipe_ignores_an_unparsable_payload() {
+    // 真偽値の受け口は広げない（決定40）。黙って false へ倒すと、cwd が消えた
+    // 結果だけが残って原因を追えない
+    let mut state = State {
+        show_cwd: true,
+        ..Default::default()
+    };
+
+    for payload in ["1", "yes", "TRUE", "false ish"] {
+        assert!(
+            !state.pipe(pipe_message(TOGGLE_CWD_PIPE, payload)),
+            "{payload:?}"
+        );
+        assert!(state.show_cwd, "{payload:?}");
+    }
 }
 
 #[test]

@@ -277,7 +277,15 @@ bind "Alt d" {
 bind "Alt g" {
     MessagePlugin "fujin" { name "fujin_go"; }
 }
+bind "Alt c" {
+    MessagePlugin "fujin" { name "fujin_toggle_cwd"; }
+}
 ```
+
+`fujin_toggle_cwd` は移動ではなく表示の切り替えで、cwd行（`show_cwd`）の表示を
+実行中に反転します。`show_cwd` の設定は**起動時の初期値**という意味になり、
+実行中の切り替えに `config.kdl` の書き換えや再起動は要りません。
+全タブのサイドバーが同時に切り替わり、あとから作ったタブにも現在の状態が引き継がれます。
 
 > [!CAUTION]
 > `Alt Enter` にはバインドしないでください。Claude Code の Shift+Enter は端末側の設定
@@ -522,6 +530,7 @@ plugins {
         up_key                "Alt u"
         down_key              "Alt d"
         go_key                "Alt g"
+        toggle_cwd_key        "Alt c"
     }
 }
 ```
@@ -533,6 +542,7 @@ plugins {
 | `up_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_up` に割り当てたキーの表記（フッターのヒント用・表示専用） |
 | `down_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_down` に割り当てたキーの表記（フッターのヒント用・表示専用） |
 | `go_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_go` に割り当てたキーの表記（フッターのヒント用・表示専用） |
+| `toggle_cwd_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_toggle_cwd` に割り当てたキーの表記（フッターのヒント用・表示専用） |
 
 <!-- settings:end -->
 
@@ -549,7 +559,7 @@ cwd はフックのペイロード由来なので、フック設定済みのエ�
 
 ### フッターのキーヒント
 
-`up_key` / `down_key` / `go_key` は**表示専用**です。キーを割り当てるものではないので、
+`up_key` / `down_key` / `go_key` / `toggle_cwd_key` は**表示専用**です。キーを割り当てるものではないので、
 割り当て自体は通常どおり行い（[直接キー](#直接キーモードなし)参照）、同じキーをここにも
 書いてください。
 
@@ -605,8 +615,8 @@ zellij pipe --name fujin_status -- '{
 - `cwd` / `detail`: 任意
 
 外部から使うのは `fujin_status` と、キーバインド用の `fujin_up` /
-`_down` / `_go` / `_mode` だけです。`fujin_sync_state` / `_read` / `_selection` は
-インスタンス間の同期用の内部プロトコルなので、外から叩かないでください。
+`_down` / `_go` / `_mode` / `_toggle_cwd` だけです。`fujin_sync_state` / `_read` /
+`_selection` はインスタンス間の同期用の内部プロトコルなので、外から叩かないでください。
 
 > [!IMPORTANT]
 > `--plugin` オプションは付けないでください。付けると未起動のプラグインを
