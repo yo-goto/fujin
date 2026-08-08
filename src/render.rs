@@ -1478,6 +1478,7 @@ pub(crate) fn reconcile_scroll(
 }
 
 // cwd行1行ぶんの Text（決定22）。ペイン行の続きとして読めるよう字下げして dim で出す。
+// 非選択時は通常ウェイトにも落とす（決定36を拡張）。
 //
 // パスは末尾のディレクトリ名のほうが識別に効くので、収まらないときは
 // 切り詰め（末尾 `…`）ではなく先頭省略で畳む
@@ -1500,6 +1501,8 @@ pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usi
         // cwd は主役（ペイン名・カウンタ列）ではないので落として出す。
         // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる
         text = text.dim_range(CWD_INDENT..end);
+        // ペイン名と同じく通常ウェイトに落とす（決定36を拡張。選択行はboldのまま残す）
+        text = text.unbold_range(CWD_INDENT..end);
     }
 
     if let Some(hit) = hit {
