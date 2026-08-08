@@ -1600,17 +1600,17 @@ const DIM_LEVEL: usize = 4;
 // error_color。状態アイコン `error` と終了操作サブモードの警告色（決定35）
 const ERROR_LEVEL: usize = 6;
 
-// direct-keys のヒント設定（decision28。configuration 経由で受け取る）
-fn direct_key_config(binds: &[(&str, &str)]) -> BTreeMap<String, String> {
-    binds
+// プラグインの configuration（決定40。取り込みは State::apply_config 1本）
+fn plugin_config(settings: &[(&str, &str)]) -> BTreeMap<String, String> {
+    settings
         .iter()
-        .map(|(setting, key)| (setting.to_string(), key.to_string()))
+        .map(|(setting, value)| (setting.to_string(), value.to_string()))
         .collect()
 }
 
 // READMEが例示している direct-keys の割り当て（Alt Up / Alt Down / Alt g）
 fn with_direct_keys(state: &mut State) {
-    state.adopt_direct_key_hints(&direct_key_config(&[
+    state.apply_config(&plugin_config(&[
         ("up_key", "alt+up"),
         ("down_key", "alt+down"),
         ("go_key", "alt+g"),
@@ -1793,7 +1793,7 @@ fn the_footer_shows_the_configured_direct_keys() {
     // 決め打ちのキー表記はユーザーの設定と食い違いうるので、実際に割り当てた
     // キーの表記を configuration から受け取って出す（決定28）
     let mut state = state_with_panes(2);
-    state.adopt_direct_key_hints(&direct_key_config(&[
+    state.apply_config(&plugin_config(&[
         ("up_key", "f1"),
         ("down_key", "f2"),
         ("go_key", "f3"),
@@ -1815,7 +1815,7 @@ fn the_zellij_spelling_of_a_key_is_accepted_as_is() {
         ("PageUp", "  pgup:up"),
         ("Enter", "  enter:up"),
     ] {
-        state.adopt_direct_key_hints(&direct_key_config(&[("up_key", written)]));
+        state.apply_config(&plugin_config(&[("up_key", written)]));
         assert_eq!(state.footer_line(SIDEBAR).content(), shown, "{}", written);
     }
 }
@@ -1825,7 +1825,7 @@ fn an_unreadable_key_setting_is_shown_as_written() {
     // 黙って落とすとヒントが1つ消えるだけになり、設定を間違えたことに
     // 気づけない。読めない値はそのまま出して気づかせる
     let mut state = state_with_panes(2);
-    state.adopt_direct_key_hints(&direct_key_config(&[("up_key", "Meta q")]));
+    state.apply_config(&plugin_config(&[("up_key", "Meta q")]));
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
     assert_eq!(footer, "  Meta q:up");
@@ -1847,7 +1847,7 @@ fn direct_key_hints_are_dropped_whole_rather_than_truncated() {
 #[test]
 fn an_unset_direct_key_drops_only_its_own_hint() {
     let mut state = state_with_panes(2);
-    state.adopt_direct_key_hints(&direct_key_config(&[
+    state.apply_config(&plugin_config(&[
         ("up_key", "alt+up"),
         ("down_key", "alt+down"),
     ]));
@@ -1861,10 +1861,7 @@ fn an_unset_direct_key_drops_only_its_own_hint() {
 #[test]
 fn an_empty_direct_key_setting_is_treated_as_unset() {
     let mut state = state_with_panes(2);
-    state.adopt_direct_key_hints(&direct_key_config(&[
-        ("up_key", "  "),
-        ("down_key", "alt+d"),
-    ]));
+    state.apply_config(&plugin_config(&[("up_key", "  "), ("down_key", "alt+d")]));
 
     assert_eq!(state.footer_line(SIDEBAR).content(), "  alt+d:down");
 }
@@ -1876,7 +1873,7 @@ fn long_direct_keys_fall_back_to_arrows() {
     // `pgup:up  pgdn:down  alt+g:jump` は30セルで28に収まらないが、
     // 矢印にすれば26セルで3項目とも残る
     let mut state = state_with_panes(2);
-    state.adopt_direct_key_hints(&direct_key_config(&[
+    state.apply_config(&plugin_config(&[
         ("up_key", "PageUp"),
         ("down_key", "PageDown"),
         ("go_key", "alt+g"),
@@ -1884,6 +1881,152 @@ fn long_direct_keys_fall_back_to_arrows() {
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
     assert_eq!(footer, "  pgup:↑  pgdn:↓  alt+g:jump");
+}
+
+// --- 設定の取り込みと警告（決定40。要件: configuration） ---
+
+#[test]
+fn the_property_form_of_kdl_is_normalised() {
+    // zellij はプロパティ書式（`show_cwd="true"`）の値を引用符込みで渡す
+    //（子ノード書式は素の文字列）。取り込み口で剥がして同じ意味にする
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[
+        ("show_cwd", "\"true\""),
+        ("up_key", "\"Alt u\""),
+    ]));
+
+    assert!(state.show_cwd, "引用符付きでも真として読む");
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  alt+u:up");
+    assert!(
+        state.config_warnings.is_empty(),
+        "正規化できたので警告は無い"
+    );
+}
+
+#[test]
+fn a_flag_setting_takes_only_true_and_false() {
+    // 真偽値の受け口は広げない（決定40）。`1` や `yes` を真と見なすと、
+    // 「効かない書き方」の一覧がユーザーからは推測できなくなる
+    let mut state = state_with_panes(2);
+    for (value, expected) in [("true", true), ("false", false)] {
+        state.apply_config(&plugin_config(&[("show_cwd", value)]));
+        assert_eq!(state.show_cwd, expected, "{}", value);
+        assert!(state.config_warnings.is_empty(), "{}", value);
+    }
+
+    for value in ["1", "yes", "TRUE"] {
+        state.apply_config(&plugin_config(&[("show_cwd", value)]));
+        assert!(!state.show_cwd, "{}", value);
+        assert_eq!(state.config_warnings, vec!["show_cwd"], "{}", value);
+    }
+}
+
+#[test]
+fn an_unusable_value_warns_in_the_footer() {
+    // 既定値へ黙って倒すと、書いた設定が効かない理由が分からない（決定40）
+    let mut state = state_with_panes(2);
+    with_direct_keys(&mut state);
+    state.apply_config(&plugin_config(&[("show_cwd", "1"), ("up_key", "alt+u")]));
+    state.arm_config_warning();
+
+    let footer = state.footer_line(SIDEBAR);
+    assert_eq!(footer.content(), "  !bad value: show_cwd");
+    assert!(
+        !ink_at(&footer, ERROR_LEVEL).is_empty(),
+        "警告色（error_color）で出す"
+    );
+    // ヘッダーの三角も同じ状態色に揃う（決定27）
+    assert!(!ink_at(&state.header_line(SIDEBAR), ERROR_LEVEL).is_empty());
+}
+
+#[test]
+fn several_unusable_values_fold_into_a_count() {
+    // 幅32のフッターには全部は載らない。末尾を `…` で切らず、残りは件数に畳む
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[
+        ("show_cwd", "1"),
+        ("up_key", "Meta q"),
+        ("down_key", "Meta w"),
+    ]));
+    state.arm_config_warning();
+
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert_eq!(footer, "  !bad values: show_cwd +2");
+    assert!(!footer.contains('…'), "{}", footer);
+}
+
+#[test]
+fn the_config_warning_gives_way_to_an_input_footer() {
+    // 入力欄・確認プロンプト・ヘルプはそこに出ていないと操作が成立しない。
+    // 警告が譲るのはこれらに対してだけで、静的なヒントには譲らない
+    let mut state = searchable_state();
+    state.apply_config(&plugin_config(&[("show_cwd", "1")]));
+    state.arm_config_warning();
+
+    state.nav_mode = true;
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  !bad value: show_cwd",
+        "navモードの静的ヒントよりは警告が優先する"
+    );
+
+    state.handle_nav_key(key(BareKey::Char('/')));
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert!(
+        footer.starts_with("  /"),
+        "検索クエリ入力欄が勝つ: {}",
+        footer
+    );
+}
+
+#[test]
+fn the_config_warning_stops_after_its_deadline() {
+    // 起動直後の一定時間だけ（決定40）。期限が切れたら通常の表示へ戻る
+    let mut state = state_with_panes(2);
+    with_direct_keys(&mut state);
+    state.apply_config(&plugin_config(&[
+        ("show_cwd", "1"),
+        ("up_key", "alt+up"),
+        ("down_key", "alt+down"),
+    ]));
+    state.arm_config_warning();
+    assert!(state.showing_config_warning());
+
+    // 期限までは出したまま
+    assert!(!state.on_timer(CONFIG_WARNING_SECS / 2.0));
+    assert!(state.showing_config_warning());
+
+    // 期限を跨いだ Timer で消え、フッターを描き直させる
+    assert!(state.on_timer(CONFIG_WARNING_SECS), "描き直しを要求する");
+    assert!(!state.showing_config_warning());
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  alt+up:up  alt+down:down"
+    );
+}
+
+#[test]
+fn the_readme_settings_section_is_generated_from_the_table() {
+    // 設定一覧の正本はコード（決定40）。README へ手で転記した表は必ずいつか
+    // ずれるので、生成物との一致をテストで縛る。差分が出たら `make readme`
+    use crate::config::doc::{settings_doc, splice, Lang};
+
+    for (file, lang) in [("README.ja.md", Lang::Ja), ("README.md", Lang::En)] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
+        let current = std::fs::read_to_string(&path).unwrap();
+        let updated = splice(&current, &settings_doc(lang))
+            .unwrap_or_else(|| panic!("{} に settings の目印が無い", file));
+
+        if std::env::var_os("UPDATE_README").is_some() {
+            std::fs::write(&path, updated).unwrap();
+            continue;
+        }
+        assert_eq!(
+            current, updated,
+            "{} の設定節が config.rs とずれている。`make readme` で再生成する",
+            file
+        );
+    }
 }
 
 #[test]
@@ -2128,7 +2271,7 @@ fn has_japanese(text: &str) -> bool {
         .any(|c| ('\u{3040}'..='\u{30ff}').contains(&c) || ('\u{4e00}'..='\u{9fff}').contains(&c))
 }
 
-// fujin が自分で書く行（ヘッダー・フッタ・ヘルプ・通知行）。ペイン名・タブ名・
+// fujin が自分で書く行（ヘッダー・フッター・ヘルプ・通知行）。ペイン名・タブ名・
 // cwd はユーザーのデータなので、日本語が入っていて当然で対象から外す
 fn chrome_lines(state: &State) -> Vec<String> {
     let mut lines = vec![

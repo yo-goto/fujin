@@ -15,7 +15,8 @@ use std::collections::BTreeMap;
 
 use zellij_tile::prelude::*;
 
-use crate::{State, SUMMONED_CONFIG_KEY, SYNC_STATE_PIPE};
+use crate::config::SUMMONED_KEY;
+use crate::{State, SYNC_STATE_PIPE};
 
 // 召喚するフローティングの幅。レイアウトの常駐サイドバー（size=32）に合わせる
 const SIDEBAR_WIDTH: usize = 32;
@@ -81,7 +82,7 @@ impl State {
         eprintln!("fujin: summoning floating instance into tab {focused_tab}");
 
         let mut config = BTreeMap::new();
-        config.insert(SUMMONED_CONFIG_KEY.to_string(), "true".to_string());
+        config.insert(SUMMONED_KEY.to_string(), "true".to_string());
         if self.show_cwd {
             config.insert("show_cwd".to_string(), "true".to_string());
         }

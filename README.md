@@ -539,14 +539,18 @@ it as a command. Nav mode stays active the whole time.
 ## Configuration
 
 **Write settings on the alias definition (the `plugins` block in `config.kdl`).**
+That is the only supported place to put them (see
+[Only the alias route is supported](#only-the-alias-route-is-supported)).
+
+These four settings are all there is.
+
+<!-- settings:begin -->
+<!-- Generated from SETTINGS in repos/main/src/config.rs. Don't edit by hand; run `make readme` -->
 
 ```kdl
 plugins {
     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
-        show_cwd "true"   // show cwd on each pane row (default: false)
-
-        // Keys shown in the sidebar footer while it is unfocused.
-        // Write the same keys you bound to fujin_up / fujin_down / fujin_go.
+        show_cwd "true"
         up_key   "Alt u"
         down_key "Alt d"
         go_key   "Alt g"
@@ -554,8 +558,27 @@ plugins {
 }
 ```
 
+| Key | Value | Default | What it does |
+| --- | --- | --- | --- |
+| `show_cwd` | `"true"` / `"false"` | `false` | Show cwd under each pane row (only for panes with the hook set up) |
+| `up_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_up` (footer hint only) |
+| `down_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_down` (footer hint only) |
+| `go_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_go` (footer hint only) |
+
+<!-- settings:end -->
+
 Since `cwd` comes from the hook payload, it's only shown for agent panes that
 have the hook configured.
+
+### Writing values
+
+- Quote the value (`show_cwd "true"`). The property form (`show_cwd="true"`)
+  is understood as the same thing.
+- The only booleans accepted are `"true"` and `"false"`. `1` and `yes` are not
+  interpreted.
+- When a value can't be interpreted, the sidebar footer shows a warning like
+  `!bad value: show_cwd` **for a few seconds after startup**. That setting
+  keeps its default.
 
 ### Footer key hints
 
@@ -572,7 +595,12 @@ Both spellings work — zellij's own `"Alt u"` and the way fujin prints it,
 `"alt+u"`. The footer normalizes them to `alt+u`. A value fujin can't parse is
 printed as written, so a typo is visible rather than silently dropped.
 
-### Don't put settings only on the layout side
+### Only the alias route is supported
+
+fujin supports exactly one setup: **settings live on the alias definition (the
+`plugins` block in `config.kdl`), and both the layout and the keybindings refer
+to that alias by name**. Pointing a layout straight at the wasm path does work,
+but it is not supported — you're on your own for avoiding the mismatch below.
 
 > [!WARNING]
 > `MessagePlugin` destination matching is done on **the wasm path plus its

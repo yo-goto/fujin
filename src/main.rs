@@ -13,6 +13,7 @@
 //
 // モジュール構成:
 // - agent  — フックイベントの解釈とエージェント状態の遷移
+// - config — configuration の取り込みと設定仕様の正本（決定40）
 // - command — コマンドペインのライフサイクルからのコマンド状態の導出（決定32）
 // - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
@@ -26,6 +27,7 @@
 
 mod agent;
 mod command;
+mod config;
 mod deploy;
 mod mark;
 mod nav;
@@ -41,12 +43,11 @@ mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use std::str::FromStr;
-
 use zellij_tile::prelude::*;
 
 use agent::{AgentInfo, StatusPayload};
 use command::CommandInfo;
+use config::Config;
 use deploy::Deployment;
 use nav::{JumpState, SearchState};
 use termination::TerminationState;
@@ -81,10 +82,6 @@ const MARK_PIPE: &str = "fujin_mark";
 // 貧しい）ため、pipe 経由の逃げ道を用意しておく
 const DISMISS_PIPE: &str = "fujin_dismiss";
 
-// 召喚インスタンスに渡す configuration キー（決定16）。
-// "true" で起動したインスタンスは、準備でき次第 navモードへ入る
-const SUMMONED_CONFIG_KEY: &str = "summoned";
-
 // 滞在猶予（docs/issues/transit-focus-clears-read-state.md）。フォーカスされてから
 // この秒数だけ留まって初めて既読にする。
 //
@@ -99,22 +96,11 @@ const SUMMONED_CONFIG_KEY: &str = "summoned";
 // 実機での調整が残っている暫定値
 const READ_DELAY: f64 = 0.6;
 
-// 非フォーカス時のフッターに出す direct-keys のヒント（決定27・決定28。要件:
-// docs/requirements/sidebar-tree/sidebar-footer.feature）。
-// `(configuration キー, 動作の説明, 幅が足りないときの代替表記)` で、
-// 配列の順がそのまま表示順。
-//
-// キーの実体は configuration から受け取る。zellij 0.44.3 のプラグインAPIは
-// `Action::KeybindPipe` の中身（どの pipe 宛てか）を捨てて渡すため、実際の
-// 割り当てから解決する当初案は実装できなかった（決定28）。
-//
-// 矢印は「東アジア文字幅が曖昧な記号をキー表記に使わない」というUI規則の例外で、
-// 幅28セルに3項目が収まらないときだけ使う（`jump` に対応する矢印は無い）
-pub(crate) const DIRECT_KEY_HINTS: [(&str, &str, Option<&str>); 3] = [
-    ("up_key", "up", Some("↑")),
-    ("down_key", "down", Some("↓")),
-    ("go_key", "jump", None),
-];
+// 設定の警告をフッターへ優先表示する時間（秒）。決定40の「起動直後の一定時間
+// だけ優先表示」。**気づける長さと、邪魔にならない短さの折り合い**で、これを
+// 過ぎるとフッターは通常の表示（direct-keys のヒント等）へ戻る。
+// 警告そのものは stderr にも残るので、見逃しても追える
+const CONFIG_WARNING_SECS: f64 = 8.0;
 
 // サイドバーに並べる選択対象（ターミナルペイン1つぶん）
 #[derive(Debug, Clone)]
@@ -251,23 +237,22 @@ struct State {
     // フッターのヒントに使う（決定27・決定28）。書かれていない項目は持たない
     // ＝ヒントからその項目だけが省かれる
     direct_keys: BTreeMap<String, String>,
+    // 解釈できなかった設定のキー（決定40）。既定値へ黙って倒すと、書いた設定が
+    // 効かない理由がユーザーからは分からない
+    config_warnings: Vec<&'static str>,
+    // 設定の警告をフッターに出しておく期限（`elapsed` 基準）。None は
+    // 「出していない・もう出さない」。壁時計は引けないので期限も経過時間で見る
+    config_warning_until: Option<f64>,
 }
 
 register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
-        self.show_cwd = configuration
-            .get("show_cwd")
-            .map(|v| v == "true")
-            .unwrap_or(false);
-        self.adopt_direct_key_hints(&configuration);
+        self.apply_config(&configuration);
         // 別インスタンスに召喚されたフローティングなら、入場pipeを取り逃している。
         // 押し直させずに済むよう、準備でき次第こちらから navモードへ入る（決定16）
-        self.summoned = configuration
-            .get(SUMMONED_CONFIG_KEY)
-            .map(|v| v == "true")
-            .unwrap_or(false);
+        self.summoned = config::summoned(&configuration);
         self.pending_nav_entry = self.summoned;
         self.own_plugin_id = Some(get_plugin_ids().plugin_id);
         // selectable はペイン側の属性で、リロードしても前回の false が残る。
@@ -334,6 +319,11 @@ impl ZellijPlugin for State {
                     // 承認を待たずに一覧が揃うと入場の機会がここしか無い
                     self.learn_own_plugin_url();
                     self.enter_nav_mode_if_pending();
+                    // 警告の時計はここから回す（決定40）。承認が済むまで
+                    // フッターは描かれない（`draw` が承認待ち表示で止まる）ので、
+                    // load() 時点から数え始めると承認に手間取ったぶんだけ
+                    // 誰にも見られないまま期限が切れる
+                    self.arm_config_warning();
                 }
                 true
             }
@@ -593,11 +583,51 @@ impl State {
         self.elapsed += elapsed;
         let mut render = self.advance_deployment();
         render |= self.apply_pending_reads();
+        render |= self.expire_config_warning();
         // 仕事が残っているあいだだけ鎖を繋ぎ直す。静かなときは回し続けない
-        if self.deployment.is_some() || !self.pending_reads.is_empty() {
+        if self.deployment.is_some()
+            || !self.pending_reads.is_empty()
+            || self.config_warning_until.is_some()
+        {
             self.arm_timer();
         }
         render
+    }
+
+    // 設定の警告の表示期限を切る（決定40）。フッターを通常表示へ戻すために
+    // 1回だけ描き直しが要るので、切れた瞬間を返す
+    fn expire_config_warning(&mut self) -> bool {
+        match self.config_warning_until {
+            Some(until) if self.elapsed >= until => {
+                self.config_warning_until = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // 設定の警告を出し始める。警告が無ければ何もしない（タイマーも張らない）
+    pub(crate) fn arm_config_warning(&mut self) {
+        if self.config_warnings.is_empty() {
+            return;
+        }
+        self.config_warning_until = Some(self.elapsed + CONFIG_WARNING_SECS);
+        self.arm_timer();
+    }
+
+    // いまフッターに設定の警告を出しているか（決定40）。
+    //
+    // **ユーザーがいま操作している文脈は警告より優先する** — 入力欄
+    //（検索クエリ・番号ジャンプ）と確認プロンプト（終了操作）、ヘルプの
+    // 閉じ方は、そこに出ていないと操作が成立しない。警告が譲るのは静的な
+    // ヒント（nav・トリアージの help/exit、direct-keys）に対してだけで、
+    // 譲っているあいだも期限は進む — 見せ場を作るために操作を待たせない
+    pub(crate) fn showing_config_warning(&self) -> bool {
+        self.config_warning_until.is_some()
+            && !self.help_overlay
+            && self.termination.is_none()
+            && self.search.is_none()
+            && self.jump.is_none()
     }
 
     // フォーカス情報をサーバへ1回だけ問い合わせて、
@@ -748,27 +778,29 @@ impl State {
             .unwrap_or(false)
     }
 
-    // フッターに出す direct-keys のヒントを configuration から取り込む
-    //（決定28。要件: sidebar-footer）。
+    // configuration を取り込む（決定40）。**設定の入口はここ1本だけ**にして、
+    // 値の正規化と解釈できない値の扱いを項目ごとにばらけさせない。
+    // 解釈と仕様の正本は config.rs 側にある。
     //
-    // ユーザーは config.kdl で任意の物理キーに `fujin_up` 等を割り当てる方式なので
-    //（決定6）、プラグイン側に決め打ちできる既定キーが無い。当初は
-    // `Event::InitialKeybinds` から実際の割り当てを解決する設計だったが、zellij
-    // 0.44.3 のプラグインAPIは `Action::KeybindPipe` の `name`/`payload` を捨てて
-    // 渡すため（`zellij-utils/src/plugin_api/action.rs`。どのキーが「何らかの
-    // プラグインpipe」に割り当たっているかまでしか分からない）実装できなかった。
-    // 代わりに、割り当てたキーの**表記だけ**を設定として受け取る（決定28）
-    fn adopt_direct_key_hints(&mut self, configuration: &BTreeMap<String, String>) {
-        self.direct_keys.clear();
-        for (setting, _, _) in DIRECT_KEY_HINTS {
-            let Some(raw) = configuration.get(setting).map(|v| v.trim()) else {
-                continue;
-            };
-            if raw.is_empty() {
-                continue;
-            }
-            self.direct_keys
-                .insert(setting.to_string(), normalize_key(raw));
+    // direct-keys のヒント（決定28）は、ユーザーが config.kdl で任意の物理キーに
+    // `fujin_up` 等を割り当てる方式なので（決定6）プラグイン側に決め打ちできる
+    // 既定キーが無い。当初は `Event::InitialKeybinds` から実際の割り当てを解決する
+    // 設計だったが、zellij 0.44.3 のプラグインAPIは `Action::KeybindPipe` の
+    // `name`/`payload` を捨てて渡すため（`zellij-utils/src/plugin_api/action.rs`。
+    // どのキーが「何らかのプラグインpipe」に割り当たっているかまでしか分からない）
+    // 実装できなかった。代わりに、割り当てたキーの**表記だけ**を設定として受け取る
+    pub(crate) fn apply_config(&mut self, configuration: &BTreeMap<String, String>) {
+        let config = Config::parse(configuration);
+        self.show_cwd = config.show_cwd;
+        self.direct_keys = config.direct_keys;
+        self.config_warnings = config.warnings;
+        // フッターは幅32でキー名しか出せない。何が悪かったのかを追える形は
+        // ログ側に残す（開発時の出力先は docs/dev/dev-workflow.md 参照）
+        for key in &self.config_warnings {
+            eprintln!(
+                "fujin: unusable value for `{}` in the plugin configuration",
+                key
+            );
         }
     }
 
@@ -783,52 +815,5 @@ impl State {
             .get(&tab_position)
             .map(|panes| panes.iter().any(|p| p.is_plugin && p.id == own_id))
             .unwrap_or(false)
-    }
-}
-
-// 設定で受け取ったキー表記を画面用に整える（決定28）。
-//
-// 受けるのは zellij のキーバインド表記（`Alt u`）でも fujin の画面表記
-// （`alt+u`）でもよい。ユーザーは config.kdl の `bind "Alt u"` からコピーする
-// ことになるので、そのまま貼れないと使いにくい。
-//
-// 解釈できない値はそのまま出す。黙って落とすとヒントが1つ消えるだけになり、
-// 設定を間違えたことに気づけない
-pub(crate) fn normalize_key(raw: &str) -> String {
-    // zellij のパーサは修飾キーを空白区切りで読む。`+` 区切りも受けたいので均す
-    let spaced = raw.replace('+', " ");
-    match KeyWithModifier::from_str(&spaced) {
-        Ok(key) => format_key(&key),
-        Err(_) => raw.to_string(),
-    }
-}
-
-// キーの画面表記（docs/concept/ui-design.md の「文言」）。すべて小文字で、
-// 修飾キーは `shift+tab` のように `+` でつなぐ。
-//
-// `KeyWithModifier` の Display は使えない — 修飾キーを空白でつなぐうえ、
-// 大文字（`ESC`）や矢印（`↑`）を返す。矢印は東アジア文字幅が曖昧でキー列の
-// 位置揃えを崩すので、fujin ではキー表記に使わない
-fn format_key(key: &KeyWithModifier) -> String {
-    let mut out = String::new();
-    for modifier in &key.key_modifiers {
-        out.push_str(&modifier.to_string().to_lowercase());
-        out.push('+');
-    }
-    out.push_str(&format_bare_key(&key.bare_key));
-    out
-}
-
-fn format_bare_key(key: &BareKey) -> String {
-    match key {
-        // 矢印・空白は Display が記号を返すので、英字表記へ置き換える
-        BareKey::Left => "left".to_string(),
-        BareKey::Right => "right".to_string(),
-        BareKey::Up => "up".to_string(),
-        BareKey::Down => "down".to_string(),
-        BareKey::Char(' ') => "space".to_string(),
-        BareKey::Char(c) => c.to_string(),
-        // 残りは Display の綴りをそのまま小文字化すれば zellij の表記に揃う
-        other => other.to_string().to_lowercase(),
     }
 }

@@ -20,10 +20,11 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
+use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::mark::MARK_GLYPH;
 use crate::search::{Field, Hit};
-use crate::{Selectable, State, DIRECT_KEY_HINTS};
+use crate::{Selectable, State};
 
 // 画面に縦に積む1行ぶんの中身。
 //
@@ -42,7 +43,7 @@ pub(crate) enum Row<'a> {
     Footer,
     // 高さだけを占めて何も描かない行。2箇所で使う:
     //  - ツリーが画面高に届かないときの埋め草（下の枠を最下部へ押し下げる。
-    //    要件: sidebar-footer.feature の「フッタの高さと位置はモードによらず常に同じ」）
+    //    要件: sidebar-footer.feature の「フッターの高さと位置はモードによらず常に同じ」）
     //  - フッターと zellij 本体の status-bar のあいだに空ける最下部の1行
     Blank,
     // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
@@ -759,6 +760,11 @@ impl State {
         // 同じ状態色」に沿わせたもの）
         if self.termination.is_some() {
             Ink::Accent(TERMINATION_LEVEL)
+        } else if self.showing_config_warning() {
+            // 警告も終了操作と同じ error_color を借りる（決定40）。新しい色は
+            // 増やさない。フッターだけ色を変えるとヘッダーの三角と食い違うので、
+            // 三角ごと警告色にする — 出ているあいだは「いまの状態」が警告
+            Ink::Accent(TERMINATION_LEVEL)
         } else if self.triage.is_some() {
             Ink::Accent(TRIAGE_LEVEL)
         } else if self.nav_mode || self.search.is_some() {
@@ -822,6 +828,13 @@ impl State {
         if let Some(jump) = &self.jump {
             return input_footer("n ", &jump.buffer, &indent, ink, inner);
         }
+        // 解釈できなかった設定の警告（決定40）。**入力欄・確認プロンプト・
+        // ヘルプより後、静的なヒントより先**に見る（`showing_config_warning`）。
+        // 起動直後の一定時間だけで、期限が切れれば通常の表示へ戻る
+        if self.showing_config_warning() {
+            let warning = self.config_warning_line(inner.saturating_sub(HEADER_INDENT));
+            return compose(&[(&indent, Ink::Plain), (&warning, ink)], inner);
+        }
         // トリアージモードの Esc の行き先は navモードのツリー表示（退場ではない）
         // なので、ヒントも `exit` ではなく `back`
         if self.triage.is_some() {
@@ -869,11 +882,15 @@ impl State {
         String::new()
     }
 
-    // 割り当てのある項目だけを `キー:動作` の形に組んだもの（表示順）
+    // 割り当てのある項目だけを `キー:動作` の形に組んだもの（表示順）。
+    // 並び順も動作名も設定テーブル（config.rs）から引く（決定40）
     fn direct_key_parts(&self, arrows: bool) -> Vec<String> {
         let mut parts = Vec::new();
-        for (pipe, label, arrow) in DIRECT_KEY_HINTS {
-            let Some(key) = self.direct_keys.get(pipe) else {
+        for setting in &SETTINGS {
+            let Kind::DirectKey { label, arrow } = setting.kind else {
+                continue;
+            };
+            let Some(key) = self.direct_keys.get(setting.key) else {
                 continue;
             };
             let label = match (arrows, arrow) {
@@ -883,6 +900,32 @@ impl State {
             parts.push(format!("{}:{}", key, label));
         }
         parts
+    }
+
+    // 解釈できなかった設定を伝える1行（決定40。要件: configuration）。
+    //
+    // 幅32のフッターに理由まで書く余地は無いので、**どのキーが効いていないか**
+    // だけを出して、直す場所を指させる形に絞る。詳細は README の設定表と
+    // stderr のログ側にある。項目が幅に収まらないときは、direct-keys のヒントと
+    // 同じ考え方で末尾を `…` で切らず、残り件数（`+N`）に畳む
+    fn config_warning_line(&self, budget: usize) -> String {
+        let keys = &self.config_warnings;
+        let head = if keys.len() == 1 {
+            "!bad value: "
+        } else {
+            "!bad values: "
+        };
+        for shown in (1..=keys.len()).rev() {
+            let mut line = format!("{}{}", head, keys[..shown].join(" "));
+            if shown < keys.len() {
+                line.push_str(&format!(" +{}", keys.len() - shown));
+            }
+            if UnicodeWidthStr::width(line.as_str()) <= budget {
+                return line;
+            }
+        }
+        // キー名が1つも置けない幅。せめて「設定を見ろ」だけは残す
+        "!bad config".to_string()
     }
 
     // キー列の幅。いま出ているキー一覧の実測最大で決めるので、モードによって

@@ -10,7 +10,7 @@ HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 # 解決されるので、その配下を既定にしておく（zellij 側にプラグインの置き場所の規約は無い）
 PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
 
-.PHONY: all build release install setup test fmt fmt-check lint check clean changelog
+.PHONY: all build release install setup test fmt fmt-check lint check clean changelog readme
 
 all: check
 
@@ -56,3 +56,8 @@ clean:
 # （git-cliff が必要: brew install git-cliff）。生成後は内容を確認してコミットすること
 changelog:
 	git-cliff -o CHANGELOG.md
+
+# README の設定節を src/config.rs の SETTINGS から再生成する（決定40）。
+# 生成物とのずれは make test 側で落ちるので、落ちたらこれを実行する
+readme:
+	UPDATE_README=1 cargo test --target $(HOST_TARGET) readme_settings_section
