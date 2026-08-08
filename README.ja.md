@@ -225,7 +225,8 @@ zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 
 初回ロード時に権限承認プロンプトが出るので、ペインにフォーカスして `y` で承認してください
 （要求権限: `ReadApplicationState` / `ChangeApplicationState` / `ReadCliPipes` /
-`InterceptInput` / `MessageAndLaunchOtherPlugins` / `OpenTerminalsOrPlugins`）。
+`InterceptInput` / `MessageAndLaunchOtherPlugins` / `OpenTerminalsOrPlugins` /
+`ReadPaneContents`）。
 承認結果は展開後の wasm の**絶対パスごと**に記録されるので、同じ場所へ上書き更新する
 限り再承認は要りませんが、**置き場所を変えると再承認になります**。
 

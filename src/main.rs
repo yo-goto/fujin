@@ -308,6 +308,11 @@ impl ZellijPlugin for State {
             // OpenPluginPaneFloating はこれを要求し（MessageAndLaunchOtherPlugins
             // では足りない）、拒否されると shim 側の unwrap でプラグインごと落ちる
             PermissionType::OpenTerminalsOrPlugins,
+            // プレビューのスナップショット取得のため（決定42）。
+            // GetPaneScrollback はこれを要求する。拒否されるとホストは応答を
+            // stdin へ書かずログを残すだけなので、パニックはせず
+            // 「取れなかった」扱い（preview::UNAVAILABLE）に落ちる
+            PermissionType::ReadPaneContents,
         ]);
         subscribe(&[
             EventType::TabUpdate,

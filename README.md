@@ -243,7 +243,7 @@ zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 On first load you'll see a permission prompt — focus the pane and press `y` to
 approve (required permissions: `ReadApplicationState` / `ChangeApplicationState` /
 `ReadCliPipes` / `InterceptInput` / `MessageAndLaunchOtherPlugins` /
-`OpenTerminalsOrPlugins`). Approval is recorded **per absolute path** of the
+`OpenTerminalsOrPlugins` / `ReadPaneContents`). Approval is recorded **per absolute path** of the
 expanded wasm, so overwriting it in place needs no re-approval, but **moving it
 somewhere else does**.
 
