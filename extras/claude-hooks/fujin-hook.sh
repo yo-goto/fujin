@@ -16,10 +16,14 @@
 # 値が empty になると、そのキーどころか**オブジェクト全体が消える**。
 # `.message` を持たないイベント（Notification 以外すべて）で payload が空になり、
 # 状態がまったく届かなくなる。null を入れておいて後段で落とす。
+# `source` は SessionStart にだけ付く（startup / resume / clear / compact / fork）。
+# fujin は配置演出のトリガー判定に使う — clear・compact は稼働中のエージェントの
+# 仕切り直しなので、新規エージェント検出から除外する必要がある
 payload=$(jq -c '{
   pane_id: (env.ZELLIJ_PANE_ID | tonumber),
   agent: "claude",
   event: .hook_event_name,
+  source: .source,
   cwd: .cwd,
   detail: .message
 } | with_entries(select(.value != null))' 2>/dev/null) || exit 0

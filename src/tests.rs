@@ -89,8 +89,17 @@ fn status(pane_id: u32, event: &str) -> StatusPayload {
         pane_id,
         event: event.to_string(),
         agent: "claude".to_string(),
+        source: None,
         cwd: None,
         detail: None,
+    }
+}
+
+// `SessionStart` に起動理由を添えたもの（配置演出のトリガー判定用）
+fn session_start(pane_id: u32, source: &str) -> StatusPayload {
+    StatusPayload {
+        source: Some(source.to_string()),
+        ..status(pane_id, "SessionStart")
     }
 }
 
@@ -220,6 +229,26 @@ fn parse_status_defaults_missing_agent() {
     assert_eq!(payload.agent, "unknown");
     assert_eq!(payload.cwd, None);
     assert_eq!(payload.detail, None);
+}
+
+#[test]
+fn parse_status_reads_the_session_start_source() {
+    // フックスクリプト（extras/claude-hooks/fujin-hook.sh）の jq が実際に吐く形。
+    // `source` は SessionStart にだけ入り、他のイベントでは with_entries で落ちる
+    let raw = r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"startup","cwd":"/tmp/x"}"#;
+    let payload = StatusPayload::parse(raw).expect("parses");
+    assert_eq!(payload.source.as_deref(), Some("startup"));
+    assert!(deploy::detect_new_agent(payload.source.as_deref()));
+
+    let raw =
+        r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"clear","cwd":"/tmp/x"}"#;
+    let payload = StatusPayload::parse(raw).expect("parses");
+    assert_eq!(payload.source.as_deref(), Some("clear"));
+    assert!(!deploy::detect_new_agent(payload.source.as_deref()));
+
+    // `source` を持たないイベントは None のまま
+    let raw = r#"{"pane_id":7,"agent":"claude","event":"Stop","cwd":"/tmp/x"}"#;
+    assert_eq!(StatusPayload::parse(raw).expect("parses").source, None);
 }
 
 #[test]
@@ -5197,14 +5226,22 @@ fn triage_state() -> State {
 // シーケンス番号も本番と同じ経路で振らせる）
 fn set_agent_state(state: &mut State, pane_id: u32, target: AgentState) {
     match target {
-        AgentState::Idle => state.apply_status(status(pane_id, "SessionStart")),
-        AgentState::Working => state.apply_status(status(pane_id, "UserPromptSubmit")),
-        AgentState::Blocked => state.apply_status(status(pane_id, "Notification")),
+        AgentState::Idle => {
+            state.apply_status(status(pane_id, "SessionStart"));
+        }
+        AgentState::Working => {
+            state.apply_status(status(pane_id, "UserPromptSubmit"));
+        }
+        AgentState::Blocked => {
+            state.apply_status(status(pane_id, "Notification"));
+        }
         AgentState::Done => {
             state.apply_status(status(pane_id, "UserPromptSubmit"));
             state.apply_status(status(pane_id, "Stop"));
         }
-        AgentState::Error => state.apply_status(status(pane_id, "StopFailure")),
+        AgentState::Error => {
+            state.apply_status(status(pane_id, "StopFailure"));
+        }
     }
 }
 
@@ -6123,8 +6160,9 @@ fn the_read_clear_pipe_ignores_the_grace() {
 const LAUNCH: usize = 8;
 const DEEPEST: usize = CONTENT - 1;
 
-// ペイン一覧を差し替えて1回ぶん観測させる。`Event::PaneUpdate` の扱いと同じ
-// 順序（一覧の組み直し → 新規エージェント検出）を踏む
+// ペイン一覧を差し替えて1回ぶん観測させる。`Event::PaneUpdate` の扱いと同じ順序。
+// **配置演出のトリガーはもう一覧を見ない**（フック通知だけで判定する）ので、ここでは
+// ヘッダー描画に要る状態を作るだけ
 fn observe_panes(state: &mut State, ids: &[u32]) {
     let panes: Vec<PaneInfo> = ids
         .iter()
@@ -6132,7 +6170,17 @@ fn observe_panes(state: &mut State, ids: &[u32]) {
         .collect();
     state.panes = Some(manifest(vec![(0, panes)]));
     state.rebuild_selectable();
-    state.detect_new_agents();
+}
+
+// 新規エージェント検出から配置演出の発火までを通す。
+//
+// 本番では検出（`apply_status` の戻り値）と発火（`begin_deployment`）の間に
+// 可視インスタンス判定（`State::is_visible_instance`）が挟まるが、これはホスト関数
+// `get_focused_pane_info()` を呼ぶのでテストから通せない
+//（docs/dev/build-and-test.md「テストで検証できない範囲」）。ここでは判定を通った
+// 後の発火だけを見る
+fn deploy_agents(state: &mut State, troops: usize) {
+    state.begin_deployment(troops);
 }
 
 // まだ何も観測していない、既定幅で描画済みのサイドバー
@@ -6167,10 +6215,11 @@ fn play_out(state: &mut State) -> usize {
 }
 
 #[test]
-fn the_first_observation_only_seeds_the_baseline() {
-    // 起動直後は一覧まるごとが「増えたペイン」に見える。ここで発火させると
-    // セッションを開くたびに演出が出てしまう
+fn new_panes_alone_do_not_start_a_deployment() {
+    // 判定材料はフック通知だけで、ペインが増えたかどうかは見ない。旧実装（増えた
+    // ターミナルペインで判定）では `vim` やビルドコマンドでも演出が出ていた
     let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
     observe_panes(&mut state, &[1, 2, 3]);
 
     assert!(state.deployment.is_none());
@@ -6178,10 +6227,101 @@ fn the_first_observation_only_seeds_the_baseline() {
 }
 
 #[test]
-fn a_new_agent_starts_the_deployment_animation() {
+fn a_session_start_is_a_new_agent_detection() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+
+    assert!(
+        state.apply_status(status(2, "SessionStart")),
+        "SessionStart は新規エージェント検出になる"
+    );
+}
+
+#[test]
+fn an_agent_started_in_an_existing_pane_is_detected() {
+    // 空のシェルペインを先に開いておき、後から `claude` を打つ使い方（要件:
+    // 前から開いてあるペインで後からエージェントを起動しても配置演出が始まる）。
+    // ペインの側は何も変わらないまま通知だけが届く
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    // 一覧を何度観測しても増減が無い状態を作ってから通知を受ける
+    observe_panes(&mut state, &[1, 2]);
+
+    assert!(state.apply_status(status(2, "SessionStart")));
+}
+
+#[test]
+fn a_restarted_conversation_is_not_a_new_agent() {
+    // `/clear` とコンパクトは稼働中のエージェントの仕切り直しで、着任ではない
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1]);
+
+    for source in ["clear", "compact"] {
+        assert!(
+            !state.apply_status(session_start(1, source)),
+            "source={} は新規エージェント検出にしない",
+            source
+        );
+    }
+}
+
+#[test]
+fn a_fresh_session_is_a_new_agent() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+
+    for source in ["startup", "resume", "fork"] {
+        assert!(
+            state.apply_status(session_start(1, source)),
+            "source={} は新規エージェント検出になる",
+            source
+        );
+    }
+}
+
+#[test]
+fn a_session_start_without_a_source_still_counts() {
+    // `source` を送らない旧フックスクリプトのままでも演出は出る。判定を
+    // ホワイトリストではなく除外方式にしてあるのはこのため
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+
+    assert!(state.apply_status(status(1, "SessionStart")));
+}
+
+#[test]
+fn other_hook_events_are_never_new_agent_detections() {
+    // **リロード直後の誤検出を防いでいるのがこの性質。** プラグインをリロードすると
+    // `agents` マップは空になる（docs/issues/redeploy-resets-agent-state.md）が、
+    // 稼働中のエージェントから次に届くのは SessionStart 以外のイベントなので、
+    // 既存エージェントが新規と誤検出されることはない
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1]);
+
+    for event in [
+        "UserPromptSubmit",
+        "Stop",
+        "StopFailure",
+        "Notification",
+        "SubagentStart",
+        "SubagentStop",
+        "TaskCreated",
+        "TaskCompleted",
+        "SessionEnd",
+    ] {
+        assert!(
+            !state.apply_status(status(1, event)),
+            "{} は新規エージェント検出にしない",
+            event
+        );
+    }
+}
+
+#[test]
+fn a_new_agent_starts_the_deployment_animation() {
+    let mut state = sidebar_state();
     observe_panes(&mut state, &[1, 2]);
+    deploy_agents(&mut state, 1);
 
     assert_eq!(state.deployment.map(|d| d.troops), Some(1));
     // 兵はブランド行の `fujin` の右側から現れる
@@ -6199,8 +6339,7 @@ fn every_detected_agent_gets_a_troop() {
     for detected in [1usize, 3, 6] {
         let mut state = sidebar_state();
         observe_panes(&mut state, &[1]);
-        let ids: Vec<u32> = (1..=detected as u32 + 1).collect();
-        observe_panes(&mut state, &ids);
+        deploy_agents(&mut state, detected);
 
         assert_eq!(
             state.deployment.map(|d| d.troops),
@@ -6216,38 +6355,30 @@ fn show_deploy_animation_can_switch_the_animation_off() {
     // 演出は情報を運ばないので、切っても見える情報は変わらない（決定40）
     let mut state = sidebar_state();
     state.apply_config(&plugin_config(&[("show_deploy_animation", "false")]));
-    observe_panes(&mut state, &[1]);
     observe_panes(&mut state, &[1, 2]);
 
+    // 新規エージェントの検出そのものは、切っている間も動く
+    //（要件: But 新規エージェントの検出そのものは行われる）
+    assert!(state.apply_status(status(2, "SessionStart")));
+    deploy_agents(&mut state, 1);
     assert!(state.deployment.is_none(), "配置演出は再生されない");
     assert_eq!(state.header_line(SIDEBAR).content(), "▲ fujin");
 
-    // 検出そのものは動いている。切っている間の増加ぶんが基準に入っているので、
-    // 戻したあとの検出は「新しく増えた1体」だけになる
+    // 戻せば次の検出から再生される
     state.apply_config(&plugin_config(&[("show_deploy_animation", "true")]));
-    observe_panes(&mut state, &[1, 2, 3]);
+    deploy_agents(&mut state, 1);
     assert_eq!(state.deployment.map(|d| d.troops), Some(1));
 }
 
 #[test]
-fn ending_panes_never_start_a_deployment() {
-    // 減ったぶんは検出ではない
-    let mut state = sidebar_state();
-    observe_panes(&mut state, &[1, 2, 3]);
-    observe_panes(&mut state, &[1]);
-
-    assert!(state.deployment.is_none());
-}
-
-#[test]
 fn detections_in_the_same_window_join_one_deployment() {
-    // 新規タブ作成のように一括で増えるときは、検出が複数回に割れて届く。
+    // 新規タブ作成のように一括で着任するときは、検出が複数回に割れて届く。
     // 検出のたびに発火させると演出が重なって騒がしくなる
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1]);
-    observe_panes(&mut state, &[1, 2]);
+    deploy_agents(&mut state, 1);
     state.advance_deployment();
-    observe_panes(&mut state, &[1, 2, 3, 4]);
+    deploy_agents(&mut state, 2);
 
     let deployment = state.deployment.expect("演出は続いている");
     assert_eq!(deployment.troops, 3, "検出した数の合計ぶんの兵が出る");
@@ -6258,7 +6389,7 @@ fn detections_in_the_same_window_join_one_deployment() {
 fn the_troops_line_up_with_the_first_launched_deepest() {
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1]);
-    observe_panes(&mut state, &[1, 2, 3, 4]);
+    deploy_agents(&mut state, 3);
 
     // 先に発進した兵ほど奥へ着く。着地列は右端から2セル間隔
     let mut landed = Vec::new();
@@ -6283,7 +6414,7 @@ fn the_troops_stay_clear_of_the_brand() {
     // 出さない（着地列は発進位置より左には作らない）
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1]);
-    observe_panes(&mut state, &(1..=40).collect::<Vec<u32>>());
+    deploy_agents(&mut state, 39);
 
     // 出せるだけ出た瞬間（＝いちばん多く並んだフレーム）を見る
     let mut columns = Vec::new();
@@ -6304,7 +6435,7 @@ fn the_header_returns_to_normal_when_the_deployment_ends() {
     // 着地点は完全に元へ戻る。稼働数のような情報は残さない
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1]);
-    observe_panes(&mut state, &[1, 2, 3]);
+    deploy_agents(&mut state, 2);
     assert!(state.header_line(SIDEBAR).content().contains(TROOP));
 
     let frames = play_out(&mut state);
@@ -6318,20 +6449,11 @@ fn the_header_returns_to_normal_when_the_deployment_ends() {
     assert!(!state.advance_deployment());
 }
 
-#[test]
-fn a_detection_missed_while_hidden_is_not_replayed() {
-    // 非可視の間は PaneUpdate が届かず、前面に出た直後にまとめて届く。
-    // これを検出として扱うと、見逃したぶんが遡って再生されてしまう
-    let mut state = sidebar_state();
-    observe_panes(&mut state, &[1]);
-    state.forget_known_panes();
-    observe_panes(&mut state, &[1, 2, 3]);
-
-    assert!(state.deployment.is_none());
-    // 基準は取り直せているので、次の検出からは再生される
-    observe_panes(&mut state, &[1, 2, 3, 4]);
-    assert_eq!(state.deployment.map(|d| d.troops), Some(1));
-}
+// 「サイドバーが表示されていない間の検出では演出は再生されない」「見逃した検出は
+// 後から遡って演出されない」の2要件は、可視インスタンス判定（`is_visible_instance`）
+// が担っている。ホスト関数 `get_focused_pane_info()` を呼ぶためユニットテストからは
+// 通せない（docs/dev/build-and-test.md「テストで検証できない範囲」）ので、実機での
+// 手動確認に頼る。
 
 #[test]
 fn the_deployment_leaves_the_mode_label_readable() {
@@ -6340,7 +6462,7 @@ fn the_deployment_leaves_the_mode_label_readable() {
     let mut state = sidebar_state();
     state.nav_mode = true;
     observe_panes(&mut state, &[1]);
-    observe_panes(&mut state, &[1, 2]);
+    deploy_agents(&mut state, 1);
 
     let header = state.header_line(SIDEBAR).content().to_string();
     assert!(header.starts_with("▲ fujin  [nav] "), "{}", header);
@@ -6353,8 +6475,8 @@ fn the_deployment_leaves_the_mode_label_readable() {
 #[test]
 fn render_survives_the_deployment() {
     let mut state = sidebar_state();
-    observe_panes(&mut state, &[1]);
     observe_panes(&mut state, &[1, 2, 3]);
+    deploy_agents(&mut state, 2);
     state.render(40, SIDEBAR);
     state.render(40, 12);
     state.render(3, 2);

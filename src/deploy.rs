@@ -9,12 +9,10 @@
 // 駆動は `set_timeout()` + `Event::Timer`。再生中だけタイマーを繋ぎ直し、
 // 終わったら鎖を切る（静かなときにタイマーを回し続けない）。
 //
-// **再生できるのは可視インスタンスだけ**。トリガーにする `Event::PaneUpdate` が
-// 可視インスタンスにしか届かないため（docs/dev/api-reference.md）で、見ていない
-// 間の検出は遡って再生しない。「見ている間だけのご褒美演出」として要件側で
-// 許容した制約なので、実装で解消しようとしないこと。
-
-use std::collections::BTreeSet;
+// **再生できるのは可視インスタンスだけ**。トリガーであるフック通知（pipe）は
+// 全インスタンスへ配送されるので、`State::is_visible_instance()`（決定14の権威判定）で
+// 絞る。見ていない間の検出は遡って再生しない — 「見ている間だけのご褒美演出」として
+// 要件側で許容した制約なので、実装で解消しようとしないこと。
 
 use crate::State;
 
@@ -113,41 +111,31 @@ fn flight_frames(index: usize, launch: usize, width: usize) -> Option<usize> {
     Some((landing - launch).div_ceil(SPEED))
 }
 
+// 新規エージェント検出（要件: header-animation）。フック通知の `SessionStart` が
+// **エージェントの着任**を意味するかを、`source` から判定する。
+//
+// 判定材料をフック通知に一本化してあるのが要点（2026-08-09 に差し替え。
+// docs/issues/deploy-animation-trigger-scope.md）。増えたターミナルペインで判定して
+// いた旧実装は、そのペインで何が動くかを一切見ていなかったため、`vim` やビルド
+// コマンドでも演出が出るうえ、前から開いてあるペインで後からエージェントを起動しても
+// 出なかった。`SessionStart` はエージェント側のイベントでしか飛ばないので、
+// **ペインの新旧を問わず着任だけを拾える**。
+//
+// `clear`（`/clear`）と `compact`（コンパクト）は、すでに走っているエージェントの
+// 途中で飛ぶので着任ではない。**除外方式**にしてあるのは意図的で、ホワイトリストに
+// すると `source` を送らない旧フックスクリプトのままの環境で演出が出なくなる。
+pub(crate) fn detect_new_agent(source: Option<&str>) -> bool {
+    !matches!(source, Some("clear") | Some("compact"))
+}
+
 impl State {
-    // 新規エージェント検出（要件: header-animation）。
-    //
-    // 新しく現れたターミナルペインを「新規にデプロイされたエージェント」とみなす。
-    // フックからの状態通知（`fujin_status`）は待たない — 通知は全インスタンスへ
-    // 配送されるので可視インスタンス限定という前提が崩れるうえ、フック未設定の
-    // ペインでは永久に届かない。
-    //
-    // 呼ぶのはペイン一覧を取り込んだ直後（`rebuild_selectable()` の後）だけ。
-    // `self.visible` は見ない — プラグインをリロードすると `Event::Visible` は
-    // 再送されず（main.rs の refresh_focus 参照）、旗を信じると演出が二度と
-    // 出なくなる。`PaneUpdate` が届いたこと自体を可視の証拠として使う
-    pub(crate) fn detect_new_agents(&mut self) {
-        let current: BTreeSet<u32> = self.selectable.iter().map(|e| e.pane_id).collect();
-        let detected = match &self.known_panes {
-            Some(known) => current.difference(known).count(),
-            // 基準をまだ持っていない。見ていない間の増減を遡って演出しないため、
-            // ここでは基準を作るだけで発火させない
-            None => 0,
-        };
-        self.known_panes = Some(current);
-        if detected > 0 {
-            self.begin_deployment(detected);
-        }
-    }
-
-    // 見ていない間の検出を遡らせないために基準を捨てる。次の観測は基準を
-    // 作り直すだけになる（要件: 見逃した検出は後から遡って演出されない）
-    pub(crate) fn forget_known_panes(&mut self) {
-        self.known_panes = None;
-    }
-
-    fn begin_deployment(&mut self, troops: usize) {
-        // 無効化されていても検出（`detect_new_agents` の基準更新）はそのまま
-        // 動かす。ここで再生だけを落とす（要件: show_deploy_animation）
+    // 配置演出を始める。呼ぶのは**可視インスタンス判定を通した後**だけ
+    //（`main.rs` の状態通知ハンドラ）— ここで判定しないのは、可視性の問い合わせが
+    // ホスト関数でテストから呼べず、発火のロジックまで巻き添えにテスト不能に
+    // なるため（docs/dev/build-and-test.md）
+    pub(crate) fn begin_deployment(&mut self, troops: usize) {
+        // 無効化されていても新規エージェント検出そのものは動かす。ここで再生だけを
+        // 落とす（要件: show_deploy_animation）
         if !self.show_deploy_animation.0 {
             return;
         }

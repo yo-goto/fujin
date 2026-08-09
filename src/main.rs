@@ -251,10 +251,6 @@ struct State {
     // 再生中の配置演出（要件: docs/requirements/header-animation/）。
     // 再生中だけ Some で、終われば None に戻ってヘッダーも通常表示へ戻る
     deployment: Option<Deployment>,
-    // 直近に観測したターミナルペインID。次の観測との差分が新規エージェント検出に
-    // なる。None は基準をまだ持っていない状態で、次の観測は基準を作るだけ
-    //（起動直後と、見ていない間の検出を遡って演出しないため）
-    known_panes: Option<BTreeSet<u32>>,
     // 届いた `Event::Timer` の経過時間を積んだ値。プラグインからは壁時計を引けない
     // ので、滞在猶予の期限判定はこれを時刻の代わりに使う（単調増加しかしない）
     elapsed: f64,
@@ -383,10 +379,6 @@ impl ZellijPlugin for State {
                     // 信用せず、実フォーカスから選択を引き直す（要件: focus-sync）
                     self.pending_focus_resync = true;
                     self.refresh_focus();
-                    // 見ていない間に増えたペインは、前面に出た直後の PaneUpdate で
-                    // まとめて届く。これを検出として扱うと見逃したぶんが遡って
-                    // 再生されてしまうので、基準を取り直させる（要件: header-animation）
-                    self.forget_known_panes();
                 }
                 visible
             }
@@ -406,9 +398,6 @@ impl ZellijPlugin for State {
                 self.apply_read_model(&manifest);
                 self.panes = Some(manifest);
                 self.rebuild_selectable();
-                // 増えたペイン＝新規にデプロイされたエージェント。ヘッダーの
-                // 配置演出を発火させる（要件: header-animation）
-                self.detect_new_agents();
                 self.prune_stale_agents();
                 // 自分のURLは PaneManifest で初めて分かる。新しい兄弟
                 // インスタンスを見つけたら状態を配る（決定13）
@@ -488,7 +477,13 @@ impl ZellijPlugin for State {
             STATUS_PIPE => {
                 if let Some(raw) = pipe_message.payload.as_deref() {
                     if let Some(payload) = StatusPayload::parse(raw) {
-                        self.apply_status(payload);
+                        // 新規エージェント検出なら配置演出を出す（要件: header-animation）。
+                        // 通知は全インスタンスへ配送されるので、可視インスタンスだけに
+                        // 絞る（決定14の権威判定）。サーバへの問い合わせが走るのは着任の
+                        // ときだけで、1エージェントにつき1回しか来ない
+                        if self.apply_status(payload) && self.is_visible_instance() {
+                            self.begin_deployment(1);
+                        }
                         return true;
                     }
                     eprintln!("fujin: unparsable status payload: {}", raw);
@@ -746,6 +741,24 @@ impl State {
             && self.termination.is_none()
             && self.search.is_none()
             && self.jump.is_none()
+    }
+
+    // 自分が可視インスタンスか（決定14の権威判定のうち、**副作用のない部分だけ**）。
+    //
+    // pipe で届く通知は全インスタンスへ配送されるので、これで絞らないと非可視の
+    // サイドバーまで反応する（要件: header-animation の「演出は可視インスタンスでしか
+    // 再生できない」）。`refresh_focus()` を流用しないのは、あちらが選択の追従・
+    // navモード退場という副作用を持つため — 状態通知が届いただけでユーザーの探索位置を
+    // 動かすわけにはいかない。
+    //
+    // `self.visible` を第一手にしないのは refresh_focus と同じ理由で、プラグインを
+    // リロードすると `Event::Visible` が再送されず、旗を信じると配置演出が二度と
+    // 出なくなる。問い合わせに失敗したときだけ旗に落ちる
+    pub(crate) fn is_visible_instance(&self) -> bool {
+        let Ok((focused_tab, _)) = get_focused_pane_info() else {
+            return self.visible;
+        };
+        self.owns_tab(focused_tab)
     }
 
     // フォーカス情報をサーバへ1回だけ問い合わせて、
