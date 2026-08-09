@@ -10,7 +10,7 @@ HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 # 解決されるので、その配下を既定にしておく（zellij 側にプラグインの置き場所の規約は無い）
 PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
 
-.PHONY: all build release install setup test fmt fmt-check lint check clean changelog readme
+.PHONY: all build release install setup try test fmt fmt-check lint check clean changelog readme
 
 all: check
 
@@ -32,6 +32,12 @@ install: release
 # 追加の引数は SETUP_ARGS で渡す（例: make setup SETUP_ARGS="--no-hooks --dry-run"）
 setup: install
 	./extras/setup.sh --plugin-dir $(PLUGIN_DIR) $(SETUP_ARGS)
+
+# 別 worktree のビルドを、常駐セッションに一切触らずに専用セッションで試す。
+# 専用の config dir を作り、その worktree の target を直接読ませる
+# （例: make try WORKTREE=second、追加の引数は TRY_ARGS）
+try:
+	./extras/try-worktree.sh $(WORKTREE) $(TRY_ARGS)
 
 test:
 	cargo test --target $(HOST_TARGET)
