@@ -1,0 +1,45 @@
+# gitleaks の設定。CI（`.github/workflows/ci.yml` の secrets job）でも、
+# 手元で `gitleaks git .` を叩いたときでも、リポジトリ直下のこれが自動で使われる。
+#
+# 方針: 誤検知の除外（allowlist）は先回りして書かず、実際に誤検知が出てから足す。
+# ここに置くのは、既定ルールに無い自前の検出ルールだけ。
+# 過去のコミットに既に入っていた分は `.gitleaksignore` 側で既知にしてある。
+
+title = "fujin"
+
+# 8.30 未満だと [extend] や allowlist の解釈が違い、ルールが意図どおり効かない。
+# 古い gitleaks では黙って素通りするより、はっきり止まったほうがよい。
+minVersion = "8.30.0"
+
+# 既定ルール（AWSキー・GitHubトークン等）を土台にして、その上に足す。
+# これを書かないと既定ルールが丸ごと無効になる。
+[extend]
+useDefault = true
+
+# ビルド成果物。gitignore 対象なので `gitleaks git` には出てこないが、
+# 手元で `gitleaks dir` を叩いたときにツールチェインの絶対パスを大量に拾うため外す。
+[allowlist]
+description = "ビルド成果物"
+paths = ['''(^|/)target/''']
+
+[[rules]]
+id = "local-home-path"
+description = "開発機のホームディレクトリ配下の絶対パス（macOS）"
+# 秘密情報ではないが、公開リポジトリのソースにOSのユーザー名が載るのを避ける。
+# 検出したいユーザー名そのものをここに書いては本末転倒なので、
+# 個人名ではなく「ホームディレクトリ直下の絶対パス」を対象にしている。
+#
+# ユーザー名の1階層で止めているのは意図的。gitleaks の既定 global allowlist に
+# `^/Users/(?i)[a-z0-9]+/[\w .-/]+$` があり、ユーザー名より深いパスまで拾う形に
+# 広げると、検出結果がまるごとそれに飲まれて除外されてしまう（実測で確認）。
+#
+# Linux の `/home/<user>/` は対象にできない。既定 global allowlist の
+# `^/(?:bin|etc|home|opt|tmp|usr|var)/[\w ./-]+$` に必ず飲まれるため、
+# ここに書いても検出されない（実測で確認）。開発機が macOS なので実害はないが、
+# Linux 側のパスはこのルールでは守れないことを承知しておく。
+regex = '''/Users/[A-Za-z0-9._-]+/'''
+tags = ["privacy"]
+
+[rules.allowlist]
+description = "実在しないプレースホルダ（テストデータ・ドキュメントの例示用）は許す"
+regexes = ['''/Users/example/''']

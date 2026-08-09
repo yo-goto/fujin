@@ -4753,9 +4753,10 @@ fn truncate_start_drops_the_head_within_budget() {
 fn truncate_start_rounds_to_a_slash_boundary() {
     // ディレクトリ名の途中で切らず、`…` の直後が必ず `/` になるように
     // 収まる範囲でいちばん手前の区切りへ丸める（中途半端な文字列を避ける調整）
-    let (folded, dropped) = truncate_start("/Users/example/development/oss/zellij-plugins/fujin", 24);
+    let (folded, dropped) =
+        truncate_start("/Users/example/development/oss/zellij-plugins/fujin", 24);
     assert_eq!(folded, "…/zellij-plugins/fujin");
-    assert_eq!(dropped, 28);
+    assert_eq!(dropped, 30);
 }
 
 #[test]

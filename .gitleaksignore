@@ -1,0 +1,23 @@
+# gitleaks が既知として無視する finding の指紋（commit:file:rule:line）。
+#
+# ここに並んでいるのは、`local-home-path` ルール（.gitleaks.toml）を後から足した
+# 時点で既にコミット履歴に入っていた分。開発機のホームディレクトリ絶対パスが
+# テストデータ・コメント・サンプル設定に含まれていたもので、秘密情報ではない。
+# 現行ファイル側は 2026-08-09 に /Users/example/ へ置き換え済み、
+# extras/keybinds.kdl の分は既に現行ファイルから消えている。
+#
+# コミット履歴は書き換えない方針（docs/issues/v1-release-checklist.md）なので、
+# 過去分はこうして既知にしておき、**新しく混入した分だけ CI で落とす**。
+# 新規の混入をここに足して黙らせないこと。直すのが先。
+
+31af654ad258882d2095e4be17d1998512b3c102:extras/keybinds.kdl:local-home-path:8
+f251948b7128a5aee6be6d9725c74909d9d0e293:extras/keybinds.kdl:local-home-path:10
+f251948b7128a5aee6be6d9725c74909d9d0e293:extras/keybinds.kdl:local-home-path:15
+f251948b7128a5aee6be6d9725c74909d9d0e293:extras/keybinds.kdl:local-home-path:20
+35206943c40902f740a63d79c342cdbaab109697:src/render.rs:local-home-path:594
+60cbfe7a9ec7f58278f1e0a241768c338358ef7b:src/tests.rs:local-home-path:1681
+35206943c40902f740a63d79c342cdbaab109697:src/tests.rs:local-home-path:1715
+35206943c40902f740a63d79c342cdbaab109697:src/tests.rs:local-home-path:1716
+35206943c40902f740a63d79c342cdbaab109697:src/tests.rs:local-home-path:1818
+6d41f90333f2f92ef469b99e0e394dba7015056f:src/tests.rs:local-home-path:4180
+5de9f41f3e75a09a4d5770a8d3b556df82af6b01:src/tests.rs:local-home-path:4727
