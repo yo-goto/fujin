@@ -41,6 +41,8 @@ do_grant=1
 fresh=0
 clean=0
 nested=0
+open_window=0
+terminal=auto
 dry_run=0
 
 usage() {
@@ -64,6 +66,8 @@ resident fujin session are never touched.
       --no-build      skip `cargo build --release`
       --no-grant      do not pre-register the permissions (approve by hand instead)
       --fresh         kill an existing session of the same name first
+      --open          open the session in a new terminal window and return
+      --terminal CMD  terminal emulator for --open (default: autodetect)
       --nested        allow starting from inside a zellij session (nested)
       --clean         kill the session, delete the config dir, and exit
 
@@ -83,6 +87,8 @@ while [ $# -gt 0 ]; do
     --no-build) do_build=0; shift ;;
     --no-grant) do_grant=0; shift ;;
     --fresh) fresh=1; shift ;;
+    --open) open_window=1; shift ;;
+    --terminal) terminal=$2; open_window=1; shift 2 ;;
     --nested) nested=1; shift ;;
     --clean) clean=1; shift ;;
     -n|--dry-run) dry_run=1; shift ;;
@@ -310,6 +316,20 @@ grant_permissions() {
 
 # ---------------------------------------------------------------- run
 
+# --open 用。指定が無ければ手元にあるものを探す
+resolve_terminal() {
+  local t
+  if [ "$terminal" != auto ]; then
+    command -v "$terminal" >/dev/null 2>&1 || return 1
+    printf '%s' "$terminal"
+    return 0
+  fi
+  for t in ${FUJIN_TERMINAL:-} ${TERMINAL:-} alacritty wezterm kitty ghostty; do
+    if command -v "$t" >/dev/null 2>&1; then printf '%s' "$t"; return 0; fi
+  done
+  return 1
+}
+
 start_session() {
   step "Session  $session"
 
@@ -335,7 +355,33 @@ start_session() {
   fi
 
   if [ "$dry_run" -eq 1 ]; then
-    info "would run: ZELLIJ_CONFIG_DIR=$config_dir ${cmd[*]}"
+    if [ "$open_window" -eq 1 ]; then
+      info "would open a new $(resolve_terminal || printf '<terminal>') window running: ${cmd[*]}"
+    else
+      info "would run: ZELLIJ_CONFIG_DIR=$config_dir ${cmd[*]}"
+    fi
+    return 0
+  fi
+
+  local -a env_prefix
+  env_prefix=(env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID
+    ZELLIJ_CONFIG_DIR="$config_dir")
+
+  # 別ウィンドウで開く。zellij の中からでも使えるので、ネストの回避策にもなる
+  if [ "$open_window" -eq 1 ]; then
+    local term
+    term=$(resolve_terminal) || die "no terminal emulator found (pass --terminal CMD)"
+    # 「このコマンドを実行しろ」の渡し方はターミナルごとに違う。
+    # wezterm だけサブコマンド形式で、残りは -e で揃う
+    local -a exec_args
+    case "$(basename "$term")" in
+      wezterm) exec_args=(start --) ;;
+      *) exec_args=(-e) ;;
+    esac
+    nohup "$term" "${exec_args[@]}" "${env_prefix[@]}" "${cmd[@]}" >/dev/null 2>&1 &
+    disown
+    ok "opened a new $term window running \"$session\""
+    info "close it with: $0 --clean ${worktree_arg:-$name}"
     return 0
   fi
 
@@ -345,12 +391,11 @@ start_session() {
   if [ -n "${ZELLIJ:-}" ] && [ "$nested" -eq 0 ]; then
     todo "you are inside a zellij session -- run this in another terminal window:"
     printf '\n        ZELLIJ_CONFIG_DIR=%s %s\n\n' "$config_dir" "${cmd[*]}"
-    info "or re-run with --nested to start it here anyway"
+    info "or re-run with --open (new window) or --nested (here anyway)"
     return 0
   fi
 
-  exec env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
-    ZELLIJ_CONFIG_DIR="$config_dir" "${cmd[@]}"
+  exec "${env_prefix[@]}" "${cmd[@]}"
 }
 
 [ "$do_build" -eq 1 ] && build
