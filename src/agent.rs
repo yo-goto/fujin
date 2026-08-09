@@ -151,6 +151,10 @@ pub(crate) struct StatusPayload {
     pub(crate) pane_id: u32,
     pub(crate) event: String,
     pub(crate) agent: String,
+    // `SessionStart` にだけ付く起動理由（`startup` / `resume` / `clear` /
+    // `compact` / `fork`）。配置演出のトリガー判定に使う（`deploy::detect_new_agent`）。
+    // 古いフックスクリプトは送ってこないので None を許す
+    pub(crate) source: Option<String>,
     pub(crate) cwd: Option<String>,
     pub(crate) detail: Option<String>,
 }
@@ -175,6 +179,7 @@ impl StatusPayload {
             pane_id: get_str("pane_id")?.parse().ok()?,
             event: get_str("event")?,
             agent: get_str("agent").unwrap_or_else(|| "unknown".to_string()),
+            source: get_str("source"),
             cwd: get_str("cwd"),
             detail: get_str("detail"),
         })
@@ -182,11 +187,20 @@ impl StatusPayload {
 }
 
 impl State {
-    // フックからの状態通知を適用
-    pub(crate) fn apply_status(&mut self, payload: StatusPayload) {
+    // フックからの状態通知を適用。**新規エージェント検出になったら true**
+    //（要件: header-animation）。
+    //
+    // 配置演出を出すかどうかまではここで決めない — 通知は全インスタンスへ配送されるので
+    // 可視インスタンス判定を通す必要があるが、その問い合わせはホスト関数でテストから
+    // 呼べない（docs/dev/build-and-test.md）。判定は呼び出し元（`main.rs` の
+    // 状態通知ハンドラ）に置き、ここは通知の解釈だけに徹する
+    pub(crate) fn apply_status(&mut self, payload: StatusPayload) -> bool {
         if let Some(cwd) = &payload.cwd {
             self.pane_cwds.insert(payload.pane_id, cwd.clone());
         }
+        // 新規エージェント検出（`deploy::detect_new_agent`）。`entry` の可変借用が
+        // 生きている間は self のメソッドを呼べないので、判定だけ先に済ませておく
+        let mut detected = false;
         // シーケンス番号を振るのは**エージェント状態が実際に変わったとき**だけ。
         // カウンタだけが動くイベント（TaskCreated 等）で番号を進めると、
         // トリアージ一覧の同一階層内が「直近の状態変化順」でなくなる
@@ -199,6 +213,7 @@ impl State {
                 entry.subagents = 0;
                 entry.open_tasks = 0;
                 entry.turn_ended = false;
+                detected = crate::deploy::detect_new_agent(payload.source.as_deref());
             }
             "UserPromptSubmit" => {
                 entry.state = AgentState::Working;
@@ -254,6 +269,7 @@ impl State {
         if self.agents.get(&payload.pane_id).map(|a| a.state) != before {
             self.bump_state_seq(payload.pane_id);
         }
+        detected
     }
 
     // 状態が変わったペインに新しいシーケンス番号を振る。
