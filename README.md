@@ -123,7 +123,8 @@ pane and press `y` to approve the permission prompt.
 | `--dry-run` | Show what would be written, write nothing |
 | `--no-hooks` | Skip the Claude Code hook registration |
 | `--layout-only` / `--hooks-only` / `--config-only` | Run just that part |
-| `--width N` | Sidebar width (default 32) |
+| `--width N` | Sidebar width (default 32). A percentage such as `20%` is written as-is and implies `--resizable` |
+| `--resizable` | Write the width as a percentage instead of a fixed column count, so zellij's own resize can move the border during a session |
 | `--force` | Overwrite an existing layout file without asking |
 
 **Updating is the same command.** Re-running is safe — hook registration is
@@ -247,8 +248,44 @@ approve (required permissions: `ReadApplicationState` / `ChangeApplicationState`
 expanded wasm, so overwriting it in place needs no re-approval, but **moving it
 somewhere else does**.
 
-The sidebar's width can be resized with zellij's standard resize keys
-(`Ctrl+n`, etc.) just like any other pane.
+Whether the sidebar's width can be changed during a session depends on how the
+layout spells it. The default `pane size=32` is a fixed column count, which
+zellij's resize does not touch — the border will not move. Pass `--resizable` at
+setup time to write the width as a percentage instead, and zellij's standard
+resize works on it. The reliable route is the resize mode — `Ctrl+n`, then `h`
+(sidebar shrinks) / `H` (grows), `Esc` to leave. `Alt+-` (grows) works too, but
+**`Alt+=` / `Alt++` need `Shift` and some terminals don't deliver them** (`+` is
+`Shift`+`=` on a US layout; on a JIS layout `=` is `Shift`+`-`, so both are
+affected). If you resize often, bind it to characters that need no `Shift`:
+
+```kdl
+// in the keybinds block of ~/.config/zellij/config.kdl
+bind "Alt ," { Resize "Decrease"; }   // sidebar grows
+bind "Alt ." { Resize "Increase"; }   // sidebar shrinks
+```
+
+Setup itself:
+
+```sh
+make setup SETUP_ARGS="--resizable --layout-only"
+```
+
+`--resizable` converts `--width` (columns) using the terminal width at the time
+it runs. **Run inside a zellij pane, it measures that pane rather than the whole
+terminal**, so passing the percentage directly is more predictable (no
+`--resizable` needed then):
+
+```sh
+make setup SETUP_ARGS="--width 20% --layout-only"
+```
+
+A rewritten layout only takes effect in **new sessions** — running ones keep the
+layout they started with.
+
+The trade-off is that the width then scales with the terminal, so the sidebar
+gets narrower on a narrow terminal (the footer hints and such are laid out for
+32 columns). To keep it fixed but pick a different value, pass `--width N` as a
+plain column count.
 
 ### 4. Global keybindings (jump feature)
 
@@ -369,6 +406,13 @@ has `default_layout "fujin"` and that the layout defines `new_tab_template`
 
 To see what actually got loaded, run `zellij action dump-layout` inside the
 session.
+
+If the pane's space is reserved but its contents are **completely blank**, the
+permission approval is likely stuck: with even one requested permission left
+unapproved, neither the prompt nor fujin's own drawing appears. This also
+happens when you approved an earlier version and the set of requested
+permissions has grown since. Remove that wasm's entry from `permissions.kdl` in
+zellij's cache directory, then start a fresh session and approve again.
 
 ### Updated the wasm but the old behaviour persists
 
