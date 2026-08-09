@@ -232,6 +232,26 @@ fn parse_status_defaults_missing_agent() {
 }
 
 #[test]
+fn parse_status_reads_the_session_start_source() {
+    // フックスクリプト（extras/claude-hooks/fujin-hook.sh）の jq が実際に吐く形。
+    // `source` は SessionStart にだけ入り、他のイベントでは with_entries で落ちる
+    let raw = r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"startup","cwd":"/tmp/x"}"#;
+    let payload = StatusPayload::parse(raw).expect("parses");
+    assert_eq!(payload.source.as_deref(), Some("startup"));
+    assert!(deploy::detect_new_agent(payload.source.as_deref()));
+
+    let raw =
+        r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"clear","cwd":"/tmp/x"}"#;
+    let payload = StatusPayload::parse(raw).expect("parses");
+    assert_eq!(payload.source.as_deref(), Some("clear"));
+    assert!(!deploy::detect_new_agent(payload.source.as_deref()));
+
+    // `source` を持たないイベントは None のまま
+    let raw = r#"{"pane_id":7,"agent":"claude","event":"Stop","cwd":"/tmp/x"}"#;
+    assert_eq!(StatusPayload::parse(raw).expect("parses").source, None);
+}
+
+#[test]
 fn parse_status_rejects_incomplete_payloads() {
     // pane_id / event はどちらも必須
     assert!(StatusPayload::parse(r#"{"event":"Stop"}"#).is_none());
