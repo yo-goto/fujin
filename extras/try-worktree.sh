@@ -35,6 +35,7 @@ config_dir=
 base_config=${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}
 layout_name=fujin
 sidebar_width=32
+resizable=0
 minimal=0
 do_build=1
 do_grant=1
@@ -62,6 +63,7 @@ resident fujin session are never touched.
                       (default: $ZELLIJ_CONFIG_DIR or ~/.config/zellij)
       --minimal       do not copy the base config; write a minimal config.kdl
       --width N       sidebar width in columns (default: 32)
+      --resizable     write the width as a percentage so zellij's resize works
 
       --no-build      skip `cargo build --release`
       --no-grant      do not pre-register the permissions (approve by hand instead)
@@ -83,6 +85,7 @@ while [ $# -gt 0 ]; do
     --base-config) base_config=$2; shift 2 ;;
     --minimal) minimal=1; shift ;;
     --width) sidebar_width=$2; shift 2 ;;
+    --resizable) resizable=1; shift ;;
     --layout-name) layout_name=$2; shift 2 ;;
     --no-build) do_build=0; shift ;;
     --no-grant) do_grant=0; shift ;;
@@ -261,11 +264,14 @@ install_config() {
 
   # レイアウトは setup.sh に作らせる。`children` と `pane` の取り違えや
   # new_tab_template の書き漏らしを、生成物の側で防いでいるものをそのまま使う
-  "$script_dir/setup.sh" --layout-only --force \
-    --config-dir "$config_dir" \
-    --plugin-dir "$(dirname "$wasm_path")" \
-    --layout-name "$layout_name" \
-    --width "$sidebar_width" >/dev/null
+  local -a layout_args
+  layout_args=(--layout-only --force
+    --config-dir "$config_dir"
+    --plugin-dir "$(dirname "$wasm_path")"
+    --layout-name "$layout_name"
+    --width "$sidebar_width")
+  [ "$resizable" -eq 1 ] && layout_args+=(--resizable)
+  "$script_dir/setup.sh" "${layout_args[@]}" >/dev/null
   ok "wrote $layout_file"
 }
 
@@ -276,6 +282,26 @@ install_config() {
 # 初回の承認プロンプト（7種を手で承認する手間）を踏まずに済む。
 # zellij は起動時にこのファイルを読み、実際に要求された権限だけを書き戻すので、
 # 余分に書いても消えるだけで害はない（2026-08-09 実測）。
+# この worktree のビルドに対して既に承認されている権限を1行1つで返す。
+# エントリの書式は `"<path>" {` ... `}`（zellij が書き戻す形）
+entry_permissions() {
+  [ -f "$1" ] || return 0
+  awk -v head="\"$wasm_path\" {" '
+    index($0, head) == 1 { inside = 1; next }
+    inside && /^}/ { inside = 0; next }
+    inside { gsub(/[[:space:]]/, ""); if ($0 != "") print }
+  ' "$1" | sort -u
+}
+
+# 同じ worktree のエントリだけを取り除いたファイル内容を返す
+strip_entry() {
+  awk -v head="\"$wasm_path\" {" '
+    index($0, head) == 1 { skip = 1; next }
+    skip && /^}/ { skip = 0; next }
+    !skip
+  ' "$1"
+}
+
 grant_permissions() {
   step "Permissions"
 
@@ -284,11 +310,6 @@ grant_permissions() {
   [ -n "$cache_dir" ] || { warn "could not determine the cache dir; skipping"; return 0; }
   perms="$cache_dir/permissions.kdl"
 
-  if [ -f "$perms" ] && grep -qF "\"$wasm_path\"" "$perms"; then
-    ok "already granted for this worktree's build"
-    return 0
-  fi
-
   # 要求する権限は wasm 側の正本（src/main.rs）から拾う。手で並べると
   # 権限が増えたとき（決定42 の ReadPaneContents など）に取り残される
   local types
@@ -296,8 +317,22 @@ grant_permissions() {
     | sed 's/PermissionType:://' | sort -u)
   [ -n "$types" ] || { warn "could not read the permission list from src/main.rs; skipping"; return 0; }
 
+  # 判定はパスの有無ではなく**中身**で行う。エントリだけ先にあって権限が
+  # 足りない状態（前回の実行のあと fujin が新しい権限を要求するようになった場合）
+  # を見落とすと、未承認が1つ残るだけでサイドバーは承認プロンプトすら出さずに
+  # 空白のまま描画される（docs/issues/sidebar-blank-in-fresh-session.md）
+  local granted missing
+  granted=$(entry_permissions "$perms")
+  missing=$(comm -23 <(printf '%s\n' "$types") <(printf '%s\n' "$granted"))
+
+  if [ -z "$missing" ]; then
+    ok "already granted for this worktree's build"
+    return 0
+  fi
+
   if [ "$dry_run" -eq 1 ]; then
-    info "would append to $perms:"
+    [ -n "$granted" ] && info "the entry exists but is missing: $(printf '%s ' $missing)"
+    info "would write to $perms:"
     printf '    | "%s" {\n' "$wasm_path"
     printf '    |     %s\n' $types
     printf '    | }\n'
@@ -305,6 +340,13 @@ grant_permissions() {
   fi
 
   mkdir -p "$cache_dir"
+  # 権限が増えていた場合は追記でなく置き換える。同じパスのエントリを
+  # 2つ持たせると、どちらが効くかが zellij のパース順まかせになる
+  if [ -n "$granted" ]; then
+    cp "$perms" "$perms.bak"
+    strip_entry "$perms" >"$perms.new" && mv "$perms.new" "$perms"
+    info "replaced the existing entry (backup: $perms.bak)"
+  fi
   {
     printf '"%s" {\n' "$wasm_path"
     printf '    %s\n' $types
