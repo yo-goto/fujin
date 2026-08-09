@@ -232,8 +232,8 @@ zellij action new-pane --floating --width 40 --height 20 -p "fujin"
 限り再承認は要りませんが、**置き場所を変えると再承認になります**。
 
 サイドバーの幅をセッション中に変えられるかどうかは、レイアウトでの書き方で決まります。
-既定の `pane size=32`（桁数固定）は zellij 標準の resize の対象外で、境界は動きません。
-セットアップ時に `--resizable` を付けると幅を割合で書くので、zellij 標準の resize で
+既定の `pane size=32`（**桁数指定**）は zellij 標準の resize の対象外で、境界は動きません。
+セットアップ時に `--resizable` を付けると幅を**割合指定**で書くので、zellij 標準の resize で
 そのまま伸縮できます。**`Ctrl+n` で resize モードに入り `h`（サイドバーが縮む）/
 `H`（広がる）、`Esc` で抜ける**のが確実です。`Alt+-`（広がる）も使えますが、
 **`Alt+=` / `Alt++` は `Shift` が必要な文字なので端末によっては届きません**
