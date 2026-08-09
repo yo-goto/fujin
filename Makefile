@@ -59,7 +59,8 @@ clean:
 	cargo clean
 
 # Conventional Commits に沿ったコミットから CHANGELOG.md を再生成する
-# （git-cliff が必要: brew install git-cliff）。生成後は内容を確認してコミットすること
+# （git-cliff が必要。flake.nix の devShell に入っていれば揃っている。
+# 素の環境なら brew install git-cliff）。生成後は内容を確認してコミットすること
 changelog:
 	git-cliff -o CHANGELOG.md
 
