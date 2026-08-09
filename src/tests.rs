@@ -19,10 +19,12 @@ use crate::command::{CommandState, PaneStatus};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::render::{
-    cwd_row, divider_line, fold_highlight_indices, overflow_row, pad_to_width, reconcile_scroll,
-    shift_highlight_indices, truncate, truncate_start, CounterColumn, HeadCells, Row,
+    cwd_row, divider_line, overflow_row, reconcile_scroll, CounterColumn, HeadCells, Row,
 };
 use crate::termination::Termination;
+use crate::width::{
+    fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate, truncate_start,
+};
 use std::collections::HashMap;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
@@ -3343,7 +3345,9 @@ fn a_park_counts_as_lost_only_after_it_was_confirmed() {
     assert!(!state.park_taken_over(true));
 
     // 一度自分にフォーカスが来たのを観測した後は、離れたら持って行かれた扱い
-    state.park_confirmed = true;
+    if let Some(parked) = state.focus_parked.as_mut() {
+        parked.confirmed = true;
+    }
     assert!(state.park_taken_over(false));
     assert!(!state.park_taken_over(true));
 

@@ -1,14 +1,14 @@
 // fujin — zellij用サイドバープラグイン
 //
 // タブ > ペインの縦並び表示、エージェント状態の可視化、グローバルキーでのジャンプ。
-// 設計決定は docs/concept/design-decisions.md を参照。
+// 設計決定は docs/concept/design-decisions.md、モジュール構成の詳細は
+// docs/dev/architecture.md を参照。
 //
-// アーキテクチャ上の前提（すべて実測で確認済み。docs/dev/api-reference.md 参照）:
+// アーキテクチャ上の前提（実測確認済み。docs/dev/api-reference.md）:
 // - タブ数ぶんのインスタンスが同時稼働する（zellijの構造上回避不能）
 // - pipe は全インスタンスに配送される
-// - **PaneUpdate / TabUpdate は可視インスタンスにしか届かない。**
-//   バックグラウンドのインスタンスはタブ・ペイン一覧が古いままになり、
-//   「自分のタブがアクティブ」と思い込む
+// - **PaneUpdate / TabUpdate は可視インスタンスにしか届かない**ため、
+//   バックグラウンドのインスタンスの一覧は古いまま凍る
 // - Event::Visible は全インスタンスに届き、true になるのは常に1つだけ
 //
 // モジュール構成:
@@ -23,6 +23,7 @@
 // - termination — 終了操作サブモード（対象ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
 // - render — サイドバーの描画
+// - width  — 表示セル幅の計算・切り詰めの純粋関数
 // - sync   — インスタンス間の状態同期（決定13）
 // - summon — フローティングでの臨時召喚（決定16）
 
@@ -39,6 +40,7 @@ mod summon;
 mod sync;
 mod termination;
 mod triage;
+mod width;
 
 #[cfg(test)]
 mod tests;
@@ -47,7 +49,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use zellij_tile::prelude::*;
 
-use agent::{AgentInfo, StatusPayload};
+use agent::AgentInfo;
 use command::CommandInfo;
 use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
@@ -60,64 +62,43 @@ use triage::TriageState;
 
 // フックからの状態通知
 const STATUS_PIPE: &str = "fujin_status";
-// キーバインドからのナビゲーション
+// キーバインドからのナビゲーション（直接キー方式・決定6）
 const NAV_UP_PIPE: &str = "fujin_up";
 const NAV_DOWN_PIPE: &str = "fujin_down";
 const NAV_GO_PIPE: &str = "fujin_go";
-// navモードへの入場（zellijのモードキーと同じ使い勝手）
+// navモードへの入場（決定12）
 const NAV_MODE_PIPE: &str = "fujin_mode";
-// cwd表示のトグル（docs/issues/toggle-cwd-key.md）。show_cwd はどのインスタンスで
-// 反転しても同じ結果になるので、NAV_UP_PIPE等と違って可視インスタンスの権威
-//（決定14）が要らない — 全インスタンスが独立に反転する。payload無し＝ユーザーの
-// キー操作（反転）、payload `"true"`/`"false"`＝新入りインスタンスへの現在値push
-//（決定13。そのままセット）。
-//
-// **反転した値を兄弟へbroadcastして補強してはいけない。** 明示セットが「まだ
-// キー操作のpipeを処理していない兄弟」へ先に届くと、その兄弟は押し付けられた値から
-// さらに反転して逆を向く。pipeを取りこぼしたインスタンスを救う効果より、
-// 順序で足並みを崩す危険の方が高い
+// cwd表示のトグル（docs/issues/toggle-cwd-key.md）。全インスタンスが独立に
+// 反転するので権威判定（決定14）は要らない。**反転した値を兄弟へbroadcastして
+// 補強してはいけない** — 未処理の兄弟へ先に届くと、そこからさらに反転して逆を向く
 const TOGGLE_CWD_PIPE: &str = "fujin_toggle_cwd";
 // インスタンス間の状態同期（決定13）
 const SYNC_STATE_PIPE: &str = "fujin_sync_state";
 // 既読クリアの兄弟インスタンスへの配布（決定13）
 const READ_CLEAR_PIPE: &str = "fujin_read";
-// コマンド状態の兄弟インスタンスへの配布（決定32）。導出できるのは PaneUpdate が
-// 届く可視インスタンスだけなので、エージェント状態と違って自前では揃わない
+// コマンド状態の配布（決定32）。導出できるのは PaneUpdate が届く可視インスタンス
+// だけなので、エージェント状態と違って自前では揃わない
 const COMMAND_STATE_PIPE: &str = "fujin_command";
-// 選択ペインIDの兄弟インスタンスへの配布（決定13）
+// 選択ペインIDの配布（決定13）
 const SELECTION_PIPE: &str = "fujin_selection";
-// マーク（決定39）の兄弟インスタンスへの配布。選択と違い集合をまるごと運ぶ —
-// 差分で運ぶと、取りこぼした1通ぶんだけ集合が食い違ったまま直らない
+// マーク（決定39）の配布。集合をまるごと運ぶ — 差分で運ぶと、取りこぼした
+// 1通ぶんだけ集合が食い違ったまま直らない
 const MARK_PIPE: &str = "fujin_mark";
-// プレビュー用フローティングペインへのスナップショットの送りつけ（決定42）。
-// プラグインは自分のペインの外を描けないので、権威インスタンスが撮った内容を
-// 描き手のインスタンスへ渡す。1行目が対象ペイン名、2行目以降が内容
+// プレビューのスナップショット送付（決定42）。1行目が対象ペイン名、2行目以降が内容
 const PREVIEW_PIPE: &str = "fujin_preview";
-// 取り残された召喚インスタンスの強制掃除（決定16）。navモードへ入れないまま
-// 取り残された召喚インスタンスはキーを横取りしておらず Esc が届かない。fujin は
-// unselectable でフォーカスできないので、ユーザーの普段のペイン操作でも消せない
-//（CLI の `close-pane --pane-id` なら消せるが、IDを調べさせる手順は逃げ道として
-// 貧しい）ため、pipe 経由の逃げ道を用意しておく
+// 取り残された召喚インスタンスの強制掃除（決定16）。取り残された召喚はキーを
+// 横取りしておらず Esc が届かず、unselectable なので普段のペイン操作でも消せない。
+// pipe 経由の逃げ道を用意しておく
 const DISMISS_PIPE: &str = "fujin_dismiss";
 
-// 滞在猶予（docs/issues/transit-focus-clears-read-state.md）。フォーカスされてから
-// この秒数だけ留まって初めて既読にする。
-//
-// zellijネイティブのペイン移動（`Alt+矢印` 等）はキー1打ごとに実フォーカスを
-// 確定させるので、目的地までに経由したペインにも本物のフォーカスが一瞬当たる。
-// 猶予が無いと、通過しただけのペインの注意を引く状態が消える。**通過と到着は
-// フォーカスの有無だけでは原理的に区別できない**ので、滞在時間で分ける。
-//
-// 決定4が退けた「時間ベースのヒューリスティック」とは別物として扱う。あちらは
-// 状態そのものを時間から推測する話で、こちらは状態を消す操作を遅らせるだけ。
-// 猶予が短すぎても長すぎても失うのは既読のタイミングだけで、状態は捏造されない。
+// 滞在猶予（決定37。docs/issues/transit-focus-clears-read-state.md）。フォーカス
+// されてからこの秒数だけ留まって初めて既読にする。**通過と到着はフォーカスの
+// 有無だけでは原理的に区別できない**ので、滞在時間で分ける。
 // 実機での調整が残っている暫定値
 const READ_DELAY: f64 = 0.6;
 
 // 設定の警告をフッターへ優先表示する時間（秒）。決定40の「起動直後の一定時間
-// だけ優先表示」。**気づける長さと、邪魔にならない短さの折り合い**で、これを
-// 過ぎるとフッターは通常の表示（direct-keys のヒント等）へ戻る。
-// 警告そのものは stderr にも残るので、見逃しても追える
+// だけ優先表示」。過ぎればフッターは通常の表示へ戻る。警告は stderr にも残る
 const CONFIG_WARNING_SECS: f64 = 8.0;
 
 // サイドバーに並べる選択対象（ターミナルペイン1つぶん）
@@ -138,6 +119,10 @@ pub(crate) struct ParkedFocus {
     pane_id: u32,
     // 戻すときの should_float_if_hidden に使う（`focus_selected` と同じ理由）
     is_floating: bool,
+    // 預かったフォーカスが実際に自分へ来たのを一度でも観測したか。
+    // フォーカス移動は非同期なので、待たずに判定すると入場直後に退場してしまう
+    //（`park_taken_over`）
+    confirmed: bool,
 }
 
 #[derive(Default)]
@@ -147,17 +132,13 @@ struct State {
     // key: ターミナルペインID
     agents: BTreeMap<u32, AgentInfo>,
     // コマンドペインの状態（決定32）。key は同じくターミナルペインID。
-    // エージェント状態とは別の入れ物に持つ — 同じペインに両方が付いたときは
-    // エージェント状態を優先する（`State::pane_status`）ため、混ぜられない
+    // エージェント状態が優先される（`State::pane_status`）ため別の入れ物に持つ
     commands: BTreeMap<u32, CommandInfo>,
     // フラット化した選択対象
     selectable: Vec<Selectable>,
     selected: usize,
-    // マーク（決定39。要件: docs/requirements/pane-termination-multi-select/）。
-    // 一括操作の対象として選んだペインIDの集合で、タブをまたいでよい。
-    // 単一のナビゲーションカーソルである `selected` とは別概念なので、
-    // インデックスではなくペインIDで持つ（決定13と同じ理由）。
-    // navモードを退場しても保持し、兄弟インスタンスへも配る
+    // マーク（決定39）: 一括操作の対象として選んだペインIDの集合。タブを
+    // またいでよく、navモードを退場しても保持し、兄弟インスタンスへも配る
     marked: BTreeSet<u32>,
     visible: bool,
     own_plugin_id: Option<u32>,
@@ -165,41 +146,26 @@ struct State {
     own_plugin_url: Option<String>,
     permissions_granted: bool,
     show_cwd: bool,
-    // 配置演出を出すか（設定 `show_deploy_animation`、既定は出す）。
-    // 既定値を型に持たせてある理由は config.rs 側のコメント参照
+    // 配置演出を出すか。既定値を型に持たせてある理由は config.rs 参照
     show_deploy_animation: ShowDeployAnimation,
     // ペインID -> cwd（フックのペイロード由来）
     pane_cwds: BTreeMap<u32, String>,
     // navモード中か。全キーを横取りしているインスタンスだけが true になる
     nav_mode: bool,
-    // ヘルプオーバーレイを表示中か（要件: docs/requirements/nav-mode/）。
-    // navモードの内側の表示状態なので、退場時には必ず倒れる
+    // ヘルプオーバーレイを表示中か。navモードの内側の表示状態なので、
+    // 退場時には必ず倒れる
     help_overlay: bool,
-    // 直近に観測した「zellijが実際にフォーカスしているターミナルペイン」
-    //（要件: docs/requirements/focus-sync/）。ホストへの問い合わせ結果を
-    // ここに畳んでおき、navモードの入退場はこの値だけを見る（問い合わせ系の
-    // ホスト関数はテストから呼べないため、判定ロジックを切り離しておく）
+    // 直近に観測した実フォーカス（要件: focus-sync）。問い合わせ系のホスト関数は
+    // テストから呼べないため、結果をここへ畳んで判定ロジックを切り離しておく
     focused_pane: Option<u32>,
-    // 直近の実フォーカスがターミナルペインそのものだったか（決定34）。
-    // 問い合わせがプラグインペインを返して `focused_terminal_in_tab()` で
-    // 作業ペインを拾い直した場合は false。zellij のフォーカス枠はレイヤを
-    // またいで1枚しか点かない（実測）ので、この場合の作業ペインには
-    // フォーカス枠が点いていない ＝ フォーカスを預かる理由が無い
+    // 直近の実フォーカスがターミナルペインそのものだったか（決定34）。false なら
+    // 作業ペインにフォーカス枠が点いていない ＝ フォーカスを預かる理由が無い
     focus_on_terminal: bool,
-    // navモード中にフォーカスを預かっている作業ペイン（決定34）。
-    // 退場でここへ戻す。`focused_pane` とは別に持つ — 預けている間の
-    // 実フォーカスはサイドバー自身なので、両者は違うものを指す
+    // navモード中にフォーカスを預かっている作業ペイン（決定34）。退場でここへ
+    // 戻す。預けている間の実フォーカスはサイドバー自身なので `focused_pane` とは別物
     focus_parked: Option<ParkedFocus>,
-    // 預かったフォーカスが実際に自分へ来たのを一度でも観測したか（決定34）。
-    // フォーカスの移動は非同期なので、これを待たずに「自分にフォーカスが無い」を
-    // 「ユーザーが持って行った」と解釈すると、入場した直後に退場してしまう
-    park_confirmed: bool,
     // 前面に出たあと、まだ実フォーカスを取り直せていない（要件: focus-sync）。
-    // 非可視の間は PaneUpdate が届かず上の キャッシュが凍るため、タブを
-    // 切り替えて戻ってきたときに「フォーカスは動いていない」と誤判定して
-    // 追従を取りこぼす。可視化を合図に、キャッシュと同じフォーカスでも
-    // 引き直させる。問い合わせがまだ古いタブを返す場合に備えて、
-    // 引き直せるまで次のイベントへ持ち越す
+    // 非可視の間はキャッシュが凍るため、可視化を合図に同値でも引き直させる
     pending_focus_resync: bool,
     // navモードを抜けたときのフォーカスと選択（要件: focus-sync）。
     // 次の入場で選択の初期値を決めるのに使う
@@ -210,67 +176,55 @@ struct State {
     // 召喚インスタンス（フローティング）か（決定16）
     summoned: bool,
     // 準備が整い次第 navモードへ入る予約。召喚直後は権限も一覧も未取得で、
-    // その時点で入場しても選択対象が空なので、揃うまで待ってから入る
+    // 揃うまで待ってから入る
     pending_nav_entry: bool,
     // 自分が召喚したフローティングの、タブindex -> プラグインID（決定16）。
     // 重ねて召喚しないための記録。一覧では代用できない（summon.rs 参照）
     summoned_panes: BTreeMap<usize, u32>,
-    // 検索サブモード中か否かは is_some() で表す。
-    // フラグとクエリが食い違う状態を作らせない
+    // 以下のサブモードは中か否かを is_some() で表す（フラグと中身が食い違う
+    // 状態を作らせない）
     search: Option<SearchState>,
-    // トリアージモード中か否かも同じく is_some() で表す（要件: triage-mode）
     triage: Option<TriageState>,
-    // 番号ジャンプサブモード中か否かも同じく is_some() で表す
-    //（要件: pane-number-jump、決定29）
     jump: Option<JumpState>,
-    // 終了操作サブモード中か否かも同じく is_some() で表す
-    //（要件: pane-close-kill、決定35）。中身は入場時に捕まえた対象ペイン
+    // 中身は入場時に捕まえた対象ペイン（決定35）
     termination: Option<TerminationState>,
-    // プレビューがオンか否かも同じく is_some() で表す（要件: preview、決定42）。
-    // モードではなく navモード内のトグル可能な横断的表示状態なので、キー解釈は
-    // 変わらない。中身は開いたフローティングペインと、直近に送った対象ペイン
+    // プレビュー（決定42）。モードではなく navモード内のトグル可能な横断的
+    // 表示状態なので、キー解釈は変わらない
     preview: Option<PreviewState>,
     // 自分がプレビュー用フローティングペインとして起動されたインスタンスか
-    //（決定42）。真なら一覧もエージェント状態も持たず、配られたスナップショットを
-    // 描くだけに徹する
+    //（決定42）。真なら配られたスナップショットを描くだけに徹する
     is_preview: bool,
     // 描くスナップショット（プレビュー用フローティングペインでのみ埋まる）
     preview_content: PreviewContent,
     // 状態変化のたびに進む単調増加のカウンタ。トリアージ一覧の tie-break に使う
-    //（要件: triage-mode）。値そのものに意味はなく、比べられればよい
     state_seq: u64,
-    // 縦スクロールで一覧が上に隠れている行数。選択と画面高から毎フレーム
-    // 導出されるローカルな表示状態で、兄弟インスタンスへは配らない（決定13の範囲外）
+    // 縦スクロールで一覧が上に隠れている行数。毎フレーム導出されるローカルな
+    // 表示状態で、兄弟インスタンスへは配らない（決定13の範囲外）
     scroll: usize,
     // 直近に描画した画面高。行クリックの逆引き（pane_at_row）が描画と同じ
     // 表示範囲を再現するために要る。0 は「まだ一度も描いていない」
     viewport_rows: usize,
-    // 直近に描画した画面幅（viewport_rows と対）。配置演出の着地列は幅から
-    // 決まるが、タイマーは描画の外で進むのでここに控えておく
+    // 直近に描画した画面幅。配置演出の着地列は幅から決まるが、タイマーは
+    // 描画の外で進むのでここに控えておく
     viewport_cols: usize,
-    // 再生中の配置演出（要件: docs/requirements/header-animation/）。
-    // 再生中だけ Some で、終われば None に戻ってヘッダーも通常表示へ戻る
+    // 再生中の配置演出。再生中だけ Some で、終われば None に戻る
     deployment: Option<Deployment>,
-    // 届いた `Event::Timer` の経過時間を積んだ値。プラグインからは壁時計を引けない
-    // ので、滞在猶予の期限判定はこれを時刻の代わりに使う（単調増加しかしない）
+    // 届いた `Event::Timer` の経過時間を積んだ値。壁時計を引けないので、
+    // 期限判定はこれを時刻の代わりに使う（単調増加しかしない）
     elapsed: f64,
     // タイマーの鎖が繋がっているか。`set_timeout()` はキャンセルできず、二重に
-    // 張ると Timer が二重に届く（配置演出のフレームが倍速になる）ので、
-    // 繋がっていないときだけ張る
+    // 張ると Timer が二重に届くので、繋がっていないときだけ張る
     timer_armed: bool,
     // 既読を保留しているペイン -> 既読にしてよくなる時刻（`elapsed` 基準）。
-    // 通過しただけのペインの状態を消さないための猶予
-    //（docs/issues/transit-focus-clears-read-state.md）
+    // 滞在猶予（決定37）の入れ物
     pending_reads: BTreeMap<u32, f64>,
-    // direct-keys方式（決定6）の configuration キー -> 画面に出すキー表記。
-    // フッターのヒントに使う（決定27・決定28）。書かれていない項目は持たない
-    // ＝ヒントからその項目だけが省かれる
+    // direct-keys方式の configuration キー -> 画面に出すキー表記（決定27・28）。
+    // 書かれていない項目は持たない＝ヒントからその項目だけが省かれる
     direct_keys: BTreeMap<String, String>,
-    // 解釈できなかった設定のキー（決定40）。既定値へ黙って倒すと、書いた設定が
-    // 効かない理由がユーザーからは分からない
+    // 解釈できなかった設定のキー（決定40）。黙って既定値へ倒さない
     config_warnings: Vec<&'static str>,
     // 設定の警告をフッターに出しておく期限（`elapsed` 基準）。None は
-    // 「出していない・もう出さない」。壁時計は引けないので期限も経過時間で見る
+    // 「出していない・もう出さない」
     config_warning_until: Option<f64>,
 }
 
@@ -287,27 +241,24 @@ impl ZellijPlugin for State {
         self.summoned = config::summoned(&configuration);
         self.pending_nav_entry = self.summoned;
         self.own_plugin_id = Some(get_plugin_ids().plugin_id);
-        // selectable はペイン側の属性で、リロードしても前回の false が残る。
-        // 権限を追加した新版をリロードすると「承認プロンプトは出ているのに
-        // そのペインにフォーカスできない」デッドロックになるため、毎回戻す。
-        // 承認済みなら PermissionRequestResult が即返り、すぐ false に戻る。
+        // selectable はペイン側の属性でリロードしても前回の false が残り、承認
+        // プロンプトにフォーカスできないデッドロックになるため、毎回戻す。
+        // 承認済みなら PermissionRequestResult が即返り、すぐ false に戻る
         set_selectable(true);
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::ReadCliPipes,
-            // navモードでキーを横取りするため（決定12）
+            // navモードのキー横取り（決定12）
             PermissionType::InterceptInput,
-            // 兄弟インスタンスとの状態同期のため（決定13）
+            // 兄弟インスタンスとの状態同期（決定13）
             PermissionType::MessageAndLaunchOtherPlugins,
-            // フローティングでの臨時召喚のため（決定16）。
-            // OpenPluginPaneFloating はこれを要求し（MessageAndLaunchOtherPlugins
-            // では足りない）、拒否されると shim 側の unwrap でプラグインごと落ちる
+            // 臨時召喚（決定16）。OpenPluginPaneFloating はこれを要求し
+            //（MessageAndLaunchOtherPlugins では足りない）、拒否されると
+            // shim 側の unwrap でプラグインごと落ちる
             PermissionType::OpenTerminalsOrPlugins,
-            // プレビューのスナップショット取得のため（決定42）。
-            // GetPaneScrollback はこれを要求する。拒否されるとホストは応答を
-            // stdin へ書かずログを残すだけなので、パニックはせず
-            // 「取れなかった」扱い（preview::UNAVAILABLE）に落ちる
+            // プレビューのスナップショット取得（決定42）。拒否されてもパニック
+            // せず「取れなかった」扱い（preview::UNAVAILABLE）に落ちる
             PermissionType::ReadPaneContents,
         ]);
         subscribe(&[
@@ -343,16 +294,9 @@ impl ZellijPlugin for State {
                     // フローティングで起動されていたら召喚インスタンスとして自覚する
                     //（決定16。下の set_selectable の分岐に効くので、ここより前に）
                     self.adopt_floating_as_summoned();
-                    // プレビュー用フローティングペインは configuration で自覚済み
-                    // なので、この経路には来ない（`is_preview` で先に分岐している）
-                    // フォーカス巡回にサイドバーが混ざらないようにする（決定6）。
-                    //
-                    // **臨時召喚は例外**（決定16）。unselectable なペインは
-                    // フォーカスできないので、プラグイン側のロジックが壊れると
-                    // ユーザーは普段のペイン操作で消せなくなる（実測でそうなった。
-                    // CLI の `close-pane --pane-id` に頼れば消せるが、IDを調べさせる
-                    // 手順は逃げ道として貧しい）。一時的に出ているだけなので
-                    // 「必ず自分で消せる」ほうを取る
+                    // フォーカス巡回にサイドバーを混ぜない（決定6）。**臨時召喚は
+                    // 例外**（決定16）— unselectable だとロジックが壊れたとき普段の
+                    // ペイン操作で消せなくなるので、「必ず自分で消せる」ほうを取る
                     if !self.summoned {
                         set_selectable(false);
                     }
@@ -364,10 +308,8 @@ impl ZellijPlugin for State {
                     // 承認を待たずに一覧が揃うと入場の機会がここしか無い
                     self.learn_own_plugin_url();
                     self.enter_nav_mode_if_pending();
-                    // 警告の時計はここから回す（決定40）。承認が済むまで
-                    // フッターは描かれない（`draw` が承認待ち表示で止まる）ので、
-                    // load() 時点から数え始めると承認に手間取ったぶんだけ
-                    // 誰にも見られないまま期限が切れる
+                    // 警告の時計はここから回す（決定40）。承認が済むまでフッターは
+                    // 描かれないので、load() から数えると見られないまま期限が切れる
                     self.arm_config_warning();
                 }
                 true
@@ -410,20 +352,17 @@ impl ZellijPlugin for State {
             }
             Event::BeforeClose => {
                 // 横取りしたままプラグインが消えるとキー入力が戻らなくなる。
-                // exit_nav_mode() は使わない。閉じられている最中に自分を
-                // close_plugin_pane() すると二重解放になるため
+                // exit_nav_mode() は使わない — 閉じられている最中に自分を
+                // close_plugin_pane() すると二重解放になる
                 if self.nav_mode {
                     self.nav_mode = false;
                     clear_key_presses_intercepts();
                 }
-                // 開いたままのプレビュー用フローティングペインは道連れにする
-                //（決定42）。閉じるのは自分ではなく別のペインなので、
-                // 二重解放（上のコメント）には当たらない
+                // プレビューと預かったフォーカスの後始末。どちらも対象は自分では
+                // なく別のペインなので、閉じられている最中でも投げてよい。
+                // フォーカスを返さないと、リロード時にユーザーは unselectable に
+                // 戻ったサイドバーにフォーカスを残して詰まる（決定34・決定42）
                 self.close_preview();
-                // 預かっているフォーカスは作業ペインへ返す（決定34）。返し先は
-                // 自分ではなく作業ペインなので、閉じられている最中でも投げて
-                // よい。リロードの場合はここで返さないと、ユーザーは
-                // unselectable に戻ったサイドバーにフォーカスを残して詰まる
                 self.release_parked_focus(true);
                 false
             }
@@ -473,174 +412,22 @@ impl ZellijPlugin for State {
         if self.is_preview && pipe_message.name != PREVIEW_PIPE {
             return false;
         }
+        // 各アームの中身は担当モジュール側のハンドラにある。ここは配線だけ
+        let payload = pipe_message.payload.as_deref();
         match pipe_message.name.as_str() {
-            STATUS_PIPE => {
-                if let Some(raw) = pipe_message.payload.as_deref() {
-                    if let Some(payload) = StatusPayload::parse(raw) {
-                        // 新規エージェント検出なら配置演出を出す（要件: header-animation）。
-                        // 通知は全インスタンスへ配送されるので、可視インスタンスだけに
-                        // 絞る（決定14の権威判定）。サーバへの問い合わせが走るのは着任の
-                        // ときだけで、1エージェントにつき1回しか来ない
-                        if self.apply_status(payload) && self.is_visible_instance() {
-                            self.begin_deployment(1);
-                        }
-                        return true;
-                    }
-                    eprintln!("fujin: unparsable status payload: {}", raw);
-                }
-                false
-            }
-            // 選択を動かすのは可視インスタンスだけ（決定14）。全員が自前で
-            // 動かすと、一覧が古いインスタンスでは境界判定とクランプの結果が
-            // 違って選択がずれる
-            NAV_UP_PIPE => {
-                if !self.refresh_focus() {
-                    return false;
-                }
-                self.select_previous();
-                self.broadcast_selection();
-                true
-            }
-            NAV_DOWN_PIPE => {
-                if !self.refresh_focus() {
-                    return false;
-                }
-                self.select_next();
-                self.broadcast_selection();
-                true
-            }
-            NAV_GO_PIPE => {
-                // 副作用は可視インスタンスのみ実行（多重発行の防止・決定14）
-                if self.refresh_focus() {
-                    self.focus_selected();
-                }
-                false
-            }
-            TOGGLE_CWD_PIPE => {
-                let requested = match pipe_message.payload.as_deref().map(str::trim) {
-                    // ユーザーのキー操作。全インスタンスが同じ値から出発している
-                    // 前提で、各自が独立に反転すれば権威なしで足並みが揃う。
-                    // 空文字も未設定と同じ扱い（config.rs の正規化に揃える） —
-                    // CLI から `zellij pipe` で叩くと payload が空で届きうる
-                    None | Some("") => !self.show_cwd,
-                    // 新入りインスタンスへの現在値push（決定13）。反転ではなく
-                    // 明示セット — 反転にすると押し付けのたびに向きがずれる
-                    Some("true") => true,
-                    Some("false") => false,
-                    // 真偽値の受け口は広げない（決定40。config.rs と同じ方針）。
-                    // 黙って false へ倒すと「cwd が消えた」結果だけが残る
-                    Some(raw) => {
-                        eprintln!("fujin: unparsable toggle_cwd payload: {}", raw);
-                        return false;
-                    }
-                };
-                if self.show_cwd == requested {
-                    return false;
-                }
-                self.show_cwd = requested;
-                true
-            }
-            DISMISS_PIPE => {
-                // 召喚された本人は自分で退場し、常駐サイドバーは
-                // 取り残された召喚インスタンスを代わりに閉じる（決定16）
-                if self.summoned {
-                    self.exit_nav_mode();
-                } else {
-                    self.dismiss_stranded_summons();
-                }
-                false
-            }
-            SELECTION_PIPE => {
-                // 選択はインデックスではなく**ペインIDで**運ぶ。インデックスは
-                // 各インスタンスの selectable に依存し、一覧が古いインスタンス
-                // では別の行を指してしまうため
-                pipe_message
-                    .payload
-                    .as_deref()
-                    .and_then(|p| p.trim().parse::<u32>().ok())
-                    .map(|target| self.select_pane_id(target))
-                    .unwrap_or(false)
-            }
-            PREVIEW_PIPE => {
-                // 描き手（プレビュー用フローティングペイン）だけが受け取る。
-                // 宛先はプラグインIDで指定しているので他へは飛ばないが、
-                // 取り違えても描くものが無いだけで済むよう役割で弾いておく
-                if !self.is_preview {
-                    return false;
-                }
-                pipe_message
-                    .payload
-                    .as_deref()
-                    .map(|raw| self.apply_preview_snapshot(raw))
-                    .unwrap_or(false)
-            }
-            MARK_PIPE => {
-                // マークも選択と同じくペインIDで運ぶ（決定39）。集合まるごとを
-                // 受け取って置き換えるので、空ペイロードは全解除を意味する
-                pipe_message
-                    .payload
-                    .as_deref()
-                    .map(|raw| self.apply_marks(raw))
-                    .unwrap_or(false)
-            }
-            READ_CLEAR_PIPE => {
-                // 可視インスタンスが観測した既読クリアを取り込む
-                let mut changed = false;
-                if let Some(raw) = pipe_message.payload.as_deref() {
-                    for pane_id in raw.split(',').filter_map(|s| s.trim().parse::<u32>().ok()) {
-                        if let Some(agent) = self.agents.get_mut(&pane_id) {
-                            changed |= agent.mark_read();
-                        }
-                        // コマンド状態も同じ既読モデルに乗る（決定32）。
-                        // 猶予（`awaiting_refocus`）は見ない — 送り手の可視
-                        // インスタンスが猶予込みで判断した結果がここへ来る
-                        if let Some(info) = self.commands.get_mut(&pane_id) {
-                            changed |= info.force_read();
-                        }
-                    }
-                }
-                changed
-            }
-            COMMAND_STATE_PIPE => pipe_message
-                .payload
-                .as_deref()
-                .map(|raw| self.apply_command_dump(raw))
-                .unwrap_or(false),
-            SYNC_STATE_PIPE => {
-                // 空のときだけ取り込む。既に自前の状態を持っているなら、
-                // 古いダンプで上書きしてしまわないよう無視する
-                if self.agents.is_empty() {
-                    if let Some(raw) = pipe_message.payload.as_deref() {
-                        self.apply_state_dump(raw);
-                        return true;
-                    }
-                }
-                false
-            }
-            NAV_MODE_PIPE => {
-                // キーの横取りは権威インスタンス1つだけが行う。全員が
-                // intercept_key_presses() を呼ぶと誰が受け取るか不定になる。
-                //
-                // なお召喚インスタンスにはこの pipe が届かない。
-                // キーバインドの `MessagePlugin` はURL一致で配送されるが、
-                // 召喚インスタンスは configuration に `summoned=true` を持つため一致しない
-                //（実測: 受信ログが一切出ない）。トグルは本人ではなく
-                // 召喚役が担う（決定16）
-                // refresh_focus() が入場直前の実フォーカスを取り込むので、
-                // enter_nav_mode() は最新のフォーカスを見て初期位置を決められる
-                if self.refresh_focus() {
-                    if !self.nav_mode {
-                        self.enter_nav_mode();
-                        return true;
-                    }
-                    return false;
-                }
-                // ここへ来たインスタンスはフォーカス中のタブに居ない。そのタブに
-                // fujin が1つも無ければ権威がどこにも立たず、pipe が届いても
-                // 無反応になる。代表1つがフローティングで召喚して穴を埋める（決定16）
-                self.summon_floating_if_absent();
-                false
-            }
+            STATUS_PIPE => self.handle_status_pipe(payload),
+            NAV_UP_PIPE => self.handle_nav_step_pipe(false),
+            NAV_DOWN_PIPE => self.handle_nav_step_pipe(true),
+            NAV_GO_PIPE => self.handle_nav_go_pipe(),
+            NAV_MODE_PIPE => self.handle_nav_mode_pipe(),
+            TOGGLE_CWD_PIPE => self.handle_toggle_cwd_pipe(payload),
+            DISMISS_PIPE => self.handle_dismiss_pipe(),
+            SELECTION_PIPE => self.handle_selection_pipe(payload),
+            PREVIEW_PIPE => self.handle_preview_pipe(payload),
+            MARK_PIPE => self.handle_mark_pipe(payload),
+            READ_CLEAR_PIPE => self.handle_read_clear_pipe(payload),
+            COMMAND_STATE_PIPE => self.handle_command_state_pipe(payload),
+            SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload),
             _ => false,
         }
     }
@@ -745,15 +532,10 @@ impl State {
 
     // 自分が可視インスタンスか（決定14の権威判定のうち、**副作用のない部分だけ**）。
     //
-    // pipe で届く通知は全インスタンスへ配送されるので、これで絞らないと非可視の
-    // サイドバーまで反応する（要件: header-animation の「演出は可視インスタンスでしか
-    // 再生できない」）。`refresh_focus()` を流用しないのは、あちらが選択の追従・
-    // navモード退場という副作用を持つため — 状態通知が届いただけでユーザーの探索位置を
-    // 動かすわけにはいかない。
-    //
-    // `self.visible` を第一手にしないのは refresh_focus と同じ理由で、プラグインを
-    // リロードすると `Event::Visible` が再送されず、旗を信じると配置演出が二度と
-    // 出なくなる。問い合わせに失敗したときだけ旗に落ちる
+    // `refresh_focus()` を流用しないのは、あちらが選択の追従・navモード退場という
+    // 副作用を持つため — 状態通知が届いただけで探索位置を動かすわけにはいかない。
+    // `self.visible` を第一手にしないのも refresh_focus と同じ理由（リロードで
+    // `Event::Visible` が再送されない）。問い合わせに失敗したときだけ旗に落ちる
     pub(crate) fn is_visible_instance(&self) -> bool {
         let Ok((focused_tab, _)) = get_focused_pane_info() else {
             return self.visible;
@@ -766,16 +548,10 @@ impl State {
     //    （要件: docs/requirements/focus-sync/）
     //  - 自分が操作の権威を持つインスタンスか（決定14）を返す
     //
-    // 権威の判定にイベントの配送は当てにできない:
-    // - PaneUpdate / TabUpdate は非可視インスタンスに届かないため、
-    //   「自分のタブがアクティブ」なインスタンスが複数現れる（実測）
-    // - Event::Visible は真が常に1つだけで正確だが、**プラグインを
-    //   リロードすると再送されない**（zellij から見て可視状態は不変でも、
-    //   プラグインの状態は初期化される）
-    //
-    // そこでサーバへ直接問い合わせる。get_focused_pane_info() は
-    // 「このプラグインのクライアントにとっての」フォーカス中のタブ／ペインを
-    // 返すので、常に最新かつ、権威になるインスタンスは1つだけになる。
+    // イベントの配送は権威判定に当てにできない — PaneUpdate / TabUpdate は
+    // 非可視インスタンスに届かず「自分のタブがアクティブ」が複数現れ（実測）、
+    // Event::Visible はリロードで再送されない。get_focused_pane_info() への
+    // 直接問い合わせなら常に最新で、権威になるインスタンスは1つだけになる
     fn refresh_focus(&mut self) -> bool {
         let Ok((focused_tab, focused_pane)) = get_focused_pane_info() else {
             // 問い合わせに失敗したときだけ Visible に落とす
@@ -787,16 +563,18 @@ impl State {
             return false;
         }
         self.focus_on_terminal = matches!(focused_pane, PaneId::Terminal(_));
-        // **プレビュー用フローティングペインは自分の一部として数える**（決定42）。
-        // 開いた直後は実フォーカスがそちらへ移るので、別ペイン扱いにすると
-        // 「ユーザーがフォーカスを持って行った」と誤読して navモードを抜けてしまう
+        // プレビュー用フローティングペインは自分の一部として数える（決定42）。
+        // 別ペイン扱いにすると、開いた直後の移動を「持って行かれた」と誤読して
+        // navモードを抜けてしまう
         let own_pane_focused = match (focused_pane, self.own_plugin_id) {
             (PaneId::Plugin(id), Some(own_id)) => id == own_id || self.is_preview_pane(id),
             _ => false,
         };
         // 預かりが成立したのを観測しておく（決定34。`park_taken_over` が使う）
-        if own_pane_focused && self.focus_parked.is_some() {
-            self.park_confirmed = true;
+        if own_pane_focused {
+            if let Some(parked) = self.focus_parked.as_mut() {
+                parked.confirmed = true;
+            }
         }
         // 預けたフォーカスをユーザーの操作で持って行かれたら、奪い返さずに手放す
         let park_lost = self.park_taken_over(own_pane_focused);
@@ -805,40 +583,32 @@ impl State {
         }
         let focused = match focused_pane {
             PaneId::Terminal(id) => Some(id),
-            // 自分がフォーカスを預かっている間（決定34）は、実フォーカスが
-            // サイドバーに在っても作業ペインは動いていない。一覧から拾い直すと
-            // 「タイル層でフォーカス中のターミナル」が居らず None になり、
-            // 探索位置も戻し先も失う
+            // フォーカスを預かっている間（決定34）は預かった当のペインを指す。
+            // 一覧から拾い直すと「タイル層でフォーカス中のターミナル」が居らず
+            // None になり、探索位置も戻し先も失う
             PaneId::Plugin(_) if own_pane_focused && self.focus_parked.is_some() => self
                 .focus_parked
                 .map(|parked| parked.pane_id)
                 .or_else(|| self.focused_terminal_in_tab(focused_tab)),
-            // 他のプラグインペインは selectable に無い。ただし諦めるのではなく
-            // 一覧から作業ペインを拾い直す（召喚インスタンス自身がフォーカスを
-            // 持つ場合がこれ。下記参照）
+            // 他のプラグインペインは selectable に無いので、一覧から作業ペインを
+            // 拾い直す（召喚インスタンス自身がフォーカスを持つ場合がこれ）
             PaneId::Plugin(_) => self.focused_terminal_in_tab(focused_tab),
         };
         // 可視化直後の1回は、キャッシュと同じフォーカスでも引き直す
         let force = std::mem::take(&mut self.pending_focus_resync);
         let follow = self.focus_to_follow(focused, force);
-        // navモード中に実フォーカスが動いた＝ユーザーは探索をやめて作業に
-        // 戻ったとみなす（要件: nav-mode / focus-sync）。navモード中のキーは
-        // 横取りしているので、これが起きる主な経路はマウスでのペイン選択。
-        // 横取りを解かないと、クリックした先で j/k がサイドバー操作として
-        // 食われ続ける。
-        //
-        // 預けたフォーカスを持って行かれた場合（`park_lost`）も同じ扱いにする。
-        // 行き先が預かる前と同じペインでも「作業に戻る」という意思表示なので、
-        // ペインIDの比較だけでは取りこぼす
+        // navモード中に実フォーカスが動いた＝探索をやめて作業に戻ったとみなして
+        // 退場する（要件: nav-mode / focus-sync）。主な経路はマウスでのペイン選択で、
+        // 横取りを解かないと移動先で j/k が食われ続ける。預けたフォーカスを
+        // 持って行かれた場合（`park_lost`）も同じ扱い — 行き先が預かる前と同じ
+        // ペインでも「作業に戻る」なので、ペインIDの比較だけでは取りこぼす
         let interrupted =
             self.nav_mode && (park_lost || (focused.is_some() && focused != self.focused_pane));
-        // フォーカスの記録は追従しない場合（navモード中など）も続ける。
-        // navモード退場時の「動いたか」の比較材料になる
+        // 記録は追従しない場合も続ける。navモード退場時の「動いたか」の比較材料
         self.focused_pane = focused;
         if interrupted {
-            // 預かりの手放しは上で済んでいる（`park_lost`）。ここで戻す形にすると
+            // 預かりの手放しは上（`park_lost`）で済んでいる。ここで返す形にすると
             // ユーザーが自分で選んだ先からフォーカスを奪い返してしまう
-            // ハイライトも実フォーカスへ揃う（退場後は navモード外なので）
             self.leave_nav_mode();
         } else if let Some(pane_id) = follow {
             if self.select_pane_id(pane_id) {
@@ -894,11 +664,11 @@ impl State {
     // 預けたフォーカスをユーザーの操作で持って行かれたか（決定34）。
     // `own_pane_focused` は「いま実フォーカスが自分のペインにあるか」の観測結果。
     //
-    // **`park_confirmed` を待つのが要点。** フォーカスの移動は非同期なので、
+    // **`confirmed` を待つのが要点。** フォーカスの移動は非同期なので、
     // 預けた命令が処理される前に届いた `PaneUpdate` では自分にフォーカスが無い。
     // 確認を待たずに判定すると、入場した直後に「持って行かれた」と誤読して退場する
     pub(crate) fn park_taken_over(&self, own_pane_focused: bool) -> bool {
-        self.focus_parked.is_some() && self.park_confirmed && !own_pane_focused
+        self.focus_parked.is_some_and(|parked| parked.confirmed) && !own_pane_focused
     }
 
     // 指定ターミナルペインがフローティングか（決定34）。フォーカスを預かるとき、
@@ -916,13 +686,10 @@ impl State {
     // 値の正規化と解釈できない値の扱いを項目ごとにばらけさせない。
     // 解釈と仕様の正本は config.rs 側にある。
     //
-    // direct-keys のヒント（決定28）は、ユーザーが config.kdl で任意の物理キーに
-    // `fujin_up` 等を割り当てる方式なので（決定6）プラグイン側に決め打ちできる
-    // 既定キーが無い。当初は `Event::InitialKeybinds` から実際の割り当てを解決する
-    // 設計だったが、zellij 0.44.3 のプラグインAPIは `Action::KeybindPipe` の
-    // `name`/`payload` を捨てて渡すため（`zellij-utils/src/plugin_api/action.rs`。
-    // どのキーが「何らかのプラグインpipe」に割り当たっているかまでしか分からない）
-    // 実装できなかった。代わりに、割り当てたキーの**表記だけ**を設定として受け取る
+    // direct-keys のヒント（決定28）が「キーの表記だけを設定で受け取る」形なのは、
+    // zellij 0.44.3 のプラグインAPIが `Action::KeybindPipe` の `name`/`payload` を
+    // 捨てて渡すため、実際の割り当てを `Event::InitialKeybinds` から解決できないから
+    //（`zellij-utils/src/plugin_api/action.rs`）
     pub(crate) fn apply_config(&mut self, configuration: &BTreeMap<String, String>) {
         let config = Config::parse(configuration);
         self.show_cwd = config.show_cwd;

@@ -23,6 +23,17 @@ use crate::{State, SYNC_STATE_PIPE};
 pub(crate) const SIDEBAR_WIDTH: usize = 32;
 
 impl State {
+    // fujin_dismiss の受け口。召喚された本人は自分で退場し、常駐サイドバーは
+    // 取り残された召喚インスタンスを代わりに閉じる（決定16）
+    pub(crate) fn handle_dismiss_pipe(&mut self) -> bool {
+        if self.summoned {
+            self.exit_nav_mode();
+        } else {
+            self.dismiss_stranded_summons();
+        }
+        false
+    }
+
     pub(crate) fn summon_floating_if_absent(&mut self) {
         let (Some(own_id), Some(own_url)) = (self.own_plugin_id, self.own_plugin_url.clone())
         else {
@@ -119,11 +130,7 @@ impl State {
         // 方式だが、このタブには可視インスタンスが居ないため誰も気づけない。
         // 召喚した本人が明示的に配る
         if !self.agents.is_empty() {
-            pipe_message_to_plugin(
-                MessageToPlugin::new(SYNC_STATE_PIPE)
-                    .with_destination_plugin_id(new_id)
-                    .with_payload(self.state_dump()),
-            );
+            crate::sync::send_to_plugin(new_id, SYNC_STATE_PIPE, self.state_dump());
         }
     }
 

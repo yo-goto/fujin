@@ -12,8 +12,6 @@
 // マークを許した以上、権威インスタンス（決定14）が交代した先でもマークが見えないと
 // 「どれを選んだか」を見失う。
 
-use zellij_tile::prelude::*;
-
 use crate::{State, MARK_PIPE};
 
 // マーク済みの行に出す印（決定39）。選択バー `▌` を置き換える案は採らない —
@@ -89,24 +87,13 @@ impl State {
     // 集合を兄弟インスタンスへ配る（運搬形式はペインIDのカンマ区切り）。
     // 空文字列は全解除を意味する
     fn broadcast_marks(&self) {
-        let payload = self.mark_dump();
-        for sibling in &self.known_siblings {
-            pipe_message_to_plugin(
-                MessageToPlugin::new(MARK_PIPE)
-                    .with_destination_plugin_id(*sibling)
-                    .with_payload(payload.clone()),
-            );
-        }
+        self.broadcast_to_siblings(MARK_PIPE, &self.mark_dump());
     }
 
     // 新入りインスタンスへの押し付け（決定13）。既存インスタンスが持っている
     // マークは、配らない限り新入りには一生見えない
     pub(crate) fn push_marks_to(&self, plugin_id: u32) {
-        pipe_message_to_plugin(
-            MessageToPlugin::new(MARK_PIPE)
-                .with_destination_plugin_id(plugin_id)
-                .with_payload(self.mark_dump()),
-        );
+        crate::sync::send_to_plugin(plugin_id, MARK_PIPE, self.mark_dump());
     }
 
     pub(crate) fn mark_dump(&self) -> String {
@@ -115,6 +102,12 @@ impl State {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",")
+    }
+
+    // fujin_mark の受け口。マークも選択と同じくペインIDで運ぶ（決定39）。
+    // 集合まるごとを受け取って置き換えるので、空ペイロードは全解除を意味する
+    pub(crate) fn handle_mark_pipe(&mut self, payload: Option<&str>) -> bool {
+        payload.map(|raw| self.apply_marks(raw)).unwrap_or(false)
     }
 
     // 配られた集合をそのまま採る。戻り値は再描画するか。

@@ -22,7 +22,95 @@ use crate::{
     State, COMMAND_STATE_PIPE, READ_CLEAR_PIPE, SELECTION_PIPE, SYNC_STATE_PIPE, TOGGLE_CWD_PIPE,
 };
 
+// 指定インスタンスへ pipe を1本送る。宛先は必ずプラグインIDで指定する —
+// URL指定（`with_plugin_url`）は配送ではなく**新しいプラグインの起動**になる
+//（ファイル冒頭の経緯参照）
+pub(crate) fn send_to_plugin(plugin_id: u32, pipe: &str, payload: String) {
+    pipe_message_to_plugin(
+        MessageToPlugin::new(pipe)
+            .with_destination_plugin_id(plugin_id)
+            .with_payload(payload),
+    );
+}
+
 impl State {
+    // fujin_toggle_cwd の受け口（docs/issues/toggle-cwd-key.md）。
+    // payload無し＝ユーザーのキー操作（各自反転）、"true"/"false"＝新入り
+    // インスタンスへの現在値push（決定13。そのままセット）
+    pub(crate) fn handle_toggle_cwd_pipe(&mut self, payload: Option<&str>) -> bool {
+        let requested = match payload.map(str::trim) {
+            // 全インスタンスが同じ値から出発している前提で、各自が独立に反転
+            // すれば権威なしで足並みが揃う。空文字も未設定と同じ扱い
+            //（config.rs の正規化に揃える。CLI から叩くと payload が空で届きうる）
+            None | Some("") => !self.show_cwd,
+            // 明示セット — 反転にすると押し付けのたびに向きがずれる
+            Some("true") => true,
+            Some("false") => false,
+            // 真偽値の受け口は広げない（決定40。config.rs と同じ方針）。
+            // 黙って false へ倒すと「cwd が消えた」結果だけが残る
+            Some(raw) => {
+                eprintln!("fujin: unparsable toggle_cwd payload: {}", raw);
+                return false;
+            }
+        };
+        if self.show_cwd == requested {
+            return false;
+        }
+        self.show_cwd = requested;
+        true
+    }
+
+    // fujin_selection の受け口。選択はインデックスではなく**ペインIDで**運ぶ
+    //（決定13）。インデックスは各インスタンスの selectable に依存し、一覧が
+    // 古いインスタンスでは別の行を指してしまう
+    pub(crate) fn handle_selection_pipe(&mut self, payload: Option<&str>) -> bool {
+        payload
+            .and_then(|p| p.trim().parse::<u32>().ok())
+            .map(|target| self.select_pane_id(target))
+            .unwrap_or(false)
+    }
+
+    // fujin_read の受け口。可視インスタンスが観測した既読クリアを取り込む
+    pub(crate) fn handle_read_clear_pipe(&mut self, payload: Option<&str>) -> bool {
+        let Some(raw) = payload else {
+            return false;
+        };
+        let mut changed = false;
+        for pane_id in raw.split(',').filter_map(|s| s.trim().parse::<u32>().ok()) {
+            if let Some(agent) = self.agents.get_mut(&pane_id) {
+                changed |= agent.mark_read();
+            }
+            // コマンド状態も同じ既読モデルに乗る（決定32）。既読の猶予
+            //（`awaiting_refocus`）は見ない — 送り手の可視インスタンスが
+            // 猶予込みで判断した結果がここへ来る
+            if let Some(info) = self.commands.get_mut(&pane_id) {
+                changed |= info.force_read();
+            }
+        }
+        changed
+    }
+
+    // fujin_sync_state の受け口。空のときだけ取り込む — 既に自前の状態を
+    // 持っているなら、古いダンプで上書きしてしまわないよう無視する
+    // 既知の兄弟インスタンス全員へ同じ payload を配る（決定13）。
+    // 配信ループはここ1本に集約し、pipe ごとに再実装しない
+    pub(crate) fn broadcast_to_siblings(&self, pipe: &str, payload: &str) {
+        for sibling in &self.known_siblings {
+            send_to_plugin(*sibling, pipe, payload.to_string());
+        }
+    }
+
+    pub(crate) fn handle_sync_state_pipe(&mut self, payload: Option<&str>) -> bool {
+        if !self.agents.is_empty() {
+            return false;
+        }
+        let Some(raw) = payload else {
+            return false;
+        };
+        self.apply_state_dump(raw);
+        true
+    }
+
     // 自分のwasm URLを知る（get_plugin_ids() には入っていない）
     pub(crate) fn learn_own_plugin_url(&mut self) {
         if self.own_plugin_url.is_some() {
@@ -87,18 +175,10 @@ impl State {
                 self.push_marks_to(id);
             }
             if let Some(dump) = &dump {
-                pipe_message_to_plugin(
-                    MessageToPlugin::new(SYNC_STATE_PIPE)
-                        .with_destination_plugin_id(id)
-                        .with_payload(dump.clone()),
-                );
+                send_to_plugin(id, SYNC_STATE_PIPE, dump.clone());
             }
             if let Some(commands) = &commands {
-                pipe_message_to_plugin(
-                    MessageToPlugin::new(COMMAND_STATE_PIPE)
-                        .with_destination_plugin_id(id)
-                        .with_payload(commands.clone()),
-                );
+                send_to_plugin(id, COMMAND_STATE_PIPE, commands.clone());
             }
         }
     }
@@ -111,11 +191,7 @@ impl State {
     // 「トグルして既定へ戻した」のか「一度も触っていない」のか区別が付かないので、
     // 無条件に押し付ける
     fn push_show_cwd_to(&self, plugin_id: u32) {
-        pipe_message_to_plugin(
-            MessageToPlugin::new(TOGGLE_CWD_PIPE)
-                .with_destination_plugin_id(plugin_id)
-                .with_payload(self.show_cwd.to_string()),
-        );
+        send_to_plugin(plugin_id, TOGGLE_CWD_PIPE, self.show_cwd.to_string());
     }
 
     // 1ペイン1行のTSV。区切りにタブと改行を使うのは、パス（cwd）にも
@@ -196,14 +272,7 @@ impl State {
         let Some(entry) = self.selectable.get(self.selected) else {
             return;
         };
-        let pane_id = entry.pane_id;
-        for sibling in &self.known_siblings {
-            pipe_message_to_plugin(
-                MessageToPlugin::new(SELECTION_PIPE)
-                    .with_destination_plugin_id(*sibling)
-                    .with_payload(pane_id.to_string()),
-            );
-        }
+        self.broadcast_to_siblings(SELECTION_PIPE, &entry.pane_id.to_string());
     }
 
     pub(crate) fn broadcast_read_clears(&self, pane_ids: &[u32]) {
@@ -215,12 +284,6 @@ impl State {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        for sibling in &self.known_siblings {
-            pipe_message_to_plugin(
-                MessageToPlugin::new(READ_CLEAR_PIPE)
-                    .with_destination_plugin_id(*sibling)
-                    .with_payload(payload.clone()),
-            );
-        }
+        self.broadcast_to_siblings(READ_CLEAR_PIPE, &payload);
     }
 }

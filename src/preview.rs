@@ -207,11 +207,7 @@ impl State {
                 UNAVAILABLE.to_string()
             }
         };
-        pipe_message_to_plugin(
-            MessageToPlugin::new(PREVIEW_PIPE)
-                .with_destination_plugin_id(pane_id)
-                .with_payload(format!("{title}\n{body}")),
-        );
+        crate::sync::send_to_plugin(pane_id, PREVIEW_PIPE, format!("{title}\n{body}"));
     }
 
     // プレビューの見出しに出す対象ペインの名前。一覧から落ちていたら空にする
@@ -222,6 +218,18 @@ impl State {
             .find(|entry| entry.pane_id == target)
             .map(|entry| self.display_title(entry).to_string())
             .unwrap_or_default()
+    }
+
+    // fujin_preview の受け口。描き手（プレビュー用フローティングペイン）だけが
+    // 受け取る。宛先はプラグインIDで指定しているので他へは飛ばないが、
+    // 取り違えても描くものが無いだけで済むよう役割で弾いておく
+    pub(crate) fn handle_preview_pipe(&mut self, payload: Option<&str>) -> bool {
+        if !self.is_preview {
+            return false;
+        }
+        payload
+            .map(|raw| self.apply_preview_snapshot(raw))
+            .unwrap_or(false)
     }
 
     // 配られたスナップショットを取り込む（プレビュー用フローティングペイン側）。

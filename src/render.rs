@@ -16,7 +16,7 @@
 // 要件: docs/requirements/sidebar-tree/sidebar-scroll.feature）。枠は固定で、
 // あいだのツリーだけが動く。
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
@@ -24,6 +24,10 @@ use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::mark::MARK_GLYPH;
 use crate::search::{Field, Hit};
+use crate::width::{
+    colorable_char_limit, fold_highlight_indices, fold_to_width, pad_left, pad_to_width,
+    shift_highlight_indices, truncate, truncate_start,
+};
 use crate::{Selectable, State};
 
 // 画面に縦に積む1行ぶんの中身。
@@ -504,9 +508,10 @@ impl State {
         screen
     }
 
-    // 選択行が visible_rows() のどこにあるか（先頭行, 末尾行）。
+    // 光っている行（ツリー表示では選択、検索・トリアージではカーソル）が
+    // visible_rows() のどこにあるか（先頭行, 末尾行）。
     // ペイン行と cwd行のように複数行が1つの帯になるので範囲で返す
-    fn selected_span(&self, all: &[Row<'_>]) -> Option<(usize, usize)> {
+    fn highlighted_span(&self, all: &[Row<'_>]) -> Option<(usize, usize)> {
         let triage_cursor = self.triage_cursor();
         let mut span: Option<(usize, usize)> = None;
         for (index, row) in all.iter().enumerate() {
@@ -516,7 +521,7 @@ impl State {
                 }
                 | Row::Cwd {
                     entry, flat_index, ..
-                } => self.row_is_selected(entry, *flat_index),
+                } => self.row_is_highlighted(entry, *flat_index),
                 Row::Triage { entry, .. } => triage_cursor == Some(entry.pane_id),
                 _ => false,
             };
@@ -546,7 +551,7 @@ impl State {
         let frame = FRAME_TOP + FRAME_BOTTOM;
         let (list_len, area, anchor) = {
             let all = self.visible_rows();
-            let anchor = self.selected_span(&all).map(|(first, last)| {
+            let anchor = self.highlighted_span(&all).map(|(first, last)| {
                 (
                     first.saturating_sub(FRAME_TOP),
                     last.saturating_sub(FRAME_TOP),
@@ -584,7 +589,7 @@ impl State {
 
     // その行がハイライトされるか。ペイン行と cwd行で同じ判定を使い、
     // 2行が1つの帯に見えるようにする
-    fn row_is_selected(&self, entry: &Selectable, flat_index: usize) -> bool {
+    fn row_is_highlighted(&self, entry: &Selectable, flat_index: usize) -> bool {
         match &self.search {
             // 検索サブモード中にハイライトする行はカーソル（ペインID）で決まる
             Some(search) => search.cursor == Some(entry.pane_id),
@@ -668,20 +673,21 @@ impl State {
                     flat_index,
                     hit,
                 } => {
-                    let is_selected = self.row_is_selected(entry, flat_index);
+                    let is_highlighted = self.row_is_highlighted(entry, flat_index);
                     // 番号ジャンプサブモード中だけ番号列が付く（決定29）
                     let number = self.jump_number(flat_index);
                     let cells = HeadCells {
                         number: number.as_ref().map(|(n, m)| (n.as_str(), *m)),
                         mark: marks.then(|| self.is_marked(entry.pane_id)),
                     };
-                    let row = self.pane_row(entry, is_selected, hit, column, cells, cols);
+                    let row = self.pane_row(entry, is_highlighted, hit, column, cells, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Triage { entry, tab_name } => {
-                    let is_selected = triage_cursor == Some(entry.pane_id);
+                    let is_highlighted = triage_cursor == Some(entry.pane_id);
                     let mark = marks.then(|| self.is_marked(entry.pane_id));
-                    let row = self.triage_row(entry, tab_name, is_selected, tab_column, mark, cols);
+                    let row =
+                        self.triage_row(entry, tab_name, is_highlighted, tab_column, mark, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Cwd {
@@ -690,8 +696,8 @@ impl State {
                     cwd,
                     hit,
                 } => {
-                    let is_selected = self.row_is_selected(entry, flat_index);
-                    let row = cwd_row(cwd, is_selected, hit, cols);
+                    let is_highlighted = self.row_is_highlighted(entry, flat_index);
+                    let row = cwd_row(cwd, is_highlighted, hit, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
             }
@@ -814,13 +820,11 @@ impl State {
     //（決定27。要件: sidebar-header / sidebar-footer）
     fn state_ink(&self) -> Ink {
         // 終了操作サブモードが最優先。確認プロンプトのあいだは、ヘッダーの三角も
-        // 含めて警告色にする（決定35のフッター転用を、決定27の「ヘッダーとフッターは
-        // 同じ状態色」に沿わせたもの）
+        // 含めて警告色にする（決定35のフッター転用を決定27に沿わせたもの）
         if self.termination.is_some() {
             Ink::Accent(TERMINATION_LEVEL)
         } else if self.showing_config_warning() {
-            // 警告も終了操作と同じ error_color を借りる（決定40）。新しい色は
-            // 増やさない。フッターだけ色を変えるとヘッダーの三角と食い違うので、
+            // 警告も同じ error_color を借りる（決定40。新しい色は増やさない）。
             // 三角ごと警告色にする — 出ているあいだは「いまの状態」が警告
             Ink::Accent(TERMINATION_LEVEL)
         } else if self.triage.is_some() {
@@ -1110,7 +1114,7 @@ impl State {
     pub(crate) fn pane_row(
         &self,
         entry: &Selectable,
-        is_selected: bool,
+        is_highlighted: bool,
         hit: Option<&Hit>,
         column: CounterColumn,
         cells: HeadCells<'_>,
@@ -1121,25 +1125,8 @@ impl State {
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定32）
         let status = self.pane_status(entry.pane_id);
         let icon = status.map(|s| s.icon()).unwrap_or(" ");
-        // 選択行は左端にバーを立てる。テーマの選択色が沈む配色でも
-        // どこが選択中か一目で分かるようにするため（幅は2文字で固定し、
-        // 番号列・状態アイコンの開始位置をずらさない）
-        let prefix = if is_selected { "▌ " } else { "  " };
-        // マーク列は列を出すフレームでだけ1文字＋空白を占める（決定39）
-        let mark_cell = mark_cell(mark);
-        // "▌ {icon} " / "  {icon} "、番号ジャンプサブモード中は "▌ {番号} {icon} "。
-        // マーク列を出すフレームでは番号列とアイコンのあいだに "{✓|空白} " が入る
-        let head = match number {
-            Some((digits, _)) => format!("{}{} {}{} ", prefix, digits, mark_cell, icon),
-            None => format!("{}{}{} ", prefix, mark_cell, icon),
-        };
-        let head_width = UnicodeWidthStr::width(head.as_str());
-        // マーク印の文字位置（列を出すフレームだけ）。アイコンの2文字手前で、
-        // 番号列の有無に追従する
-        let mark_at = mark.map(|_| head.chars().count().saturating_sub(4));
-        // 状態アイコンの文字位置。head の末尾は常に「アイコン(1文字)+空白」なので、
-        // 番号列の有無で動いても末尾から数えれば追従できる
-        let icon_at = head.chars().count().saturating_sub(2);
+        let head = row_head(is_highlighted, number, mark, icon);
+        let head_width = UnicodeWidthStr::width(head.text.as_str());
 
         let (subagents, open_tasks) = counter_labels(agent);
         let counters = column.render(&subagents, &open_tasks);
@@ -1169,18 +1156,12 @@ impl State {
         let (title, title_dropped) = fold_to_width(source, title_budget);
         let (open, close) = floating_brackets(entry, &title);
 
-        let mut label = format!("{}{}{}{}", head, open, title, close);
+        let mut label = format!("{}{}{}{}", head.text, open, title, close);
         if !counters.is_empty() {
             // ペイン名の長さに関わらず、カウンタ列は右端で揃える
-            let filler =
-                inner.saturating_sub(UnicodeWidthStr::width(label.as_str()) + counters_width);
-            label.push_str(&" ".repeat(filler));
-            label.push_str(&counters);
-            // アイコンとカウンタ列だけで幅を使い切るほど狭いときの保険。
-            // はみ出すと選択背景が端末側で折り返して次の行を汚す
-            label = truncate(&label, inner);
+            append_right_column(&mut label, &counters, inner);
         }
-        if is_selected {
+        if is_highlighted {
             // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
             // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない
             label = pad_to_width(label, cols);
@@ -1203,26 +1184,17 @@ impl State {
                 title_dropped,
                 title_original_len,
                 // 丸括弧のぶんだけペイン名の開始位置が右へずれる
-                head.chars().count() + open.chars().count(),
+                head.text.chars().count() + open.chars().count(),
             )
         });
 
         let mut text = Text::new(&label);
-        // ペイン名は通常ウェイトに落とす（決定36）。全行bold・同色だと状態アイコンの
-        // 色や選択行の背景が相対的に沈み、一覧のメリハリが弱くなるため。
-        // **選択行（実フォーカスのペイン）はboldのまま残す** — 実機で確認したところ
-        // 選択行まで落とすと「いまどこにいるか」が弱まった（決定36改訂）
-        if !is_selected {
-            let name_start = head.chars().count();
-            // 丸括弧もペイン名の一部として同じ太さで出す（要件:
-            // floating-pane-indicator。括弧だけ別扱いにはしない）
-            let name_end =
-                name_start + open.chars().count() + title.chars().count() + close.chars().count();
-            text = text.unbold_range(name_start..name_end);
+        if !is_highlighted {
+            text = unbold_name(text, &head.text, open, &title, close);
         }
         if let Some(status) = status {
             // 状態アイコン部分に状態色（位置は番号列の有無に追従する）
-            text = text.color_range(status.color(), icon_at..icon_at + 1);
+            text = text.color_range(status.color(), head.icon_at..head.icon_at + 1);
         }
         if let Some((digits, matches)) = number {
             // 番号は「そのまま打つ文字」なのでキーの色で出す（ヘルプの
@@ -1236,7 +1208,7 @@ impl State {
                 text.dim_range(span)
             };
         }
-        if let (Some(at), Some(true)) = (mark_at, mark) {
+        if let (Some(at), Some(true)) = (head.mark_at, mark) {
             // マーク印は「ユーザーが自分で指した」印なので、選択バーと同じレベル2。
             // 状態アイコンの色（行ごとに変わる）とは役割が違う
             text = text.color_range(2, at..at + 1);
@@ -1245,7 +1217,7 @@ impl State {
             // レベル1で固定（決定11のv1スコープ: 設定項目は増やさない）
             text = text.color_indices(1, indices);
         }
-        if is_selected {
+        if is_highlighted {
             // opaque を付けないと背景が透けて選択色が沈む
             text = text.selected().opaque().color_range(2, 0..1);
         }
@@ -1278,26 +1250,19 @@ impl State {
         &self,
         entry: &Selectable,
         tab_name: &str,
-        is_selected: bool,
+        is_highlighted: bool,
         tab_column: usize,
         mark: Option<bool>,
         cols: usize,
     ) -> Text {
         let status = self.pane_status(entry.pane_id);
         let icon = status.map(|s| s.icon()).unwrap_or(" ");
-        // 選択行の左端バーはペイン行と同じ（幅2固定）
-        let prefix = if is_selected { "▌ " } else { "  " };
         // マーク列もペイン行と同じ位置（アイコンの手前）に出す（決定39）。
         // トリアージ一覧の上でもマークできる以上、印が見えないと積み上げられない
-        let mark_cell = mark_cell(mark);
-        let head = format!("{}{}{} ", prefix, mark_cell, icon);
-        let head_width = UnicodeWidthStr::width(head.as_str());
-        // 状態アイコンの文字位置はマーク列の有無で動く（ペイン行と同じ数え方）
-        let icon_at = head.chars().count().saturating_sub(2);
-        let mark_at = mark.map(|_| head.chars().count().saturating_sub(4));
+        let head = row_head(is_highlighted, None, mark, icon);
+        let head_width = UnicodeWidthStr::width(head.text.as_str());
 
         let tab = truncate(tab_name, tab_column);
-        let tab_width = UnicodeWidthStr::width(tab.as_str());
         let inner = content_cols(cols);
         // フローティングペインの丸括弧はペイン行と同じ扱い（先に確保する）。
         // トリアージ行はカウンタ列・cwd行を持たないが、括弧はペイン名に直接付く
@@ -1317,48 +1282,33 @@ impl State {
         let (title, _) = fold_to_width(self.display_title(entry), inner.saturating_sub(reserved));
         let (open, close) = floating_brackets(entry, &title);
 
-        let mut label = format!("{}{}{}{}", head, open, title, close);
+        let mut label = format!("{}{}{}{}", head.text, open, title, close);
         let mut tab_span = None;
         if !tab.is_empty() {
-            let filler = inner.saturating_sub(UnicodeWidthStr::width(label.as_str()) + tab_width);
-            label.push_str(&" ".repeat(filler));
-            let start = label.chars().count();
-            label.push_str(&tab);
-            let end = label.chars().count();
-            // アイコンとタブ名だけで幅を使い切るほど狭いときの保険。はみ出すと
-            // 選択背景が端末側で折り返して次の行を汚す
-            let fitted = truncate(&label, inner);
             // 切り詰められたらタブ名の位置が確定しないので dim は諦める
-            if fitted.chars().count() == end {
-                tab_span = Some((start, end));
-            }
-            label = fitted;
+            //（append_right_column が None を返す）
+            tab_span = append_right_column(&mut label, &tab, inner);
         }
-        if is_selected {
+        if is_highlighted {
             label = pad_to_width(label, cols);
         }
 
         let mut text = Text::new(&label);
-        // ペイン名は通常ウェイトに落とす（決定36改訂。ペイン行と同じ扱いで、選択行は
-        // boldのまま残す）
-        if !is_selected {
-            let name_start = head.chars().count();
-            let name_end =
-                name_start + open.chars().count() + title.chars().count() + close.chars().count();
-            text = text.unbold_range(name_start..name_end);
+        if !is_highlighted {
+            text = unbold_name(text, &head.text, open, &title, close);
         }
         if let Some(status) = status {
-            text = text.color_range(status.color(), icon_at..icon_at + 1);
+            text = text.color_range(status.color(), head.icon_at..head.icon_at + 1);
         }
-        if let (Some(at), Some(true)) = (mark_at, mark) {
+        if let (Some(at), Some(true)) = (head.mark_at, mark) {
             text = text.color_range(2, at..at + 1);
         }
         // タブ名は主役（状態アイコン・ペイン名）ではないので落として出す。
         // 選択行では落とさない — 帯の中でさらに沈むと読めなくなる（cwd行と同じ）
-        if let (Some((start, end)), false) = (tab_span, is_selected) {
+        if let (Some((start, end)), false) = (tab_span, is_highlighted) {
             text = text.dim_range(start..end);
         }
-        if is_selected {
+        if is_highlighted {
             text = text.selected().opaque().color_range(2, 0..1);
         }
         text
@@ -1420,6 +1370,69 @@ fn mark_cell(mark: Option<bool>) -> String {
         Some(false) => "  ".to_string(),
         None => String::new(),
     }
+}
+
+// 行頭（選択バー → 番号列 → マーク列 → 状態アイコン。決定39の並び）。
+// ペイン行とトリアージ行で共有する
+struct RowHead {
+    // "▌ {番号} {✓|空白}{icon} " の形。出さない列はそのまま詰める
+    text: String,
+    // マーク印の文字位置（列を出すフレームだけ）。アイコンの2文字手前で、
+    // 番号列の有無に追従する
+    mark_at: Option<usize>,
+    // 状態アイコンの文字位置。head の末尾は常に「アイコン(1文字)+空白」なので、
+    // 番号列の有無で動いても末尾から数えれば追従できる
+    icon_at: usize,
+}
+
+fn row_head(
+    is_highlighted: bool,
+    number: Option<(&str, bool)>,
+    mark: Option<bool>,
+    icon: &str,
+) -> RowHead {
+    // 光っている行は左端にバーを立てる。テーマの選択色が沈む配色でもどこに
+    // いるか一目で分かるようにするため（幅は2文字で固定し、後続の列の開始位置を
+    // ずらさない）
+    let prefix = if is_highlighted { "▌ " } else { "  " };
+    let mark_cell = mark_cell(mark);
+    let text = match number {
+        Some((digits, _)) => format!("{}{} {}{} ", prefix, digits, mark_cell, icon),
+        None => format!("{}{}{} ", prefix, mark_cell, icon),
+    };
+    let chars = text.chars().count();
+    RowHead {
+        mark_at: mark.map(|_| chars.saturating_sub(4)),
+        icon_at: chars.saturating_sub(2),
+        text,
+    }
+}
+
+// ペイン名の右側の列（カウンタ列・タブ名列）を右端揃えで足す。
+// アイコンと列だけで幅を使い切るほど狭いときは切り詰める — はみ出すと
+// 選択背景が端末側で折り返して次の行を汚す。
+// 返り値は、列が切り詰められずに収まったときの列の (開始, 終了) 文字位置
+fn append_right_column(label: &mut String, column: &str, inner: usize) -> Option<(usize, usize)> {
+    let width = UnicodeWidthStr::width(column);
+    let filler = inner.saturating_sub(UnicodeWidthStr::width(label.as_str()) + width);
+    label.push_str(&" ".repeat(filler));
+    let start = label.chars().count();
+    label.push_str(column);
+    let end = label.chars().count();
+    let fitted = truncate(label, inner);
+    let span = (fitted.chars().count() == end).then_some((start, end));
+    *label = fitted;
+    span
+}
+
+// ペイン名を通常ウェイトに落とす（決定36改訂）。全行bold・同色だと状態アイコンの
+// 色や選択行の背景が相対的に沈むため。**選択行はboldのまま残す** — 実機確認で
+// 選択行まで落とすと「いまどこにいるか」が弱まった。丸括弧もペイン名の一部として
+// 同じ太さで出す（要件: floating-pane-indicator）
+fn unbold_name(text: Text, head: &str, open: &str, title: &str, close: &str) -> Text {
+    let start = head.chars().count();
+    let end = start + open.chars().count() + title.chars().count() + close.chars().count();
+    text.unbold_range(start..end)
 }
 
 // 終了操作サブモードの確認プロンプト（決定35。要件: pane-close-kill）。
@@ -1533,17 +1546,13 @@ pub(crate) fn reconcile_scroll(
     scroll
 }
 
-// cwd行1行ぶんの Text（決定22）。ペイン行の続きとして読めるよう字下げして dim で出す。
-// zellij側の実装制約でdimはboldを打ち消さないため、見た目上はbold+dimになる
-// （決定36の対象外。詳細は docs/issues/sidebar-cwd-bold.md）。選択中もdimを
-// 外さない — 外すとbold表示に戻ってしまい、カーソル移動のたびに見た目が
-// ちらついて見づらいと実機で指摘された（2026-08-09）
-//
-// パスは末尾のディレクトリ名のほうが識別に効くので、収まらないときは
-// 切り詰め（末尾 `…`）ではなく先頭省略で畳む
-pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usize) -> Text {
+// cwd行1行ぶんの Text（決定22）。ペイン行の続きとして読めるよう字下げして dim で
+// 出す。zellij側の実装制約で dim は bold を打ち消さないため、見た目上は bold+dim
+// になる（決定36の対象外。docs/issues/sidebar-cwd-bold.md）。
+// パスは末尾のディレクトリ名のほうが識別に効くので、先頭省略で畳む
+pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: usize) -> Text {
     // 選択中は左端のバーをこの行まで伸ばし、ペイン行と1つの帯に見せる
-    let bar = if is_selected { "▌" } else { " " };
+    let bar = if is_highlighted { "▌" } else { " " };
     let indent = format!("{}{}", bar, " ".repeat(CWD_INDENT.saturating_sub(1)));
     let inner = content_cols(cols);
     let (path, dropped) = truncate_start(cwd, inner.saturating_sub(CWD_INDENT));
@@ -1551,17 +1560,17 @@ pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usi
     // 字下げだけで幅を使い切るほど狭いときの保険。はみ出した行は端末側で
     // 折り返り、選択背景が次の行を汚す（docs/issues/sidebar-bottom-highlight-glitch.md）
     let mut label = truncate(&format!("{}{}", indent, path), inner);
-    if is_selected {
+    if is_highlighted {
         label = pad_to_width(label, cols);
     }
     let mut text = Text::new(&label);
     let end = label.chars().count();
     if end > CWD_INDENT {
-        // cwd は主役（ペイン名・カウンタ列）ではないので落として出す。
-        // 選択中も落としたまま — unbold_range は併用しない。zellij側の実装
-        // （zellij-server/src/ui/components/text.rs の color_index_character）が
-        // dim/unboldを同じindexに対して if/else if で排他的に処理しており、
-        // unboldを足すとdimが無視されて通常表示に戻ってしまう（実測・ソース確認済み）
+        // cwd は主役ではないので落として出す。選択中も落としたまま — 外すと
+        // bold に戻ってカーソル移動のたびにちらつく（2026-08-09 実機指摘）。
+        // unbold_range は併用しない — zellij 側が dim/unbold を排他的に処理して
+        // おり、足すと dim が無視される（実測・ソース確認済み。
+        // zellij-server/src/ui/components/text.rs の color_index_character）
         text = text.dim_range(CWD_INDENT..end);
     }
 
@@ -1577,173 +1586,8 @@ pub(crate) fn cwd_row(cwd: &str, is_selected: bool, hit: Option<&Hit>, cols: usi
             text = text.color_indices(1, indices);
         }
     }
-    if is_selected {
+    if is_highlighted {
         text = text.selected().opaque().color_range(2, 0..1);
     }
     text
-}
-
-// 中身がパスかどうか。Claude Code はペイン名に cwd をそのまま入れることがあり、
-// その場合は末尾を切ると `/Users/example/develo…` のようにどれも同じ見た目になる
-fn looks_like_path(s: &str) -> bool {
-    s.starts_with('/') || s.starts_with("~/")
-}
-
-// 表示幅 max に畳む（決定22）。パスは先頭省略、それ以外は切り詰め。
-// 返り値は (畳んだ文字列, 先頭で落とした文字数)
-fn fold_to_width(s: &str, max: usize) -> (String, usize) {
-    if looks_like_path(s) {
-        truncate_start(s, max)
-    } else {
-        (truncate(s, max), 0)
-    }
-}
-
-// フィールド内のマッチ位置（char index）を、畳んだあとの行内の位置へ移す。
-// 画面から落ちた位置は捨てる — 見えていない文字にハイライトを置くと、
-// 関係ない文字が光ってヒット箇所の提示にならない
-pub(crate) fn fold_highlight_indices(
-    indices: &[usize],
-    folded: &str,
-    dropped: usize,
-    original_len: usize,
-    offset: usize,
-) -> Vec<usize> {
-    if dropped > 0 {
-        // 先頭省略。残った側は省略記号（1文字）ぶん右へずれる
-        indices
-            .iter()
-            .filter(|&&i| i >= dropped)
-            .map(|&i| i - dropped + offset + 1)
-            .collect()
-    } else {
-        let limit = colorable_char_limit(folded.chars().count(), original_len);
-        indices
-            .iter()
-            .filter(|&&i| i < limit)
-            .map(|&i| i + offset)
-            .collect()
-    }
-}
-
-// 切り詰め後の行で色を乗せてよい文字数の上限。
-// 切り詰められた行の末尾は … なので、そこには色を乗せない
-fn colorable_char_limit(visible: usize, original_len: usize) -> usize {
-    if visible < original_len {
-        visible.saturating_sub(1)
-    } else {
-        visible
-    }
-}
-
-// マッチ位置（フィールド内の char index）を行ラベル内の位置へずらし、
-// truncate() で切られて画面に無い位置を捨てる
-pub(crate) fn shift_highlight_indices(
-    indices: &[usize],
-    offset: usize,
-    truncated: &str,
-    original_len: usize,
-) -> Vec<usize> {
-    let limit = colorable_char_limit(truncated.chars().count(), original_len);
-    indices
-        .iter()
-        .map(|i| i + offset)
-        .filter(|i| *i < limit)
-        .collect()
-}
-
-// 表示幅が cols に達するまで右側を空白で埋める。
-// 全角文字（2セル）が混ざるので表示幅で数える — 文字数で数えると実際の
-// セル幅を超えてパディングしてしまい、選択背景が端末側で折り返されて
-// 次の行にはみ出す（docs/issues/sidebar-bottom-highlight-glitch.md）
-pub(crate) fn pad_to_width(mut s: String, cols: usize) -> String {
-    let pad = cols.saturating_sub(UnicodeWidthStr::width(s.as_str()));
-    s.push_str(&" ".repeat(pad));
-    s
-}
-
-// 左側に空白を足して表示幅 width に揃える（カウンタ列の右揃え用）
-fn pad_left(s: &str, width: usize) -> String {
-    let pad = width.saturating_sub(UnicodeWidthStr::width(s));
-    format!("{}{}", " ".repeat(pad), s)
-}
-
-// 表示セル幅ベースの先頭省略。先頭を落として `…` に畳み、末尾を残す（決定22）。
-// `/` の位置で丸め、`…` の直後が必ず `/` になるようにする（`…/development/…`
-// のような形。ディレクトリ名の途中で切れて中途半端な文字列になるのを避ける
-// ための調整。詳細は docs/issues/sidebar-cwd-path-boundary.md）。
-// どのセグメント境界でも収まらないほど狭いときだけ、従来どおり文字幅で
-// 機械的に末尾を残す。
-// 返り値は (畳んだ文字列, 落とした文字数)
-pub(crate) fn truncate_start(s: &str, max: usize) -> (String, usize) {
-    let total = s.chars().count();
-    // 幅0のときに省略記号だけがはみ出さないようにする
-    if max == 0 {
-        return (String::new(), total);
-    }
-    if UnicodeWidthStr::width(s) <= max {
-        return (s.to_string(), 0);
-    }
-    if let Some((dropped, tail)) = truncate_start_at_boundary(s, max) {
-        return (format!("…{tail}"), dropped);
-    }
-    // フォールバック: 最後のセグメント自体が `…/` を付けても収まらないほど
-    // 長い。区切りでは畳めないので、文字幅で機械的に末尾を残す
-    let limit = max.saturating_sub(1);
-    let mut kept = 0;
-    let mut width = 0;
-    for c in s.chars().rev() {
-        let w = UnicodeWidthChar::width(c).unwrap_or(0);
-        if width + w > limit {
-            break;
-        }
-        width += w;
-        kept += 1;
-    }
-    let dropped = total - kept;
-    let mut out = String::from("…");
-    out.extend(s.chars().skip(dropped));
-    (out, dropped)
-}
-
-// `/` の位置（先頭自身を除く）を境界候補として、末尾からいちばん多く残せる
-// 境界を探す。境界の文字（`/`自身）ごと残すので、`…` の直後は必ず `/` になる
-fn truncate_start_at_boundary(s: &str, max: usize) -> Option<(usize, String)> {
-    let chars: Vec<char> = s.chars().collect();
-    for (i, &c) in chars.iter().enumerate() {
-        if i == 0 || c != '/' {
-            continue;
-        }
-        let tail: String = chars[i..].iter().collect();
-        // 省略記号（幅1）ぶんの余地を残して収まるか
-        if UnicodeWidthStr::width(tail.as_str()) < max {
-            return Some((i, tail));
-        }
-    }
-    None
-}
-
-// 表示セル幅ベースの切り詰め。全角文字（CJK）は2セル分として数える
-pub(crate) fn truncate(s: &str, max: usize) -> String {
-    // 幅0のときに省略記号だけがはみ出さないようにする
-    if max == 0 {
-        return String::new();
-    }
-    if UnicodeWidthStr::width(s) <= max {
-        return s.to_string();
-    }
-    // 省略記号（幅1）ぶんの余地を残しながら、幅が max-1 を超える手前まで詰める
-    let limit = max.saturating_sub(1);
-    let mut out = String::new();
-    let mut width = 0;
-    for c in s.chars() {
-        let w = UnicodeWidthChar::width(c).unwrap_or(0);
-        if width + w > limit {
-            break;
-        }
-        width += w;
-        out.push(c);
-    }
-    out.push('…');
-    out
 }

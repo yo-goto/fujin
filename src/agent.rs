@@ -187,13 +187,31 @@ impl StatusPayload {
 }
 
 impl State {
+    // 状態通知（STATUS_PIPE）の受け口。
+    //
+    // 新規エージェント検出なら配置演出を出す（要件: header-animation）。通知は
+    // 全インスタンスへ配送されるので、可視インスタンスだけに絞る（決定14の権威判定）。
+    // サーバへの問い合わせが走るのは着任のときだけで、1エージェントにつき1回しか来ない
+    pub(crate) fn handle_status_pipe(&mut self, payload: Option<&str>) -> bool {
+        let Some(raw) = payload else {
+            return false;
+        };
+        let Some(payload) = StatusPayload::parse(raw) else {
+            eprintln!("fujin: unparsable status payload: {}", raw);
+            return false;
+        };
+        if self.apply_status(payload) && self.is_visible_instance() {
+            self.begin_deployment(1);
+        }
+        true
+    }
+
     // フックからの状態通知を適用。**新規エージェント検出になったら true**
     //（要件: header-animation）。
     //
-    // 配置演出を出すかどうかまではここで決めない — 通知は全インスタンスへ配送されるので
-    // 可視インスタンス判定を通す必要があるが、その問い合わせはホスト関数でテストから
-    // 呼べない（docs/dev/build-and-test.md）。判定は呼び出し元（`main.rs` の
-    // 状態通知ハンドラ）に置き、ここは通知の解釈だけに徹する
+    // 配置演出を出すかどうかまではここで決めない — 可視インスタンス判定は
+    // ホスト関数でテストから呼べない（docs/dev/build-and-test.md）。判定は
+    // 上の pipe ハンドラに置き、ここは通知の解釈だけに徹する
     pub(crate) fn apply_status(&mut self, payload: StatusPayload) -> bool {
         if let Some(cwd) = &payload.cwd {
             self.pane_cwds.insert(payload.pane_id, cwd.clone());

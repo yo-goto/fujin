@@ -37,6 +37,54 @@ pub(crate) struct SearchState {
 }
 
 impl State {
+    // fujin_up / fujin_down（直接キー方式・決定6）の受け口。
+    // 選択を動かすのは可視インスタンスだけ（決定14）。全員が自前で動かすと、
+    // 一覧が古いインスタンスでは境界判定とクランプの結果が違って選択がずれる
+    pub(crate) fn handle_nav_step_pipe(&mut self, forward: bool) -> bool {
+        if !self.refresh_focus() {
+            return false;
+        }
+        if forward {
+            self.select_next();
+        } else {
+            self.select_previous();
+        }
+        self.broadcast_selection();
+        true
+    }
+
+    // fujin_go の受け口。副作用は可視インスタンスのみ実行（多重発行の防止・決定14）
+    pub(crate) fn handle_nav_go_pipe(&mut self) -> bool {
+        if self.refresh_focus() {
+            self.focus_selected();
+        }
+        false
+    }
+
+    // fujin_mode（navモードへの入場）の受け口。
+    //
+    // キーの横取りは権威インスタンス1つだけが行う。全員が intercept_key_presses()
+    // を呼ぶと誰が受け取るか不定になる。refresh_focus() が入場直前の実フォーカスを
+    // 取り込むので、enter_nav_mode() は最新のフォーカスを見て初期位置を決められる。
+    //
+    // なお召喚インスタンスにはこの pipe が届かない。キーバインドの `MessagePlugin` は
+    // URL一致で配送されるが、召喚インスタンスは configuration に `summoned=true` を
+    // 持つため一致しない（実測: 受信ログが一切出ない）。トグルは召喚役が担う（決定16）
+    pub(crate) fn handle_nav_mode_pipe(&mut self) -> bool {
+        if self.refresh_focus() {
+            if !self.nav_mode {
+                self.enter_nav_mode();
+                return true;
+            }
+            return false;
+        }
+        // ここへ来たインスタンスはフォーカス中のタブに居ない。そのタブに
+        // fujin が1つも無ければ権威がどこにも立たず、pipe が届いても
+        // 無反応になる。代表1つがフローティングで召喚して穴を埋める（決定16）
+        self.summon_floating_if_absent();
+        false
+    }
+
     pub(crate) fn enter_nav_mode(&mut self) {
         eprintln!("fujin: entering nav mode (summoned={})", self.summoned);
         self.nav_mode = true;
@@ -50,12 +98,9 @@ impl State {
 
     // navモード中だけ、実フォーカスをサイドバー自身へ預かる（決定34）。
     //
-    // navモードは実フォーカスを動かさないので、そのままでは探索中もフォーカス枠が
-    // 直前まで作業していたペインに点いたままになり、サイドバーのハイライトと
-    // 二重に「ここが操作対象」を主張する。フォーカス枠の色だけを消すAPIは無いが、
-    // **フォーカス枠はセッション内で1枚しか点かない**（実測）ので、フォーカスを
-    // サイドバーへ移せば作業ペインの枠は非フォーカス色に戻る。枠そのものは残る。
-    //
+    // フォーカス枠の色だけを消すAPIは無いが、**枠はセッション内で1枚しか点かない**
+    //（実測）ので、フォーカスをサイドバーへ移せば作業ペインの枠は非フォーカス色に
+    // 戻り、サイドバーのハイライトと二重に「ここが操作対象」を主張しなくなる。
     // 召喚インスタンス（決定16）は最初から自分がフォーカスを持っているので、
     // これは常駐サイドバーを召喚と同じ状態に揃える操作でもある
     fn park_focus(&mut self) {
@@ -63,7 +108,7 @@ impl State {
         if self.summoned || self.focus_parked.is_some() {
             return;
         }
-        // 実フォーカスがプラグインペイン側にあるなら、作業ペインにフォーカス枠は
+        // 実フォーカスがプラグインペイン側にあるなら、作業ペインに枠は
         // 点いていない（上記の1枚だけの性質）。預かる理由が無い
         if !self.focus_on_terminal {
             return;
@@ -73,16 +118,14 @@ impl State {
         };
         let is_floating = self.pane_is_floating(pane_id);
         // unselectable なペインはフォーカスできない（実測。api-reference.md）ので、
-        // 預かる間だけ selectable に戻す。navモード中は全キーを横取りしている
-        // ため、この間にフォーカス巡回でサイドバーへ入り込む余地は無く、
-        // 決定6（サイドバーを巡回に混ぜない）の意図は保たれる
+        // 預かる間だけ selectable に戻す。navモード中は全キーを横取りしているため
+        // 巡回でサイドバーへ入り込む余地は無く、決定6の意図は保たれる
         set_selectable(true);
-        // 召喚インスタンスはここへ来ないので、フローティング層の出し入れ
-        //（should_float_if_hidden）も in-place 化も要らない
         focus_plugin_pane(own_id, false, false);
         self.focus_parked = Some(ParkedFocus {
             pane_id,
             is_floating,
+            confirmed: false,
         });
     }
 
@@ -97,7 +140,6 @@ impl State {
         let Some(parked) = self.focus_parked.take() else {
             return;
         };
-        self.park_confirmed = false;
         if refocus {
             if let Some((pane_id, is_floating)) = self.refocus_target(parked) {
                 focus_pane_with_id(PaneId::Terminal(pane_id), is_floating, false);
@@ -141,37 +183,27 @@ impl State {
 
     pub(crate) fn exit_nav_mode(&mut self) {
         self.nav_mode = false;
-        // ヘルプオーバーレイはnavモードの内側の表示。開いたまま退場すると
-        // ツリー表示に戻れなくなる（navモード外にキーは届かない）
+        // ヘルプオーバーレイ・サブモード・プレビューは全て navモードの内側の
+        // 表示なので一緒に畳む。開いたまま退場するとキーが届かず戻れなくなる。
+        // 入力途中のバッファも、確認を経ていない終了操作も持ち越さない
         self.help_overlay = false;
         // 次の入場で「退場後にフォーカスが動いたか」を判定するために控える
         //（要件: focus-sync）
         self.focus_at_nav_exit = self.focused_pane;
         self.selection_at_nav_exit = self.selectable.get(self.selected).map(|e| e.pane_id);
-        // 検索サブモードごと抜ける場合はクエリも破棄する。
-        // 次回の入場は常に空クエリから始まる
         self.search = None;
-        // トリアージモードも navモードの内側の表示なので、一緒に畳む
         self.triage = None;
-        // 番号ジャンプサブモードも同様。入力途中のバッファは持ち越さない
         self.jump = None;
-        // 終了操作サブモードも同様。確認を経ていない終了操作は実行しない
-        //（要件: pane-close-kill）
         self.termination = None;
-        // プレビューも畳んでフローティングペインを閉じる（決定42）。ジャンプ・
-        // 退場のどちらの経路もここを通る。navモードの外にプレビューだけ残すのは
-        // 決定34（フォーカスの預かり）の設計と整合しない。
-        // **預かったフォーカスを返すより前**に閉じる — 閉じる順が逆だと、
-        // 返した先のフォーカスがプレビューの後始末で持って行かれかねない
+        // プレビューを畳むのは**預かったフォーカスを返すより前**（決定42）。
+        // 順が逆だと、返した先のフォーカスがプレビューの後始末で持って行かれかねない
         self.close_preview();
-        // 預かっていたフォーカスを作業ペインへ返す（決定34）。召喚インスタンスの
-        // 自死（下）より前に置く — 自分を閉じたあとではホストコマンドが届くか
-        // 分からない
+        // フォーカスの返却（決定34）は召喚インスタンスの自死（下）より前に置く —
+        // 自分を閉じたあとではホストコマンドが届くか分からない
         self.release_parked_focus(true);
         clear_key_presses_intercepts();
-        // 召喚インスタンスは用が済んだら自分で退場する（決定16）。
-        // 残すと作業ペインに重なり続ける。次の入場でまた呼べばよい
-        //（召喚から入場まで実測16ms）
+        // 召喚インスタンスは用が済んだら自分で退場する（決定16）。残すと作業
+        // ペインに重なり続ける。次の入場でまた呼べばよい（召喚から入場まで実測16ms）
         if self.summoned {
             if let Some(own_id) = self.own_plugin_id {
                 close_plugin_pane(own_id);
@@ -258,36 +290,28 @@ impl State {
             self.leave_nav_mode();
             return true;
         }
+        // 1文字ショートカットは頭文字（p=priority, n=number, d=delete, m=mark,
+        // v=view, r=read）で、いずれも navモード内で未使用だったキー
         match key.bare_key {
             // 検索サブモードへ（要件: docs/requirements/search-explorer/）
             BareKey::Char('/') => self.enter_search(),
-            // トリアージモードへ（要件: docs/requirements/triage-mode/）。
-            // `p` は priority の頭文字で、navモード内で未使用だった
+            // トリアージモードへ（要件: docs/requirements/triage-mode/）
             BareKey::Char('p') => self.enter_triage(),
             // 番号ジャンプサブモードへ（要件: docs/requirements/pane-number-jump/）。
-            // `n` は number の頭文字で、navモード内で未使用だった。
-            // かつてここにあった 1-9 の直行ジャンプ（1桁固定・番号の表示なし）は
-            // このサブモードへ一本化して削除した（決定29）。navモード最上位の
-            // 数字は未定義キー＝安全弁の扱いに戻る
+            // かつての 1-9 直行ジャンプはここへ一本化して削除した（決定29）。
+            // navモード最上位の数字は未定義キー＝安全弁の扱い
             BareKey::Char('n') => self.enter_jump(),
-            // 終了操作サブモードへ（要件: docs/requirements/pane-close-kill/、
-            // 決定35）。`d` は delete の頭文字で、navモード内で未使用だった。
-            // close/kill/kill→close を独立キーにすると押し間違いのリスクが高い
-            // ので、入場キー1つ＋確認プロンプトのミニフローに畳んである
+            // 終了操作サブモードへ（決定35。要件: docs/requirements/pane-close-kill/）。
+            // close/kill/kill→close を独立キーにすると押し間違いのリスクが高いので、
+            // 入場キー1つ＋確認プロンプトのミニフローに畳んである
             BareKey::Char('d') => self.enter_termination(),
-            // マークのトグルと全解除（要件:
-            // docs/requirements/pane-termination-multi-select/、決定39）。
-            // `m` は mark の頭文字で、navモード内で未使用だった。専用サブモードは
-            // 作らない — トグルだけの軽い操作なので、一覧の上で直接積み上げる
+            // マークのトグルと全解除（決定39）。専用サブモードは作らない —
+            // トグルだけの軽い操作なので、一覧の上で直接積み上げる
             BareKey::Char('m') => self.toggle_mark(),
             BareKey::Char('M') => self.clear_marks(),
-            // プレビューのトグルと、プレビュー中の既読化（要件:
-            // docs/requirements/preview/、決定42）。`v` は view、`r` は read の
-            // 頭文字で、どちらも navモード内で未使用だった。マークと同じく専用
-            // サブモードは作らない — トグルだけの軽い横断的操作なので、
-            // 一覧の上で直接切り替える。
-            // `r` はプレビューがオフの間、未定義キーとして安全弁に倒れる
-            //（判定は mark_preview_read の中）
+            // プレビューのトグルと、プレビュー中の既読化（決定42。マークと同じく
+            // サブモード無しの横断的操作）。`r` はプレビューがオフの間、未定義キー
+            // として安全弁に倒れる（判定は mark_preview_read の中）
             BareKey::Char('v') => self.toggle_preview(),
             BareKey::Char('r') => self.mark_preview_read(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
@@ -316,18 +340,14 @@ impl State {
     // 検索サブモード中のキー解釈。navモードの安全弁（決定12）を検索サブモード用に
     // 引き直したもの。印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる
     fn handle_search_key(&mut self, key: KeyWithModifier) -> bool {
-        // 絞り込み結果の上でもマークできる（決定39）。ただしここは印字可能文字を
-        // すべてクエリに使う入力空間なので、navモード本体の `m` は使えない。
-        // **安全弁（下の has_hard_modifier）の唯一の例外**として Alt+m を通す。
-        // 全解除はこの例外を広げず navモード本体の `M` に置いたまま — Esc で
-        // 戻ってから押せばよく、取り消せなくなる操作ではない
+        // マーク（決定39）とプレビュー（決定42）は絞り込み結果の上でも使えるよう、
+        // 安全弁（下の has_hard_modifier）の例外として Alt付きで通す。
+        // マーク全解除（Esc で戻ってから押せばよい）と既読化（取り消せない操作）は
+        // この例外を広げない
         if key.bare_key == BareKey::Char('m') && key.key_modifiers.contains(&KeyModifier::Alt) {
             self.toggle_mark();
             return true;
         }
-        // プレビューのトグルも同じ事情でここだけ Alt付き（決定42）。
-        // **既読化キーはこの例外を広げない** — 既読化は取り消せない操作なので、
-        // マークの全解除（`M`）と同じく Esc で navモード本体へ戻ってから押す
         if key.bare_key == BareKey::Char('v') && key.key_modifiers.contains(&KeyModifier::Alt) {
             self.toggle_preview();
             return true;

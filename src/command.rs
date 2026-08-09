@@ -1,21 +1,13 @@
 // コマンド状態の管理（決定32。要件: docs/requirements/command-status/）。
 //
-// `zellij run -- docker build .` のように明示的にコマンドを指定して開かれた
-// ペイン（コマンドペイン）の走行・終了を、エージェント状態と同じ記号で
-// サイドバーに出す。エージェント状態とは別概念で、持つ値も `working` /
-// `done` / `error` の3値だけ（`idle` / `blocked` は無い）。
+// コマンドペインの走行・終了を、エージェント状態と同じ記号でサイドバーに出す。
+// 別概念で、持つ値は `working` / `done` / `error` の3値だけ。
 //
-// **検知は `PaneManifest` からの導出で行う。** `CommandPaneOpened` /
-// `CommandPaneExited` / `CommandPaneReRun` イベントは、そのコマンドペインを
-// **自分で開いたプラグイン**にしか配送されない（zellij 0.44.3 の
-// `zellij-server/src/pty.rs`。`RunCommand::originating_plugin` が無ければ
-// イベント自体が発火しない）ので、利用者が `zellij run` やレイアウトで
-// 開いたコマンドペインには使えない。代わりに `PaneUpdate` に無料で乗っている
-// `terminal_command` / `exited` / `exit_status` から状態を導く。
-//
-// `PaneUpdate` は可視インスタンスにしか届かない（決定13）ため、導出できるのは
-// 権威インスタンス1つだけ。観測した変化は既読クリアと同じように兄弟インスタンスへ
-// 配る。
+// **検知は `PaneManifest` からの導出で行う。** `CommandPane*` イベントは
+// そのペインを自分で開いたプラグインにしか配送されない（zellij 0.44.3 の
+// `zellij-server/src/pty.rs`）ため、利用者が開いたペインには使えない。
+// `PaneUpdate` は可視インスタンスにしか届かないので導出できるのは権威
+// インスタンス1つだけで、観測した変化は兄弟インスタンスへ配る。
 
 use std::collections::BTreeSet;
 
@@ -231,13 +223,7 @@ impl State {
             };
             payload.push_str(&command_line(*pane_id, info));
         }
-        for sibling in &self.known_siblings {
-            pipe_message_to_plugin(
-                MessageToPlugin::new(COMMAND_STATE_PIPE)
-                    .with_destination_plugin_id(*sibling)
-                    .with_payload(payload.clone()),
-            );
-        }
+        self.broadcast_to_siblings(COMMAND_STATE_PIPE, &payload);
     }
 
     // 新入りインスタンスへ押し付けるコマンド状態のダンプ（決定13）。
@@ -248,6 +234,13 @@ impl State {
             out.push_str(&command_line(*pane_id, info));
         }
         out
+    }
+
+    // fujin_command の受け口
+    pub(crate) fn handle_command_state_pipe(&mut self, payload: Option<&str>) -> bool {
+        payload
+            .map(|raw| self.apply_command_dump(raw))
+            .unwrap_or(false)
     }
 
     // 配られたコマンド状態を取り込む。戻り値は再描画するか。
