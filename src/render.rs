@@ -64,6 +64,15 @@ pub(crate) enum Row<'a> {
         hidden: usize,
         above: bool,
     },
+    // アコーディオンのセクション見出し行（要件: formation-display-accordion）。
+    // フォーメーションが1件以上あるときだけ出る2行で、フォーカスされた側だけが
+    // 中身を伸ばし、もう一方は**この1行に折りたたまれる**。
+    // 折りたたみ側は中身の件数を添えて、畳んだ先に何があるかを示す
+    Section {
+        section: crate::Section,
+        open: bool,
+        count: usize,
+    },
     Tab(&'a TabInfo),
     Pane {
         entry: &'a Selectable,
@@ -78,8 +87,8 @@ pub(crate) enum Row<'a> {
         tab_name: &'a str,
     },
     // フォーメーション見出し行（要件: formation-display-accordion）。名前と
-    // メンバー数を出す。**F1 ではカーソルが乗らない表示専用の行**で、TABS /
-    // FORMATIONS のセクション化・折りたたみ・切替えは F2 の範囲
+    // メンバー数を出す。**カーソルが乗る行**で、そこでの `x`/`a` は名簿行とは
+    // 別の意味を持つ（要件: formation-management）
     FormationHeader {
         formation: &'a Formation,
         members: usize,
@@ -413,6 +422,50 @@ impl State {
             }
             return rows;
         }
+        // フォーメーションが1件も無ければセクションに割らない（アコーディオンは
+        // フォーメーションがあって初めて意味を持つ）。使っていない利用者の
+        // サイドバーに、中身の無い見出しを2行増やさないため
+        if self.formations.is_empty() {
+            rows.extend(self.tree_rows());
+            return rows;
+        }
+        // 絞り込み中は FORMATIONS を**見出し1行だけ**にする（2026-08-11 決定）。
+        // 名簿まで出すと、どこまでが絞り込み結果なのか読めなくなる。かといって
+        // セクションごと消すと、絞り込みのたびに枠の中身が上下に動く
+        let searching = self.search.is_some();
+        let tabs_open = searching || self.split || self.section == crate::Section::Tabs;
+        let formations_open =
+            !searching && (self.split || self.section == crate::Section::Formations);
+        rows.push(Row::Section {
+            section: crate::Section::Tabs,
+            open: tabs_open,
+            count: self.selectable.len(),
+        });
+        if tabs_open {
+            rows.extend(self.tree_rows());
+        }
+        rows.push(Row::Section {
+            section: crate::Section::Formations,
+            open: formations_open,
+            // 畳んだときに出す件数は**名簿行の総数**（`assignments` の件数では
+            // ない）。一覧に無いペインへの割り当ては名簿にも出ないので、
+            // 数だけ合わない見出しになる
+            count: self
+                .formations
+                .iter()
+                .map(|formation| self.formation_members(formation.id).len())
+                .sum(),
+        });
+        if formations_open {
+            rows.extend(self.formation_rows());
+        }
+        rows
+    }
+
+    // ツリー表示（タブ見出し行とその配下のペイン行・cwd行）。アコーディオンでは
+    // TABSセクションの中身になる
+    fn tree_rows(&self) -> Vec<Row<'_>> {
+        let mut rows = Vec::new();
         if let Some(search) = &self.search {
             // 0件は空リストではなく明示する。絞り込みが効いているのか
             // 描画が壊れているのか区別できないため
@@ -475,15 +528,6 @@ impl State {
                     }
                 }
             }
-        }
-        // フォーメーションの名簿を続けて出す（要件: formation-display-accordion）。
-        // **F1 は「確認できる最小限の表示」**なので、ツリーの下に並べるだけに留める
-        // ——TABS / FORMATIONS のセクション化・折りたたみ・切替えは F2。
-        //
-        // 検索の絞り込み中は出さない。絞り込み結果に班の一覧が混ざると、どこまでが
-        // 検索の結果なのか読めなくなる（トリアージモード中はここへ来ない）
-        if self.search.is_none() {
-            rows.extend(self.formation_rows());
         }
         rows
     }
@@ -576,6 +620,12 @@ impl State {
                     entry, flat_index, ..
                 } => self.row_is_highlighted(entry, *flat_index),
                 Row::Triage { entry, .. } => triage_cursor == Some(entry.pane_id),
+                Row::FormationHeader { formation, .. } => {
+                    self.formation_row_is_highlighted(crate::FormationCursor::Header(formation.id))
+                }
+                Row::Roster { entry, .. } => {
+                    self.formation_row_is_highlighted(crate::FormationCursor::Member(entry.pane_id))
+                }
                 _ => false,
             };
             if selected {
@@ -620,13 +670,17 @@ impl State {
     }
 
     // 画面のこの行に載っているペイン（要件: docs/requirements/click-to-focus/）。
-    // ヘッダ・タブ見出し行・あふれマーカー行・一覧の外は None。
-    // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる
+    // ヘッダ・タブ見出し行・セクション見出し行・フォーメーション見出し行・
+    // あふれマーカー行・一覧の外は None。
+    //
+    // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる。
+    // **名簿行も同じ扱い**（要件: 画面に出ている行が押せない状態を作らない）
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
         match self.screen_rows(self.viewport_rows).get(row)? {
-            Row::Pane { entry, .. } | Row::Cwd { entry, .. } | Row::Triage { entry, .. } => {
-                Some(entry.pane_id)
-            }
+            Row::Pane { entry, .. }
+            | Row::Cwd { entry, .. }
+            | Row::Triage { entry, .. }
+            | Row::Roster { entry, .. } => Some(entry.pane_id),
             _ => None,
         }
     }
@@ -641,13 +695,27 @@ impl State {
     }
 
     // その行がハイライトされるか。ペイン行と cwd行で同じ判定を使い、
-    // 2行が1つの帯に見えるようにする
-    fn row_is_highlighted(&self, entry: &Selectable, flat_index: usize) -> bool {
+    // 2行が1つの帯に見えるようにする。
+    //
+    // **FORMATIONSセクションにカーソルがあるあいだ、ツリー側は光らせない** —
+    // 名簿行へ乗ると選択も同じペインへ揃う（`set_formation_cursor`）ので、
+    // split表示では同じペインの帯が2本出てしまう
+    pub(crate) fn row_is_highlighted(&self, entry: &Selectable, flat_index: usize) -> bool {
         match &self.search {
             // 検索サブモード中にハイライトする行はカーソル（ペインID）で決まる
             Some(search) => search.cursor == Some(entry.pane_id),
-            None => flat_index == self.selected,
+            None => flat_index == self.selected && self.section == crate::Section::Tabs,
         }
+    }
+
+    // FORMATIONSセクションの行（見出し行・名簿行）がハイライトされるか。
+    // ツリーとは別のカーソルを持つので判定も分ける（要件:
+    // formation-display-accordion）
+    pub(crate) fn formation_row_is_highlighted(&self, cursor: crate::FormationCursor) -> bool {
+        self.section == crate::Section::Formations
+            && self.search.is_none()
+            && self.triage.is_none()
+            && self.formation_cursor() == Some(cursor)
     }
 
     pub(crate) fn draw(&self, rows: usize, cols: usize) {
@@ -675,8 +743,11 @@ impl State {
         let screen = self.screen_rows(rows);
         // カウンタ列の幅はフレーム全体で1つ。行ごとに測ると桁が揃わない（決定22）
         let column = self.counter_column(&screen);
-        // トリアージ行のタブ名列も同じ理由でフレーム全体で1つ
-        let tab_column = self.triage_tab_column(&screen, cols);
+        // トリアージ行・名簿行のタブ名列も同じ理由でフレーム全体で1つ
+        let tab_column = self.tab_name_column(&screen, cols);
+        // 司令列を出すかも同じくフレーム単位（マーク列と同じ考え方。決定39）。
+        // 司令が1件も居ないフレームでは列そのものが消え、ペイン名が幅を広く使う
+        let commanders = self.commander_column(&screen);
         // マーク列を出すかもフレーム全体で1つ（決定39）。行ごとに決めると
         // マーク済みの行だけアイコンの位置がずれる
         let marks = self.mark_column(&screen);
@@ -718,6 +789,19 @@ impl State {
                         None,
                     );
                 }
+                Row::Section {
+                    section,
+                    open,
+                    count,
+                } => {
+                    print_text_with_coordinates(
+                        section_heading(section, open, count, cols),
+                        0,
+                        y,
+                        None,
+                        None,
+                    );
+                }
                 Row::Tab(tab) => {
                     print_text_with_coordinates(self.tab_heading(tab, cols), 0, y, None, None);
                 }
@@ -744,8 +828,10 @@ impl State {
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::FormationHeader { formation, members } => {
+                    let is_highlighted = self
+                        .formation_row_is_highlighted(crate::FormationCursor::Header(formation.id));
                     print_text_with_coordinates(
-                        formation_heading(formation, members, cols),
+                        formation_heading(formation, members, is_highlighted, cols),
                         0,
                         y,
                         None,
@@ -757,8 +843,16 @@ impl State {
                     tab_name,
                     commander,
                 } => {
+                    let is_highlighted = self.formation_row_is_highlighted(
+                        crate::FormationCursor::Member(entry.pane_id),
+                    );
                     let mark = marks.then(|| self.is_marked(entry.pane_id));
-                    let row = self.roster_row(entry, tab_name, commander, tab_column, mark, cols);
+                    let cells = RosterCells {
+                        commander: commanders.then_some(commander),
+                        mark,
+                        highlighted: is_highlighted,
+                    };
+                    let row = self.roster_row(entry, tab_name, cells, tab_column, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
                 Row::Cwd {
@@ -981,7 +1075,8 @@ impl State {
             return compose(&[(&indent, Ink::Plain), ("?:help  esc:back", ink)], inner);
         }
         if self.nav_mode {
-            return compose(&[(&indent, Ink::Plain), ("?:help  esc:exit", ink)], inner);
+            let hint = self.nav_hint(inner.saturating_sub(HEADER_INDENT));
+            return compose(&[(&indent, Ink::Plain), (hint.as_str(), ink)], inner);
         }
         // 非フォーカス時は direct-keys方式（決定6）のヒント
         compose(
@@ -994,6 +1089,34 @@ impl State {
             ],
             inner,
         )
+    }
+
+    // navモードのフッターに出すヒント。常時出すのはヘルプ・退出キーだけ（決定27）
+    // だが、フォーメーションがあるときは splitトグルの**行き先**を挟む
+    //（要件: formation-display-accordion。`s split view` / `s accordion`）。
+    //
+    // 幅32では3項目が2スペース区切りで1セル収まらないので、そのときだけ
+    // 1スペースへ詰める。項目を削るより詰めるほうを先にするのは、どれも
+    // 「いま押せるキー」で優劣が付けられないため（direct-keys のヒントが
+    // 矢印へ落としてから項目を削るのと同じ順序の考え方）
+    fn nav_hint(&self, budget: usize) -> String {
+        let split = if self.split {
+            "s:accordion"
+        } else {
+            "s:split view"
+        };
+        let parts: Vec<&str> = if self.formations.is_empty() {
+            vec!["?:help", "esc:exit"]
+        } else {
+            vec!["?:help", split, "esc:exit"]
+        };
+        for gap in ["  ", " "] {
+            let line = parts.join(gap);
+            if UnicodeWidthStr::width(line.as_str()) <= budget {
+                return line;
+            }
+        }
+        parts.join(" ")
     }
 
     // 非フォーカス時のフッターに出す direct-keys のヒント（要件: sidebar-footer）。
@@ -1203,7 +1326,9 @@ impl State {
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定32）
         let status = self.pane_status(entry.pane_id);
         let icon = status.map(|s| s.icon()).unwrap_or(" ");
-        let head = row_head(cursor_lead(is_highlighted), number, mark, icon);
+        // 司令列はツリーのペイン行には出さない（要件: 名簿の中での役割なので、
+        // ツリー側に持ち込むと階段の桁がフォーメーションの有無で動く）
+        let head = row_head(cursor_lead(is_highlighted), None, number, mark, icon);
         let head_width = UnicodeWidthStr::width(head.text.as_str());
 
         let (subagents, open_tasks) = counter_labels(agent);
@@ -1302,14 +1427,13 @@ impl State {
         text
     }
 
-    // トリアージ行のタブ名列の幅（要件: docs/requirements/triage-mode/）。
+    // トリアージ行・名簿行のタブ名列の幅（要件: triage-mode / formation）。
     // カウンタ列（決定22）と同じくフレーム内の実測最大で決めて、行をまたいで
     // タブ名の開始位置を揃える。
     //
-    // **名簿行（要件: formation）も同じ列を共用する。** トリアージモード中は
-    // ツリーもフォーメーションも出ないので、両者が同じフレームに並ぶことはなく、
-    // どちらか一方の実測になる
-    pub(crate) fn triage_tab_column(&self, rows: &[Row<'_>], cols: usize) -> usize {
+    // **両者は同じ列を共用する。** トリアージモード中はツリーもフォーメーションも
+    // 出ないので、両者が同じフレームに並ぶことはなく、どちらか一方の実測になる
+    pub(crate) fn tab_name_column(&self, rows: &[Row<'_>], cols: usize) -> usize {
         let mut width = 0;
         for row in rows {
             if let Row::Triage { tab_name, .. } | Row::Roster { tab_name, .. } = row {
@@ -1341,7 +1465,7 @@ impl State {
             entry,
             tab_name,
             FlatHead {
-                lead: cursor_lead(is_highlighted),
+                commander: None,
                 mark,
                 highlighted: is_highlighted,
             },
@@ -1351,40 +1475,54 @@ impl State {
     }
 
     // 名簿行1行ぶんの Text（要件: formation-display-accordion）。トリアージ行と
-    // 同じレイアウトで、**左端のカーソルバーの位置に司令の記号**が入る
-    //（要件: formation-commander。色は使わず記号だけで表す）。
+    // 同じレイアウトに、**司令列**（要件: formation-commander。色は使わず記号だけ）
+    // が1セル挟まる。
     //
-    // F1 では名簿行にカーソルが乗らないので両者は衝突しない。乗るようになる F2 で
-    // 置き場所を決め直すこと（記号そのものの確定は F6）
+    // 司令の記号を行頭に置かないのは、そこがカーソルバーの位置だから（F1 は
+    // 名簿行にカーソルが乗らない前提で行頭に置いていた）。マーク列と同じく
+    // 「フレーム内に司令が居るときだけ出る列」にしてある
     pub(crate) fn roster_row(
         &self,
         entry: &Selectable,
         tab_name: &str,
-        commander: bool,
+        cells: RosterCells,
         tab_column: usize,
-        mark: Option<bool>,
         cols: usize,
     ) -> Text {
+        let RosterCells {
+            commander,
+            mark,
+            highlighted,
+        } = cells;
         self.flat_row(
             entry,
             tab_name,
             FlatHead {
-                lead: if commander {
-                    COMMANDER_GLYPH
-                } else {
-                    cursor_lead(false)
-                },
+                commander,
                 mark,
-                highlighted: false,
+                highlighted,
             },
             tab_column,
             cols,
         )
     }
 
+    // このフレームに司令列を出すか（決定39のマーク列と同じ考え方）。
+    // 司令が1件も居ないフレームでは列そのものが消える
+    pub(crate) fn commander_column(&self, rows: &[Row<'_>]) -> bool {
+        rows.iter().any(|row| {
+            matches!(
+                row,
+                Row::Roster {
+                    commander: true,
+                    ..
+                }
+            )
+        })
+    }
+
     // タブ名列を持つフラットな行（トリアージ行・名簿行）の組み立て。
-    // 違うのは行頭2文字（カーソルバー / 司令の記号）と選択の帯を敷くかだけなので、
-    // レイアウトの本体はここ1本に集約する
+    // 違うのは司令列を持つかだけなので、レイアウトの本体はここ1本に集約する
     fn flat_row(
         &self,
         entry: &Selectable,
@@ -1394,7 +1532,7 @@ impl State {
         cols: usize,
     ) -> Text {
         let FlatHead {
-            lead,
+            commander,
             mark,
             highlighted: is_highlighted,
         } = cells;
@@ -1402,7 +1540,7 @@ impl State {
         let icon = status.map(|s| s.icon()).unwrap_or(" ");
         // マーク列もペイン行と同じ位置（アイコンの手前）に出す（決定39）。
         // トリアージ一覧・名簿の上でもマークできる以上、印が見えないと積み上げられない
-        let head = row_head(lead, None, mark, icon);
+        let head = row_head(cursor_lead(is_highlighted), commander, None, mark, icon);
         let head_width = UnicodeWidthStr::width(head.text.as_str());
 
         let tab = truncate(tab_name, tab_column);
@@ -1458,31 +1596,89 @@ impl State {
     }
 }
 
+// アコーディオンのセクション見出し行（要件: formation-display-accordion）。
+//
+// タブ見出し行と同じ階層の外側（x=0）に置き、開いている側は `▾ tabs`、
+// 折りたたまれた側は `▸ formations (5)` の形。文言は他のUI文言と同じく
+// 英字・小文字（ui-design.md の「文言」）。
+//
+// 折りたたみ側を dim に落とすのは、いま読ませたいのが開いている側だから
+pub(crate) fn section_heading(
+    section: crate::Section,
+    open: bool,
+    count: usize,
+    cols: usize,
+) -> Text {
+    let inner = content_cols(cols);
+    let marker = if open { "▾ " } else { "▸ " };
+    let label = match section {
+        crate::Section::Tabs => "tabs",
+        crate::Section::Formations => "formations",
+    };
+    // 畳んだ側だけ件数を添える。開いていれば中身が見えているので数は要らない
+    let count = if open {
+        String::new()
+    } else {
+        format!(" ({})", count)
+    };
+    compose(
+        &[
+            (marker, Ink::Muted),
+            (label, if open { Ink::Plain } else { Ink::Muted }),
+            (count.as_str(), Ink::Muted),
+        ],
+        inner,
+    )
+}
+
 // フォーメーション見出し行1行ぶんの Text（要件: formation-display-accordion）。
 //
-// タブ見出し行と同じく階層の外側（x=0）に置き、`▾ 名前 (メンバー数)` の形で出す。
-// メンバー数を先に確保して名前の側を畳むのは、カウンタ列（決定22）と同じ折り合い方
-// ——名前が長くても「何人居る班か」は消えない。
+// セクション見出しの1段内側（x=2、ツリーのペイン行と同じ列）に置き、
+// `▾ 名前 (メンバー数)` の形で出す。メンバー数を先に確保して名前の側を畳むのは、
+// カウンタ列（決定22）と同じ折り合い方——名前が長くても「何人居る班か」は消えない。
 //
-// F1 では折りたたみを持たないので三角は常に開いた向き（折りたたみと集約バッジは F5、
-// アクセントカラーは F6）。記号はタブ見出しと同じ系列の暫定で、セクション化する F2 で
-// 見分けが付くかを実機で確かめる
-pub(crate) fn formation_heading(formation: &Formation, members: usize, cols: usize) -> Text {
+// 折りたたみと集約バッジは F5、アクセントカラーは F6 なので、三角は常に開いた向き
+pub(crate) fn formation_heading(
+    formation: &Formation,
+    members: usize,
+    is_highlighted: bool,
+    cols: usize,
+) -> Text {
     let inner = content_cols(cols);
-    let head = format!("{} ", FORMATION_MARKER);
+    let head = format!("{}{} ", cursor_lead(is_highlighted), FORMATION_MARKER);
     let count = format!(" ({})", members);
     let budget = inner
         .saturating_sub(UnicodeWidthStr::width(head.as_str()))
         .saturating_sub(UnicodeWidthStr::width(count.as_str()));
     let name = truncate(&formation.name, budget);
-    compose(
+    // 選択行の背景は幅いっぱいに伸ばす（ペイン行と同じ。埋めないと帯に見えない）
+    let pad = if is_highlighted {
+        let used = UnicodeWidthStr::width(head.as_str())
+            + UnicodeWidthStr::width(name.as_str())
+            + UnicodeWidthStr::width(count.as_str());
+        " ".repeat(cols.saturating_sub(used))
+    } else {
+        String::new()
+    };
+    // 帯の中では dim を使わない（帯でさらに沈むと読めなくなる。cwd行と同じ判断）
+    let subdued = if is_highlighted {
+        Ink::Plain
+    } else {
+        Ink::Muted
+    };
+    let mut text = compose(
         &[
-            (head.as_str(), Ink::Muted),
+            (head.as_str(), subdued),
             (name.as_str(), Ink::Plain),
-            (count.as_str(), Ink::Muted),
+            (count.as_str(), subdued),
+            (pad.as_str(), Ink::Plain),
         ],
-        inner,
-    )
+        if is_highlighted { cols } else { inner },
+    );
+    if is_highlighted {
+        text = text.selected().opaque().color_range(2, 0..1);
+    }
+    text
 }
 
 // フォーメーション編集のプロンプト（要件: formation）。終了操作サブモードと同じく
@@ -1493,6 +1689,8 @@ pub(crate) fn formation_heading(formation: &Formation, members: usize, cols: usi
 //   見分けられるようにする
 // - 名前の重複: 入力欄の代わりにエラーを出す。次の入力で入力欄へ戻るので、
 //   打ち直しは Esc を経由せずに続けられる
+// - 削除の確認: `x:delete esc:cancel`。**フォーメーション名は出さない** —
+//   対象は見出し行のハイライトで分かっており、終了操作の確認と同じ判断
 fn formation_footer(
     prompt: &FormationPrompt,
     total: usize,
@@ -1509,6 +1707,9 @@ fn formation_footer(
                 "add 1  n:new".to_string()
             };
             compose(&[(indent, Ink::Plain), (picks.as_str(), ink)], cols)
+        }
+        FormationPrompt::Delete { .. } => {
+            compose(&[(indent, Ink::Plain), ("x:delete esc:cancel", ink)], cols)
         }
         // 重複のエラーは入力欄より先に見る（入力は畳まず持っている）
         FormationPrompt::Name { taken: true, .. } => {
@@ -1595,13 +1796,22 @@ struct RowHead {
 }
 
 // トリアージ行・名簿行の行頭の作り分け（`flat_row`）。引数の数を増やさずに
-// 「左端2文字」と「帯を敷くか」を独立に渡すための束
+// 「司令列」と「帯を敷くか」を独立に渡すための束
 struct FlatHead {
-    // 行頭2文字（カーソルバー / 司令の記号 / 空白）
-    lead: &'static str,
+    // 司令列を出すフレームだけ Some（その行が司令か。要件: formation-commander）。
+    // トリアージ行は常に None ＝ 列を持たない
+    commander: Option<bool>,
     mark: Option<bool>,
-    // 選択の帯を敷くか。名簿行は F1 ではカーソルが乗らないので常に false
+    // 選択の帯を敷くか
     highlighted: bool,
+}
+
+// 名簿行の行頭に挟む列（`roster_row` の引数の束）。中身は `FlatHead` と同じだが、
+// 描画側から見た名前を分けてある — トリアージ行と共有するのは組み立ての内部だけ
+pub(crate) struct RosterCells {
+    pub(crate) commander: Option<bool>,
+    pub(crate) mark: Option<bool>,
+    pub(crate) highlighted: bool,
 }
 
 // 光っている行は左端にバーを立てる。テーマの選択色が沈む配色でもどこにいるか
@@ -1614,17 +1824,36 @@ fn cursor_lead(is_highlighted: bool) -> &'static str {
     }
 }
 
-// 名簿行で司令を示す記号（要件: formation-commander）。カーソルバーと同じ位置・
-// 同じ幅に置き、**色は乗せない** — 司令は「班の中での役割」で、アクセントカラー
-// （「どの班か」）とは軸が違うため記号だけで表す。ロゴ・配置演出の「本陣」と同じ
-// 三角を借りた暫定の記号で、確定は F6
-const COMMANDER_GLYPH: &str = "▲ ";
+// 名簿行で司令を示す記号（要件: formation-commander）。カーソルバーの右隣に
+// 1セルの列として置き、**色は乗せない** — 司令は「班の中での役割」で、
+// アクセントカラー（「どの班か」）とは軸が違うため記号だけで表す。
+// ロゴ・配置演出の「本陣」と同じ三角を借りた暫定の記号で、確定は F6
+const COMMANDER_GLYPH: &str = "▲";
 
-fn row_head(lead: &str, number: Option<(&str, bool)>, mark: Option<bool>, icon: &str) -> RowHead {
+// 司令列の1行ぶん。列を出さないフレームでは空文字＝桁を消費しない
+fn commander_cell(commander: Option<bool>) -> String {
+    match commander {
+        Some(true) => format!("{} ", COMMANDER_GLYPH),
+        Some(false) => "  ".to_string(),
+        None => String::new(),
+    }
+}
+
+fn row_head(
+    lead: &str,
+    commander: Option<bool>,
+    number: Option<(&str, bool)>,
+    mark: Option<bool>,
+    icon: &str,
+) -> RowHead {
     let mark_cell = mark_cell(mark);
+    let commander_cell = commander_cell(commander);
     let text = match number {
-        Some((digits, _)) => format!("{}{} {}{} ", lead, digits, mark_cell, icon),
-        None => format!("{}{}{} ", lead, mark_cell, icon),
+        Some((digits, _)) => format!(
+            "{}{}{} {}{} ",
+            lead, commander_cell, digits, mark_cell, icon
+        ),
+        None => format!("{}{}{}{} ", lead, commander_cell, mark_cell, icon),
     };
     let chars = text.chars().count();
     RowHead {

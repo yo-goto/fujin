@@ -55,7 +55,7 @@ use agent::AgentInfo;
 use command::CommandInfo;
 use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
-use formation::{Formation, FormationPrompt};
+use formation::{Formation, FormationCursor, FormationPrompt, Section};
 use nav::{JumpState, SearchState};
 use preview::{PreviewContent, PreviewState};
 use termination::TerminationState;
@@ -155,6 +155,14 @@ struct State {
     assignments: BTreeMap<u32, u32>,
     // 次に発行するフォーメーションID。配布を受けたら最大IDの次まで進める
     next_formation_id: u32,
+    // アコーディオンのフォーカス中セクション（要件: formation-display-accordion）。
+    // 下の `split` と合わせて表示状態を成し、兄弟インスタンスへ配る
+    section: Section,
+    // splitトグル: TABS・FORMATIONS の両セクションを同時に展開する
+    split: bool,
+    // FORMATIONSセクションのカーソル。ツリー側の選択（`selected`）と違って
+    // 行種を持つ（見出し行にも乗る）。実効値は `State::formation_cursor()`
+    formation_cursor: Option<FormationCursor>,
     visible: bool,
     own_plugin_id: Option<u32>,
     // 自分のwasm URL。実行時に判明する（同期の宛先・召喚の起動元に使う）

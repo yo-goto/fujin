@@ -474,8 +474,8 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 
 | Key | Action |
 |---|---|
-| `j` / `↓` / `Tab` | next pane |
-| `k` / `↑` | previous pane |
+| `j` / `↓` | next row |
+| `k` / `↑` | previous row |
 | `g` / `G` | first / last |
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
 | `/` | enter search sub-mode (below) |

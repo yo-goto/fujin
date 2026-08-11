@@ -34,6 +34,16 @@ impl State {
         if let Some(search) = &self.search {
             return search.cursor;
         }
+        // FORMATIONSセクションにカーソルがあるときは名簿行のペイン
+        //（要件: formation。両方のセクションで編集操作が効く）。**見出し行は
+        // 指すペインを持たないので None** — `c` や `d` がそこで no-op になるのは
+        // これで足りる
+        if self.section == crate::Section::Formations {
+            return match self.formation_cursor()? {
+                crate::FormationCursor::Member(pane_id) => Some(pane_id),
+                crate::FormationCursor::Header(_) => None,
+            };
+        }
         self.selectable.get(self.selected).map(|e| e.pane_id)
     }
 

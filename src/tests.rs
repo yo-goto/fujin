@@ -20,8 +20,8 @@ use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::formation::FormationPrompt;
 use crate::render::{
-    cwd_row, divider_line, formation_heading, overflow_row, reconcile_scroll, CounterColumn,
-    HeadCells, HelpRow, Row,
+    cwd_row, divider_line, formation_heading, overflow_row, reconcile_scroll, section_heading,
+    CounterColumn, HeadCells, HelpRow, RosterCells, Row,
 };
 use crate::termination::Termination;
 use crate::width::{
@@ -4540,7 +4540,7 @@ fn triage_rows_fall_back_to_the_cwd_too() {
     state.handle_nav_key(key(BareKey::Char('p')));
 
     let rows = state.visible_rows();
-    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let tab_column = state.tab_name_column(&rows, SIDEBAR);
     let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い: {}", rows.len());
     };
@@ -4706,7 +4706,7 @@ fn triage_rows_wrap_floating_pane_names_too() {
     state.handle_nav_key(key(BareKey::Char('p')));
 
     let rows = state.visible_rows();
-    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let tab_column = state.tab_name_column(&rows, SIDEBAR);
     let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い: {}", rows.len());
     };
@@ -5549,7 +5549,7 @@ fn triage_rows_carry_the_pane_name_and_its_tab_name() {
     state.handle_nav_key(key(BareKey::Char('p')));
 
     let rows = state.visible_rows();
-    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let tab_column = state.tab_name_column(&rows, SIDEBAR);
     let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い: {}", rows.len());
     };
@@ -5586,7 +5586,7 @@ fn a_long_pane_name_does_not_push_the_tab_name_off_the_row() {
     state.handle_nav_key(key(BareKey::Char('p')));
 
     let rows = state.visible_rows();
-    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let tab_column = state.tab_name_column(&rows, SIDEBAR);
     let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い");
     };
@@ -5621,7 +5621,7 @@ fn triage_rows_drop_the_counter_column_and_the_cwd_row() {
         !rows.iter().any(|r| matches!(r, Row::Cwd { .. })),
         "cwd行は出さない"
     );
-    let tab_column = state.triage_tab_column(&rows, SIDEBAR);
+    let tab_column = state.tab_name_column(&rows, SIDEBAR);
     let Some(Row::Triage { entry, tab_name }) = rows.get(HEADER_ROWS) else {
         panic!("トリアージ行が無い: {}", rows.len());
     };
@@ -6797,6 +6797,8 @@ fn the_roster_is_flat_and_notes_the_tab_of_each_member() {
     let mut state = state_with_two_tabs();
     state.marked.extend([1, 2]);
     create_formation(&mut state, "alpha");
+    // 名簿が見えるのは FORMATIONSセクションを開いているあいだ（F2）
+    state.handle_nav_key(key(BareKey::Tab));
 
     let rows = content_rows_of(&state);
     let heading = rows
@@ -6807,8 +6809,8 @@ fn the_roster_is_flat_and_notes_the_tab_of_each_member() {
         unreachable!()
     };
     assert_eq!(
-        formation_heading(formation, *members, SIDEBAR).content(),
-        "▾ alpha (2)"
+        formation_heading(formation, *members, false, SIDEBAR).content(),
+        "  ▾ alpha (2)"
     );
     // メンバーは元のタブ位置に関わらず平坦に並び、各行に所属タブ名が付く
     let rosters: Vec<(&str, &str)> = rows
@@ -6825,11 +6827,12 @@ fn the_roster_is_flat_and_notes_the_tab_of_each_member() {
 
 #[test]
 fn the_roster_row_marks_the_commander_with_a_glyph() {
-    // 司令は色を使わず記号だけで表す（要件）。カーソルバーと同じ位置・同じ幅
+    // 司令は色を使わず記号だけで表す（要件）。カーソルバーの右隣の司令列に置く
     let mut state = formation_state(2);
     state.marked.extend([1, 2]);
     create_formation(&mut state, "alpha");
     state.handle_nav_key(key(BareKey::Char('c')));
+    state.handle_nav_key(key(BareKey::Tab));
 
     let rows = content_rows_of(&state);
     let mut rosters = rows.iter().filter_map(|r| match r {
@@ -6840,19 +6843,25 @@ fn the_roster_row_marks_the_commander_with_a_glyph() {
         } => Some((entry, tab_name, commander)),
         _ => None,
     });
+    let cells = |commander: bool| RosterCells {
+        commander: Some(commander),
+        mark: None,
+        highlighted: false,
+    };
     let (entry, tab_name, commander) = rosters.next().expect("名簿行が無い");
     assert!(commander, "先頭のメンバーが司令");
-    let commander_row = state.roster_row(entry, tab_name, *commander, 4, None, SIDEBAR);
+    let commander_row = state.roster_row(entry, tab_name, cells(*commander), 4, SIDEBAR);
     assert!(
-        commander_row.content().starts_with("▲ "),
+        // 行頭2文字はカーソルバーの席。司令の記号はその右隣の列に出る
+        commander_row.content().starts_with("  ▲ "),
         "司令の記号: {}",
         commander_row.content()
     );
     let (entry, tab_name, commander) = rosters.next().expect("2行目が無い");
     assert!(!commander);
-    let plain_row = state.roster_row(entry, tab_name, *commander, 4, None, SIDEBAR);
+    let plain_row = state.roster_row(entry, tab_name, cells(*commander), 4, SIDEBAR);
     assert!(
-        plain_row.content().starts_with("  "),
+        plain_row.content().starts_with("    "),
         "司令でない行は空白のまま: {}",
         plain_row.content()
     );
@@ -6870,6 +6879,7 @@ fn an_empty_formation_still_shows_its_heading() {
     let mut state = formation_state(2);
     create_formation(&mut state, "alpha");
     state.handle_nav_key(key(BareKey::Char('x')));
+    state.handle_nav_key(key(BareKey::Tab));
 
     let rows = content_rows_of(&state);
     let Some(Row::FormationHeader { formation, members }) = rows
@@ -6880,14 +6890,15 @@ fn an_empty_formation_still_shows_its_heading() {
     };
     assert_eq!(*members, 0);
     assert_eq!(
-        formation_heading(formation, *members, SIDEBAR).content(),
-        "▾ alpha (0)"
+        formation_heading(formation, *members, false, SIDEBAR).content(),
+        "  ▾ alpha (0)"
     );
 }
 
 #[test]
-fn the_roster_is_hidden_while_filtering() {
-    // 絞り込み結果に班の一覧が混ざると、どこまでが検索結果か読めなくなる
+fn the_roster_is_hidden_while_filtering_but_the_section_stays() {
+    // 絞り込み結果に班の一覧が混ざると、どこまでが検索結果か読めなくなる。
+    // ただしセクションごと消すと枠の中身が上下に動くので、見出し1行は残す（要件）
     let mut state = formation_state(2);
     create_formation(&mut state, "alpha");
     state.handle_nav_key(key(BareKey::Char('/')));
@@ -6896,6 +6907,385 @@ fn the_roster_is_hidden_while_filtering() {
     assert!(!rows
         .iter()
         .any(|r| matches!(r, Row::FormationHeader { .. } | Row::Roster { .. })));
+    let Some(Row::Section { open, count, .. }) = rows.iter().find(|r| {
+        matches!(
+            r,
+            Row::Section {
+                section: crate::Section::Formations,
+                ..
+            }
+        )
+    }) else {
+        panic!("絞り込み中もFORMATIONSの見出しは残る");
+    };
+    assert!(!open, "名簿は開かない");
+    assert_eq!(*count, 1, "畳んだ見出しには名簿行の件数を添える");
+}
+
+// --- F2: アコーディオン表示 ---
+
+// 先頭のフォーメーションのID（採番は0始まり）
+fn formation_id(state: &State) -> u32 {
+    state.formations[0].id
+}
+
+// セクション見出し行を (section, open) で
+fn sections_of(state: &State) -> Vec<(crate::Section, bool)> {
+    content_rows_of(state)
+        .iter()
+        .filter_map(|r| match r {
+            Row::Section { section, open, .. } => Some((*section, *open)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn there_are_no_sections_until_a_formation_exists() {
+    // フォーメーションを使っていないサイドバーに、中身の無い見出しを増やさない
+    let state = formation_state(2);
+    assert!(sections_of(&state).is_empty());
+    let mut state = state;
+    create_formation(&mut state, "alpha");
+    assert_eq!(
+        sections_of(&state),
+        vec![
+            (crate::Section::Tabs, true),
+            (crate::Section::Formations, false)
+        ]
+    );
+}
+
+#[test]
+fn tab_switches_the_focused_section_and_folds_the_other() {
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+
+    state.handle_nav_key(key(BareKey::Tab));
+    assert_eq!(state.section, crate::Section::Formations);
+    assert_eq!(
+        sections_of(&state),
+        vec![
+            (crate::Section::Tabs, false),
+            (crate::Section::Formations, true)
+        ]
+    );
+    // 折りたたまれた側にツリーの行は出ない
+    let rows = content_rows_of(&state);
+    assert!(!rows.iter().any(|r| matches!(r, Row::Tab(_))));
+    assert!(rows
+        .iter()
+        .any(|r| matches!(r, Row::FormationHeader { .. })));
+
+    // もう一度押すと TABS へ戻る。Shift+Tab も同じ切替え
+    state.handle_nav_key(key(BareKey::Tab));
+    assert_eq!(state.section, crate::Section::Tabs);
+    state.handle_nav_key(key(BareKey::Tab).with_shift_modifier());
+    assert_eq!(state.section, crate::Section::Formations);
+}
+
+#[test]
+fn tab_is_a_no_op_without_formations() {
+    // 切替え先に中身が無いだけで `Tab` は定義済みのキー。安全弁へは落とさない（要件）
+    let mut state = formation_state(3);
+    state.selected = 1;
+    state.handle_nav_key(key(BareKey::Tab));
+    assert!(state.nav_mode, "navモードは継続する");
+    assert_eq!(state.selected, 1, "選択行も変わらない");
+    assert_eq!(state.section, crate::Section::Tabs);
+}
+
+#[test]
+fn the_split_toggle_opens_both_sections() {
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('s')));
+
+    assert!(state.split);
+    assert_eq!(
+        sections_of(&state),
+        vec![
+            (crate::Section::Tabs, true),
+            (crate::Section::Formations, true)
+        ]
+    );
+    let rows = content_rows_of(&state);
+    assert!(rows.iter().any(|r| matches!(r, Row::Tab(_))));
+    assert!(rows
+        .iter()
+        .any(|r| matches!(r, Row::FormationHeader { .. })));
+
+    // もう一度でアコーディオンへ戻る
+    state.handle_nav_key(key(BareKey::Char('s')));
+    assert!(!state.split);
+    assert_eq!(
+        sections_of(&state),
+        vec![
+            (crate::Section::Tabs, true),
+            (crate::Section::Formations, false)
+        ]
+    );
+}
+
+#[test]
+fn the_footer_hints_where_the_split_toggle_goes() {
+    let mut state = formation_state(2);
+    // フォーメーションが無いあいだは従来どおりヘルプ・退出だけ
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  ?:help  esc:exit");
+
+    create_formation(&mut state, "alpha");
+    assert!(
+        state
+            .footer_line(SIDEBAR)
+            .content()
+            .contains("s:split view"),
+        "{}",
+        state.footer_line(SIDEBAR).content()
+    );
+    state.handle_nav_key(key(BareKey::Char('s')));
+    assert!(
+        state.footer_line(SIDEBAR).content().contains("s:accordion"),
+        "{}",
+        state.footer_line(SIDEBAR).content()
+    );
+    // 幅32に収まる（はみ出すと選択背景が端末側で折り返す）
+    assert!(unicode_width::UnicodeWidthStr::width(state.footer_line(SIDEBAR).content()) <= SIDEBAR);
+}
+
+#[test]
+fn the_section_heading_folds_with_a_count() {
+    assert_eq!(
+        section_heading(crate::Section::Tabs, true, 7, SIDEBAR).content(),
+        "▾ tabs"
+    );
+    assert_eq!(
+        section_heading(crate::Section::Formations, false, 5, SIDEBAR).content(),
+        "▸ formations (5)"
+    );
+}
+
+#[test]
+fn the_cursor_walks_headings_and_roster_rows() {
+    let mut state = state_with_two_tabs();
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+
+    // 入った直後は先頭＝見出し行
+    assert_eq!(
+        state.formation_cursor(),
+        Some(crate::FormationCursor::Header(formation_id(&state)))
+    );
+    assert_eq!(state.highlighted_formation(), Some(formation_id(&state)));
+    assert!(
+        state.highlighted_pane().is_none(),
+        "見出し行は指すペインを持たない"
+    );
+
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(
+        state.formation_cursor(),
+        Some(crate::FormationCursor::Member(1))
+    );
+    assert_eq!(state.highlighted_pane(), Some(1));
+    assert_eq!(state.selected, 0, "名簿行では選択も同じペインへ揃う");
+
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.highlighted_pane(), Some(2));
+    assert_eq!(state.selected, 1);
+    // 末尾で止まる
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.highlighted_pane(), Some(2));
+
+    state.handle_nav_key(key(BareKey::Char('g')));
+    assert_eq!(
+        state.formation_cursor(),
+        Some(crate::FormationCursor::Header(formation_id(&state)))
+    );
+    state.handle_nav_key(key(BareKey::Char('G')));
+    assert_eq!(
+        state.formation_cursor(),
+        Some(crate::FormationCursor::Member(2))
+    );
+}
+
+#[test]
+fn only_the_focused_section_shows_the_cursor() {
+    // split中は同じペインがツリーと名簿の両方に出る。帯が2本出ないこと
+    let mut state = formation_state(2);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('s')));
+    state.handle_nav_key(key(BareKey::Tab));
+    state.handle_nav_key(key(BareKey::Char('j')));
+
+    assert_eq!(state.selected, 0, "名簿行に合わせて選択も動いている");
+    // 同じペインがツリーにも出ているが、光るのはフォーカス中のセクションだけ
+    for row in content_rows_of(&state) {
+        if let Row::Pane {
+            entry, flat_index, ..
+        } = row
+        {
+            assert!(
+                !state.row_is_highlighted(entry, flat_index),
+                "ツリー側は光らせない"
+            );
+        }
+    }
+    assert!(state.formation_row_is_highlighted(crate::FormationCursor::Member(1)));
+}
+
+#[test]
+fn the_display_state_travels_to_a_sibling_instance() {
+    // タブを移っても同じ見え方が続くよう、表示状態も配る（2026-08-11 決定）
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+    state.handle_nav_key(key(BareKey::Char('s')));
+
+    let mut sibling = formation_state(2);
+    assert!(sibling.apply_formations(&state.formation_dump()));
+    assert_eq!(sibling.section, crate::Section::Formations);
+    assert!(sibling.split);
+    // カーソルも行のIDで運ぶ。見出し行は選択（ペインID）に乗せられないので、
+    // 配らないと兄弟だけ別の行が光る（実機で確認して足した）
+    assert_eq!(
+        sibling.formation_cursor(),
+        Some(crate::FormationCursor::Header(formation_id(&state)))
+    );
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert!(sibling.apply_formations(&state.formation_dump()));
+    assert_eq!(
+        sibling.formation_cursor(),
+        Some(crate::FormationCursor::Member(1))
+    );
+    assert_eq!(
+        sections_of(&sibling),
+        vec![
+            (crate::Section::Tabs, true),
+            (crate::Section::Formations, true)
+        ]
+    );
+}
+
+#[test]
+fn deleting_the_last_formation_folds_the_display_state() {
+    // セクションが消えた後に Formations が残ると、カーソルの行き場が無くなる
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+    state.handle_nav_key(key(BareKey::Char('s')));
+    state.handle_nav_key(key(BareKey::Char('x')));
+    state.handle_nav_key(key(BareKey::Char('x')));
+
+    assert!(state.formations.is_empty());
+    assert_eq!(state.section, crate::Section::Tabs);
+    assert!(!state.split);
+}
+
+#[test]
+fn x_on_a_heading_deletes_the_formation_after_a_confirmation() {
+    let mut state = formation_state(3);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+
+    state.handle_nav_key(key(BareKey::Char('x')));
+    assert!(matches!(
+        state.formation_prompt,
+        Some(FormationPrompt::Delete { .. })
+    ));
+    assert_eq!(state.formations.len(), 1, "確認の前は消さない");
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  x:delete esc:cancel"
+    );
+
+    state.handle_nav_key(key(BareKey::Char('x')));
+    assert!(state.formations.is_empty());
+    assert!(state.assignments.is_empty(), "メンバーは無所属へ戻る");
+    assert!(state.nav_mode, "削除してもnavモードは続く");
+}
+
+#[test]
+fn esc_cancels_the_delete_confirmation() {
+    let mut state = formation_state(2);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+    state.handle_nav_key(key(BareKey::Char('x')));
+    state.handle_nav_key(key(BareKey::Esc));
+
+    assert!(state.formation_prompt.is_none());
+    assert!(state.nav_mode, "取り消しでnavモードは抜けない");
+    assert_eq!(state.formations.len(), 1);
+    assert_eq!(members(&state, formation_id(&state)), vec![1]);
+}
+
+#[test]
+fn a_on_a_heading_skips_the_pick_prompt() {
+    // 見出し行では行き先が決まっているので選ばせない。
+    // 追加先の選択が9件までという制約（PICK_LIMIT）もこの経路で回避できる（要件）
+    let mut state = formation_state(3);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.clear_marks();
+    state.marked.extend([2, 3]);
+    state.handle_nav_key(key(BareKey::Tab));
+
+    state.handle_nav_key(key(BareKey::Char('a')));
+    assert!(
+        state.formation_prompt.is_none(),
+        "プロンプトを経ずに追加する"
+    );
+    assert_eq!(members(&state, formation_id(&state)), vec![1, 2, 3]);
+}
+
+#[test]
+fn c_and_enter_do_nothing_on_a_heading() {
+    let mut state = formation_state(2);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+
+    // `c` は対象ペインが不定なので no-op（要件）
+    state.handle_nav_key(key(BareKey::Char('c')));
+    assert_eq!(state.formations[0].commander, None);
+    // `Enter` はスポットライト（F8）の席。まだ持たないので no-op に留める
+    state.handle_nav_key(key(BareKey::Enter));
+    assert!(state.nav_mode, "見出し行のEnterでは退場しない");
+}
+
+#[test]
+fn r_renames_the_formation_from_its_heading() {
+    let mut state = formation_state(2);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+
+    state.handle_nav_key(key(BareKey::Char('R')));
+    for _ in 0.."alpha".len() {
+        state.handle_nav_key(key(BareKey::Backspace));
+    }
+    type_name(&mut state, "bravo");
+    assert_eq!(state.formations[0].name, "bravo");
+}
+
+#[test]
+fn a_roster_row_can_be_clicked() {
+    // 画面に出ている行が押せない状態を作らない（要件: click-to-focus）
+    let mut state = state_with_two_tabs();
+    state.marked.extend([2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Tab));
+
+    let screen = state.screen_rows(24);
+    let row = screen
+        .iter()
+        .position(|r| matches!(r, Row::Roster { .. }))
+        .expect("名簿行が無い");
+    state.viewport_rows = 24;
+    assert_eq!(state.pane_at_row(row), Some(2));
 }
 
 #[test]

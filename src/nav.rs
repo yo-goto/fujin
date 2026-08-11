@@ -238,6 +238,34 @@ impl State {
         changed
     }
 
+    // カーソルを1行動かす（要件: formation-display-accordion）。どちらの
+    // セクションにカーソルがあるかで行き先が変わる — TABSセクションでは
+    // ツリーの選択、FORMATIONSセクションでは名簿のカーソル。
+    //
+    // pipe 経由の選択移動（`fujin_up`/`fujin_down`）はツリー側だけを動かす
+    // `select_next`/`select_previous` のままにしてある。あちらは navモードに
+    // 入っていないときの直接キー方式（決定6）で、セクションの文脈を持たない
+    fn move_cursor(&mut self, delta: isize) {
+        if self.section == crate::Section::Formations {
+            self.move_formation_cursor(delta);
+        } else if delta > 0 {
+            self.select_next();
+        } else {
+            self.select_previous();
+        }
+    }
+
+    // 先頭・末尾へ（`g`/`G`）。移動と同じくセクションで行き先が変わる
+    fn jump_cursor(&mut self, to_end: bool) {
+        if self.section == crate::Section::Formations {
+            self.jump_formation_cursor(to_end);
+        } else if to_end {
+            self.selected = self.selectable.len().saturating_sub(1);
+        } else {
+            self.selected = 0;
+        }
+    }
+
     // 選択を1行下へ。末尾で止まる（pipe とキー操作の両方から使う）
     pub(crate) fn select_next(&mut self) {
         if self.selected + 1 < self.selectable.len() {
@@ -326,19 +354,27 @@ impl State {
             // マークの再利用で、専用モードは作らない。対象が無所属・不在なら no-op。
             // `a`/`R` は対象を捕まえてフッターのプロンプトへ入る
             BareKey::Char('a') => self.begin_formation_add(),
-            BareKey::Char('x') => self.exclude_from_formation(),
+            BareKey::Char('x') => self.remove_from_formation(),
             BareKey::Char('R') => self.begin_formation_rename(),
             BareKey::Char('c') => self.toggle_commander(),
-            BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
-            BareKey::Up | BareKey::Char('k') => self.select_previous(),
-            BareKey::Char('g') => self.selected = 0,
-            BareKey::Char('G') => {
-                self.selected = self.selectable.len().saturating_sub(1);
-            }
+            // アコーディオンのセクション切替えと splitトグル（要件:
+            // formation-display-accordion）。`Tab` は F0 で選択移動から外して
+            // 切替え専用にした（`Shift+Tab` も同じ扱い。セクションは2つで
+            // 逆方向の区別が要らない）
+            BareKey::Tab => self.toggle_section(),
+            BareKey::Char('s') => self.toggle_split(),
+            BareKey::Down | BareKey::Char('j') => self.move_cursor(1),
+            BareKey::Up | BareKey::Char('k') => self.move_cursor(-1),
+            BareKey::Char('g') => self.jump_cursor(false),
+            BareKey::Char('G') => self.jump_cursor(true),
             BareKey::Enter | BareKey::Char(' ') | BareKey::Char('l') => {
-                // フォーカス移動でタブが変わりうるので、先に横取りを解除する
-                self.exit_nav_mode();
-                self.focus_selected();
+                // 見出し行の Enter はスポットライトの起動（F8）で、まだ持たないので
+                // no-op に留める。定義済みのキーなので安全弁へは落とさない
+                if self.highlighted_formation().is_none() {
+                    // フォーカス移動でタブが変わりうるので、先に横取りを解除する
+                    self.exit_nav_mode();
+                    self.focus_selected();
+                }
             }
             // Esc / q は明示的な退場。それ以外の未定義キーでも抜ける:
             // 万一プラグインが応答不能になってもキー入力が取り残されないため
@@ -701,8 +737,11 @@ impl State {
                 Entry("v", "preview off"),
                 Entry("r", "mark read"),
                 Entry("d", "terminate pane"),
-                // フォーメーション（要件: formation）。削除・アーカイブ等の残りの
-                // キーは受け皿（FORMATIONSセクションの見出し行）ができる F2 以降
+                // アコーディオン（要件: formation-display-accordion）
+                Entry("tab", "switch section"),
+                Entry("s", "split view"),
+                // フォーメーション（要件: formation）。見出し行では `a` が直接追加、
+                // `x` がフォーメーションの削除になる。アーカイブ等は F7 以降
                 Entry("a x", "formation +/-"),
                 Entry("R", "rename formation"),
                 Entry("c", "commander"),
@@ -722,8 +761,11 @@ impl State {
                 Entry("m M", "mark / clear all"),
                 Entry("v", "preview"),
                 Entry("d", "terminate pane"),
-                // フォーメーション（要件: formation）。削除・アーカイブ等の残りの
-                // キーは受け皿（FORMATIONSセクションの見出し行）ができる F2 以降
+                // アコーディオン（要件: formation-display-accordion）
+                Entry("tab", "switch section"),
+                Entry("s", "split view"),
+                // フォーメーション（要件: formation）。見出し行では `a` が直接追加、
+                // `x` がフォーメーションの削除になる。アーカイブ等は F7 以降
                 Entry("a x", "formation +/-"),
                 Entry("R", "rename formation"),
                 Entry("c", "commander"),
