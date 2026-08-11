@@ -18,6 +18,7 @@ use crate::agent::{AgentState, StatusPayload};
 use crate::command::{CommandState, PaneStatus};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
+use crate::entry::{decoded_char, restore_char_key};
 use crate::render::{
     cwd_row, divider_line, overflow_row, reconcile_scroll, CounterColumn, HeadCells, Row,
     NO_AGENT_ICON, NO_AGENT_LABEL,
@@ -27,6 +28,7 @@ use crate::width::{
     fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate, truncate_start,
 };
 use std::collections::HashMap;
+use zellij_tile::shim::plugin_api::event::ProtobufEvent;
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
 // ホスト向けにリンクするにはこのシンボルを埋めてやる必要がある。
@@ -6736,4 +6738,92 @@ fn render_survives_the_deployment() {
     state.render(0, 0);
     // 幅0で描いたあともフレーム送りは止まらない
     state.advance_deployment();
+}
+
+// --- IME経由の非ASCII入力（決定47 / docs/issues/ime-input-support.md） ---
+//
+// プラグインAPIのデコードが `Char` をコードポイントの下位1バイトへ畳むため、
+// 素通しでは日本語がASCIIに化ける（navモードでは別のキーとして誤発火する）。
+// entry.rs が protobuf の生の値から復元しているので、その往復を守る
+
+fn intercepted_key_protobuf(c: char) -> ProtobufEvent {
+    ProtobufEvent::try_from(Event::InterceptedKeyPress(KeyWithModifier::new(
+        BareKey::Char(c),
+    )))
+    .expect("キーイベントは protobuf へ畳める")
+}
+
+fn intercepted_bare_key(event: &Event) -> Option<BareKey> {
+    match event {
+        Event::InterceptedKeyPress(key) => Some(key.bare_key),
+        _ => None,
+    }
+}
+
+fn decode_intercepted(protobuf: ProtobufEvent) -> Option<BareKey> {
+    let decoded = decoded_char(&protobuf);
+    let mut event = Event::try_from(protobuf).ok()?;
+    restore_char_key(&mut event, decoded);
+    intercepted_bare_key(&event)
+}
+
+#[test]
+fn non_ascii_keys_collapse_without_the_restore() {
+    // 復元しないと「日」(U+65E5) は下位バイトだけになり 'å'(U+00E5) に化ける。
+    // 修正の前提そのものなので、上流が直ったらこのテストが落ちて気づける
+    let event = Event::try_from(intercepted_key_protobuf('日')).expect("デコードできる");
+    assert_eq!(intercepted_bare_key(&event), Some(BareKey::Char('å')));
+}
+
+#[test]
+fn non_ascii_keys_survive_the_restore() {
+    for c in ['日', '本', '語', 'ぁ', 'ー', '漢', 'é', '🐎'] {
+        assert_eq!(
+            decode_intercepted(intercepted_key_protobuf(c)),
+            Some(BareKey::Char(c)),
+            "{c} が復元されない"
+        );
+    }
+}
+
+#[test]
+fn ascii_keys_are_untouched_by_the_restore() {
+    for c in ['a', 'Z', '/', ' ', '9'] {
+        assert_eq!(
+            decode_intercepted(intercepted_key_protobuf(c)),
+            Some(BareKey::Char(c))
+        );
+    }
+}
+
+#[test]
+fn named_keys_are_untouched_by_the_restore() {
+    for bare in [BareKey::Enter, BareKey::Esc, BareKey::Tab, BareKey::Up] {
+        let protobuf =
+            ProtobufEvent::try_from(Event::InterceptedKeyPress(KeyWithModifier::new(bare)))
+                .expect("キーイベントは protobuf へ畳める");
+        assert_eq!(decoded_char(&protobuf), None);
+        assert_eq!(decode_intercepted(protobuf), Some(bare));
+    }
+}
+
+#[test]
+fn search_query_accepts_japanese() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('/')));
+    for c in "日本語".chars() {
+        state.handle_nav_key(key(BareKey::Char(c)));
+    }
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("日本語")
+    );
+    // Backspace は char 単位で消える（バイト単位に落ちていない）
+    state.handle_nav_key(key(BareKey::Backspace));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("日本")
+    );
 }

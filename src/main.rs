@@ -26,11 +26,13 @@
 // - width  — 表示セル幅の計算・切り詰めの純粋関数
 // - sync   — インスタンス間の状態同期（決定13）
 // - summon — フローティングでの臨時召喚（決定16）
+// - entry  — wasm のエクスポート関数（`register_plugin!` の自前版。決定47）
 
 mod agent;
 mod command;
 mod config;
 mod deploy;
+mod entry;
 mod mark;
 mod nav;
 mod preview;
@@ -228,7 +230,11 @@ struct State {
     config_warning_until: Option<f64>,
 }
 
-register_plugin!(State);
+// `register_plugin!(State)` は使わない。エクスポート関数は entry.rs が持つ
+//（IME経由の非ASCII入力を拾うため。決定47 / docs/issues/ime-input-support.md）
+fn main() {
+    entry::install_panic_hook();
+}
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
