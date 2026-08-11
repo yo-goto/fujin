@@ -654,6 +654,8 @@ impl State {
         let marks = self.mark_column(&screen);
         // カーソルは一覧から導出されるので、行ごとに引き直さず1度だけ求める
         let triage_cursor = self.triage_cursor();
+        // 入力欄を出している間だけ実カーソルをそこへ置く（下記 input_cursor_column）
+        let mut cursor = None;
         for (y, row) in screen.into_iter().enumerate() {
             match row {
                 Row::Header => {
@@ -661,6 +663,7 @@ impl State {
                 }
                 Row::Footer => {
                     print_text_with_coordinates(self.footer_line(cols), 0, y, None, None);
+                    cursor = self.input_cursor_column().map(|x| (x, y));
                 }
                 // 高さを占めるだけの行。描くものは無い
                 Row::Blank => {}
@@ -727,6 +730,26 @@ impl State {
                 }
             }
         }
+        // 入力欄が無い間は隠す（None）。サイドバーは読むための面なので、
+        // 平常時にカーソルが点いていると入力できるように見えてしまう
+        show_cursor(cursor);
+    }
+
+    // 入力欄（検索・番号ジャンプ）を出している間の、実カーソルを置く列。
+    //
+    // **IME の変換候補ウィンドウは端末が実カーソルの位置に出す**ので、置かないと
+    // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
+    // 変換の確定そのものが効かない端末もある（docs/issues/ime-input-support.md）。
+    // 位置は input_footer の組み立てと同じ勘定で、`▏` を出している列に重ねる
+    fn input_cursor_column(&self) -> Option<usize> {
+        let (tag, input) = if let Some(search) = &self.search {
+            ("/", search.query.as_str())
+        } else if let Some(jump) = &self.jump {
+            ("n ", jump.buffer.as_str())
+        } else {
+            return None;
+        };
+        Some(HEADER_INDENT + UnicodeWidthStr::width(tag) + UnicodeWidthStr::width(input))
     }
 
     // プレビュー用フローティングペインの描画（決定42。要件: preview）。
