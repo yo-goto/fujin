@@ -37,6 +37,9 @@ Every pane row starts with a one-character state icon, and each state has its
 own color. **The legend lives in the plugin**: press `?` in nav mode and it
 sits right under the key list, so you never have to come back here to read it.
 
+Panes without an agent (a plain shell, say) show `›` in that same spot. It is
+not one of the states, so it carries no color.
+
 Two counters may follow the pane name: `+N` for active subagents, `[N]` for
 incomplete tasks.
 
