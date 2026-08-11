@@ -27,12 +27,15 @@ use crate::config::PREVIEW_KEY;
 use crate::summon::SIDEBAR_WIDTH;
 use crate::{State, PREVIEW_PIPE};
 
-// プレビュー用フローティングペインの左端。常駐サイドバー（幅32）の右隣に
-// 少しだけ間を空けて置く。**サイドバーに重ねない** — 選択を動かしながら
-// 見るものなので、一覧が隠れると操作対象を見失う
-const PREVIEW_X: usize = SIDEBAR_WIDTH + 2;
-// 幅は画面の半分。残りは作業ペインに見えたままにしておく
-const PREVIEW_WIDTH_PERCENT: usize = 50;
+// プレビュー用フローティングペインの左端。常駐サイドバー（幅32）の右端へ
+// 隙間なく続ける — サイドバーの延長として一体に見せるため。**重ねはしない**
+// （選択を動かしながら見るものなので、一覧が隠れると操作対象を見失う）。
+// かつては +2 のオフセットを置いていたが、背景が透けて「ズレて浮いている」
+// 見え方になっていた（docs/issues/preview-pane-and-keybind-swap.md）
+const PREVIEW_X: usize = SIDEBAR_WIDTH;
+// 幅は画面の1/3強。「大体の様子を掴む」（決定42）には足りる一方、
+// 半分取ると作業ペインの取り分が圧迫されて見えた（同上）
+const PREVIEW_WIDTH_PERCENT: usize = 35;
 
 // プレビューがオンのあいだ持つ状態。オン/オフそのものは `State::preview` の
 // `is_some()` で表す（排他的なUI状態は Option で持つ、の指針どおり）
