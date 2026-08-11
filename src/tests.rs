@@ -1899,10 +1899,20 @@ fn the_snapshot_drops_the_blank_tail() {
 // サイドバー幅は32文字（決定3）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 
 // Text の装飾を「レベル → 文字位置」に戻す。serialize() は
-// 「レベルごとの位置列を `$` 区切りで並べ、そのあとに本文」の形。
-// 色は 0-3、dim は 4（zellij-tile の Text の取り決め）
+// 「`selected`/`opaque` のプレフィックス → レベルごとの位置列を `$` 区切りで
+// 並べたもの → 本文」の形。色は 0-3、dim は 4（zellij-tile の Text の取り決め）。
+//
+// **プレフィックスは zellij 本体と同じ順（x → z）で剥がす。** 本体は
+// `parse_selected` → `parse_opaque` の順に先頭1文字ずつ見るので、剥がし残しは
+// そのままレベル0の先頭の数値にくっついて位置指定を壊す。ここで同じ順を踏むことで、
+// 実機と同じ見え方を検査できる（docs/issues/idle-icon-color-on-selection.md）
 fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
-    let serialized = text.serialize();
+    let mut serialized = text.serialize();
+    for marker in ['x', 'z'] {
+        if serialized.starts_with(marker) {
+            serialized.remove(0);
+        }
+    }
     let Some((indices, _body)) = serialized.rsplit_once('$') else {
         return Vec::new();
     };
@@ -4191,6 +4201,78 @@ fn a_status_replaces_the_no_agent_marker() {
         content
     );
     assert!(!ink_at(&text, DIM_LEVEL).contains(&2), "{}", content);
+}
+
+#[test]
+fn the_status_icon_keeps_its_color_on_the_highlighted_row() {
+    // カーソルが乗っても状態色は変えない。行が変わるたびにアイコンの色が
+    // 動くと、色だけで状態を判別できるという前提（決定25）が崩れる。
+    //
+    // `selected()` と `opaque()` を併用していたころは、レベル0（idle）の位置指定
+    // だけが zellij 本体のパースで壊れ、選択行の idle アイコンがテーマの base 色
+    //（白系）に落ちていた（docs/issues/idle-icon-color-on-selection.md）
+    for target in [
+        AgentState::Idle,
+        AgentState::Working,
+        AgentState::Blocked,
+        AgentState::Done,
+        AgentState::Error,
+    ] {
+        for highlighted in [false, true] {
+            let mut state = state_with_one_pane("claude");
+            set_agent_state(&mut state, 1, target);
+            let entry = state.selectable[0].clone();
+
+            let pane = state.pane_row(
+                &entry,
+                highlighted,
+                None,
+                column_of(&state),
+                HeadCells::default(),
+                SIDEBAR,
+            );
+            let triage = state.triage_row(&entry, "tab1", highlighted, 4, None, SIDEBAR);
+            for text in [&pane, &triage] {
+                assert!(
+                    ink_at(text, target.color()).contains(&2),
+                    "{:?} highlighted={} のアイコンにレベル{}が乗らない: {:?}",
+                    target,
+                    highlighted,
+                    target.color(),
+                    text.content()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_highlighted_row_keeps_its_bar_and_background() {
+    // 選択行の見た目は「左端のバー（レベル2）」と opaque な背景の2つ。
+    // アイコンの色を直すために `selected()` を落としたときも、この2つは残す
+    let mut state = state_with_one_pane("claude");
+    set_agent_state(&mut state, 1, AgentState::Idle);
+    let entry = state.selectable[0].clone();
+    let text = state.pane_row(
+        &entry,
+        true,
+        None,
+        column_of(&state),
+        HeadCells::default(),
+        SIDEBAR,
+    );
+    assert!(
+        ink_at(&text, 2).contains(&0),
+        "左端のバーが消えている: {:?}",
+        text.content()
+    );
+    // opaque のプレフィックス（`z`）が付いていることを直接見る。背景が塗られないと
+    // 帯にならず、幅いっぱいへ伸ばした空白（pad_to_width）が無駄になる
+    assert!(
+        text.serialize().starts_with('z'),
+        "opaque が落ちている: {:?}",
+        text.serialize()
+    );
 }
 
 #[test]

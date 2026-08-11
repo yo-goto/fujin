@@ -1259,8 +1259,7 @@ impl State {
             text = text.color_indices(1, indices);
         }
         if is_highlighted {
-            // opaque を付けないと背景が透けて選択色が沈む
-            text = text.selected().opaque().color_range(2, 0..1);
+            text = highlight_row(text);
         }
         text
     }
@@ -1350,7 +1349,7 @@ impl State {
             text = text.dim_range(start..end);
         }
         if is_highlighted {
-            text = text.selected().opaque().color_range(2, 0..1);
+            text = highlight_row(text);
         }
         text
     }
@@ -1447,6 +1446,20 @@ fn row_head(
         icon_at: chars.saturating_sub(2),
         text,
     }
+}
+
+// 選択行の見た目（背景の帯 + 左端のバー）。ペイン行・トリアージ行・cwd行で共有する。
+//
+// **`selected()` は付けない。** zellij-tile の serialize は selected → opaque の
+// 順にプレフィックスを前置して `zx…` にするのに対し、zellij 本体は x → z の順に
+// 剥がすため、併用すると `x` が残って**レベル0の位置指定が丸ごと壊れる**
+// （idle アイコンがテーマの base 色＝白系に落ちる）。`opaque()` だけなら
+// プレフィックスは `z` の1文字で、パースは通る。
+//
+// 落としているものは無い — 併用時も `selected` は false と解釈されており、
+// 帯の背景は元から `opaque` 側が塗っている（docs/issues/idle-icon-color-on-selection.md）
+fn highlight_row(text: Text) -> Text {
+    text.opaque().color_range(2, 0..1)
 }
 
 // ペイン名の右側の列（カウンタ列・タブ名列）を右端揃えで足す。
@@ -1628,7 +1641,7 @@ pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: 
         }
     }
     if is_highlighted {
-        text = text.selected().opaque().color_range(2, 0..1);
+        text = highlight_row(text);
     }
     text
 }
