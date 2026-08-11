@@ -765,8 +765,15 @@ impl State {
     // **IME の変換候補ウィンドウは端末が実カーソルの位置に出す**ので、置かないと
     // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
     // 変換の確定そのものが効かない端末もある（docs/issues/ime-input-support.md）。
-    // 位置は input_footer の組み立てと同じ勘定で、`▏` を出している列に重ねる
+    // 位置は input_footer の組み立てと同じ勘定で、`▏` を出している列に重ねる。
+    //
+    // **分岐は `footer_line` と同じ順序で見ること。** 入力欄が出ていないのに
+    // カーソルだけ残すと、候補窓が見当違いの場所に出る（検索サブモード中に
+    // ヘルプを開くとフッターは閉じ方の案内に変わる、など）
     fn input_cursor_column(&self) -> Option<usize> {
+        if self.help_overlay || self.termination.is_some() {
+            return None;
+        }
         let (tag, input) = if let Some(search) = &self.search {
             ("/", search.query.as_str())
         } else if let Some(jump) = &self.jump {

@@ -6888,3 +6888,28 @@ fn pasted_text_lands_in_the_search_query() {
     // 制御文字だけのペーストは何も変えない
     assert!(!state.handle_pasted_text("\n"));
 }
+
+#[test]
+fn the_input_cursor_hides_when_the_footer_is_not_an_input() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    state.render(20, SIDEBAR);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    assert!(state.input_cursor_position().is_some());
+
+    // ヘルプオーバーレイ中のフッターは閉じ方の案内（footer_line）。
+    // カーソルを入力欄の位置に残すと、候補窓だけがそこに出てしまう
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(state.help_overlay);
+    assert_eq!(state.input_cursor_position(), None);
+    // 閉じれば戻る
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(state.input_cursor_position().is_some());
+
+    // 終了操作サブモードのフッターは確認プロンプト
+    state.handle_nav_key(key(BareKey::Esc)); // 検索を抜けて navモードへ
+    state.handle_nav_key(key(BareKey::Char('d')));
+    assert!(state.termination.is_some());
+    assert_eq!(state.input_cursor_position(), None);
+}
