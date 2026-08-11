@@ -441,7 +441,15 @@ impl State {
                 // ただしペイン名フォールバック中の行では出さない。ペイン名の位置に
                 // 既に同じパスが出ており、2行並べても情報が増えない（決定26）
                 let cwd_hit = hit.filter(|h| h.field == Field::Cwd);
-                if (self.show_cwd || cwd_hit.is_some()) && self.title_fallback(entry).is_none() {
+                // エージェントが終了したペインでは出さない
+                //（docs/issues/sidebar-cwd-persists-after-exit.md）。cwd はフック由来
+                // なので `pane_cwds` はエージェントが去った後も残るが、show_cwd が
+                // 見せたいのは動いているエージェントの居場所。終了後も出し続けると、
+                // シェルがタイトルを cwd に戻した瞬間から同じパスが2行並ぶ。
+                // 検索ヒットの側はこの条件を通さない — 一覧に出ている以上、
+                // 何に一致したかは示す必要がある
+                let show_for_agent = self.show_cwd && self.agents.contains_key(&entry.pane_id);
+                if (show_for_agent || cwd_hit.is_some()) && self.title_fallback(entry).is_none() {
                     if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
                         rows.push(Row::Cwd {
                             entry,

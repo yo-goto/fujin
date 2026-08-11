@@ -4309,6 +4309,7 @@ fn a_pane_name_that_is_a_path_keeps_its_tail() {
 fn the_cwd_is_rendered_as_its_own_row() {
     let mut state = state_with_one_pane("claude-worker");
     state.show_cwd = true;
+    set_agent_state(&mut state, 1, AgentState::Idle);
     state
         .pane_cwds
         .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
@@ -4378,6 +4379,7 @@ fn the_cwd_row_is_not_highlighted_by_a_pane_name_hit() {
     // ペイン名に当たっただけの行では cwd行を光らせない
     let mut state = searchable_state();
     state.show_cwd = true;
+    set_agent_state(&mut state, 2, AgentState::Idle);
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "bravo");
 
@@ -4386,6 +4388,57 @@ fn the_cwd_row_is_not_highlighted_by_a_pane_name_hit() {
         panic!("cwd行が無い");
     };
     assert!(hit.is_none());
+}
+
+#[test]
+fn the_cwd_row_disappears_when_the_agent_exits() {
+    // エージェントが去ったら cwd行も引っ込める
+    //（docs/issues/sidebar-cwd-persists-after-exit.md）
+    let mut state = state_with_one_pane("claude-worker");
+    state.show_cwd = true;
+    set_agent_state(&mut state, 1, AgentState::Idle);
+    state
+        .pane_cwds
+        .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
+    assert!(
+        state
+            .visible_rows()
+            .iter()
+            .any(|r| matches!(r, Row::Cwd { .. })),
+        "動いている間は出る"
+    );
+
+    state.apply_status(status(1, "SessionEnd"));
+
+    assert!(
+        !state
+            .visible_rows()
+            .iter()
+            .any(|r| matches!(r, Row::Cwd { .. })),
+        "終了後は出ない"
+    );
+    // cwd 自体は捨てない。ペイン名フォールバック（決定26）が使う
+    assert!(state.pane_cwds.contains_key(&1));
+}
+
+#[test]
+fn an_exited_agent_still_gets_a_cwd_row_for_a_search_hit() {
+    // 表示条件を絞っても、絞り込み結果の提示は変えない — 一覧に残っている以上、
+    // 何に一致したかは示す（決定18）
+    let mut state = searchable_state();
+    state.show_cwd = true;
+    // pane2 は cwd を持つがエージェントは居ない（＝終了後と同じ状態）
+    assert!(!state.agents.contains_key(&2));
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "fujin");
+
+    let rows = state.visible_rows();
+    let Some(Row::Cwd { entry, hit, .. }) = rows.iter().find(|r| matches!(r, Row::Cwd { .. }))
+    else {
+        panic!("cwd行が無い");
+    };
+    assert_eq!(entry.pane_id, 2);
+    assert!(hit.is_some());
 }
 
 #[test]
@@ -4937,6 +4990,7 @@ fn the_cwd_row_stays_with_its_pane_row_at_the_bottom_edge() {
     const ROWS: usize = 11;
     let mut state = overflowing_state();
     state.show_cwd = true;
+    set_agent_state(&mut state, 5, AgentState::Idle);
     state.pane_cwds.insert(5, "/work/fujin".to_string());
     state.selected = 4; // pane5
     state.render(ROWS, 32);
