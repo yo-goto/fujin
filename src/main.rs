@@ -19,6 +19,7 @@
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
 // - mark   — 複数選択（マーク。決定39）の集合と、その配布
+// - formation — フォーメーション（複数ペインのグルーピング）の定義・割り当てと編集操作
 // - preview — プレビュー（決定42。選択行のペインの内容を覗き見る）
 // - termination — 終了操作サブモード（対象ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
@@ -31,6 +32,7 @@ mod agent;
 mod command;
 mod config;
 mod deploy;
+mod formation;
 mod mark;
 mod nav;
 mod preview;
@@ -53,6 +55,7 @@ use agent::AgentInfo;
 use command::CommandInfo;
 use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
+use formation::{Formation, FormationPrompt};
 use nav::{JumpState, SearchState};
 use preview::{PreviewContent, PreviewState};
 use termination::TerminationState;
@@ -84,6 +87,10 @@ const SELECTION_PIPE: &str = "fujin_selection";
 // マーク（決定39）の配布。集合をまるごと運ぶ — 差分で運ぶと、取りこぼした
 // 1通ぶんだけ集合が食い違ったまま直らない
 const MARK_PIPE: &str = "fujin_mark";
+// フォーメーション（要件: formation）の配布。マークと同じく差分ではなく定義と
+// 割り当てをまるごと運ぶ。タブを跨いでメンバーを持つので、配らないと
+// 「どのタブのサイドバーを見ているか」で班の内容が食い違う
+const FORMATION_PIPE: &str = "fujin_formation";
 // プレビューのスナップショット送付（決定42）。1行目が対象ペイン名、2行目以降が内容
 const PREVIEW_PIPE: &str = "fujin_preview";
 // 取り残された召喚インスタンスの強制掃除（決定16）。取り残された召喚はキーを
@@ -140,6 +147,14 @@ struct State {
     // マーク（決定39）: 一括操作の対象として選んだペインIDの集合。タブを
     // またいでよく、navモードを退場しても保持し、兄弟インスタンスへも配る
     marked: BTreeSet<u32>,
+    // フォーメーションの定義（要件: formation）。並びは作成順で、手動での
+    // 並び替え・ピン留めは F5 の範囲。兄弟インスタンスへ配る（決定13）
+    formations: Vec<Formation>,
+    // ペインID -> フォーメーションID の割り当て。単一所属モデルなので値は1つだけ。
+    // 定義と分けて持つ理由は formation.rs 冒頭を参照
+    assignments: BTreeMap<u32, u32>,
+    // 次に発行するフォーメーションID。配布を受けたら最大IDの次まで進める
+    next_formation_id: u32,
     visible: bool,
     own_plugin_id: Option<u32>,
     // 自分のwasm URL。実行時に判明する（同期の宛先・召喚の起動元に使う）
@@ -188,6 +203,9 @@ struct State {
     jump: Option<JumpState>,
     // 中身は入場時に捕まえた対象ペイン（決定35）
     termination: Option<TerminationState>,
+    // フォーメーション編集のプロンプト（追加先の選択・名前入力）。中身は押した
+    // ときに捕まえた対象ペイン集合で、終了操作と同じくペインIDで持つ
+    formation_prompt: Option<FormationPrompt>,
     // プレビュー（決定42）。モードではなく navモード内のトグル可能な横断的
     // 表示状態なので、キー解釈は変わらない
     preview: Option<PreviewState>,
@@ -398,6 +416,7 @@ impl ZellijPlugin for State {
                 | COMMAND_STATE_PIPE
                 | SELECTION_PIPE
                 | MARK_PIPE
+                | FORMATION_PIPE
                 | PREVIEW_PIPE
                 | DISMISS_PIPE
         );
@@ -425,6 +444,7 @@ impl ZellijPlugin for State {
             SELECTION_PIPE => self.handle_selection_pipe(payload),
             PREVIEW_PIPE => self.handle_preview_pipe(payload),
             MARK_PIPE => self.handle_mark_pipe(payload),
+            FORMATION_PIPE => self.handle_formation_pipe(payload),
             READ_CLEAR_PIPE => self.handle_read_clear_pipe(payload),
             COMMAND_STATE_PIPE => self.handle_command_state_pipe(payload),
             SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload),
@@ -526,6 +546,7 @@ impl State {
         self.config_warning_until.is_some()
             && !self.help_overlay
             && self.termination.is_none()
+            && self.formation_prompt.is_none()
             && self.search.is_none()
             && self.jump.is_none()
     }

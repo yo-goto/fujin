@@ -167,12 +167,18 @@ impl State {
         // マークも配る（決定39）。タブをまたぐマークを許した以上、後からできた
         // タブのサイドバーにだけ印が出ないと「どれを選んだか」が食い違う
         let marked = !self.marked.is_empty();
+        // フォーメーションも配る（要件: formation）。タブを跨いでメンバーを持つので、
+        // 後からできたタブのサイドバーにだけ班が出ないと内容が食い違う
+        let formations = !self.formations.is_empty();
         for id in newcomers {
             // cwd表示の現在値も配る（docs/issues/toggle-cwd-key.md）。他と違って
             // 無条件に送る理由は push_show_cwd_to 側のコメントに書いてある
             self.push_show_cwd_to(id);
             if marked {
                 self.push_marks_to(id);
+            }
+            if formations {
+                self.push_formations_to(id);
             }
             if let Some(dump) = &dump {
                 send_to_plugin(id, SYNC_STATE_PIPE, dump.clone());

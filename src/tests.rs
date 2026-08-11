@@ -18,8 +18,10 @@ use crate::agent::{AgentState, StatusPayload};
 use crate::command::{CommandState, PaneStatus};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
+use crate::formation::FormationPrompt;
 use crate::render::{
-    cwd_row, divider_line, overflow_row, reconcile_scroll, CounterColumn, HeadCells, Row,
+    cwd_row, divider_line, formation_heading, overflow_row, reconcile_scroll, CounterColumn,
+    HeadCells, HelpRow, Row,
 };
 use crate::termination::Termination;
 use crate::width::{
@@ -6488,4 +6490,601 @@ fn render_survives_the_deployment() {
     state.render(0, 0);
     // 幅0で描いたあともフレーム送りは止まらない
     state.advance_deployment();
+}
+
+// --- フォーメーション（要件: docs/requirements/formation/。実装フェーズF1） ---
+//
+// 複数ペインをまとめて名付けたグループ。入力経路はマーク（決定39）の再利用で、
+// 専用モードは持たない。配布そのもの（pipe）はホスト関数なので観測できないため、
+// 検証はその手前のデータ（`formations` / `assignments`）と運搬用のダンプで行う
+
+// 名前を打って Enter で確定する（名前入力のプロンプトが開いている前提）
+fn type_name(state: &mut State, name: &str) {
+    for c in name.chars() {
+        state.handle_nav_key(key(BareKey::Char(c)));
+    }
+    state.handle_nav_key(key(BareKey::Enter));
+}
+
+// マーク集合（マークが無ければ選択行）を新しいフォーメーションへ入れる。
+// 既存が1件以上あるときは追加先の選択を経由するので、新規作成を選んでから名前へ進む
+fn create_formation(state: &mut State, name: &str) {
+    state.handle_nav_key(key(BareKey::Char('a')));
+    if matches!(state.formation_prompt, Some(FormationPrompt::Pick { .. })) {
+        state.handle_nav_key(key(BareKey::Char('n')));
+    }
+    type_name(state, name);
+}
+
+// フォーメーションのメンバーをツリー順のペインIDで
+fn members(state: &State, id: u32) -> Vec<u32> {
+    state
+        .formation_members(id)
+        .iter()
+        .map(|e| e.pane_id)
+        .collect()
+}
+
+// navモードに入った、ペインだけがある状態
+fn formation_state(count: u32) -> State {
+    let mut state = state_with_panes(count);
+    state.nav_mode = true;
+    state
+}
+
+// 2つのタブにまたがるペインを持つ状態（名簿のフラット表示の確認用）
+fn state_with_two_tabs() -> State {
+    let mut state = State {
+        tabs: vec![tab(0, true), tab(1, false)],
+        panes: Some(manifest(vec![
+            (0, vec![terminal_pane(1, "alpha")]),
+            (1, vec![terminal_pane(2, "bravo")]),
+        ])),
+        permissions_granted: true,
+        ..Default::default()
+    };
+    state.rebuild_selectable();
+    state.nav_mode = true;
+    state
+}
+
+// ヘルプオーバーレイに載っているキー（キー列の文字列そのもの）
+fn help_keys(state: &State) -> Vec<&'static str> {
+    state
+        .help_lines()
+        .iter()
+        .filter_map(|row| match row {
+            HelpRow::Entry(keys, _) => Some(*keys),
+            _ => None,
+        })
+        .collect()
+}
+
+// 枠（ヘッダー・フッター）を除いた content の行
+fn content_rows_of(state: &State) -> Vec<Row<'_>> {
+    let mut rows = state.visible_rows();
+    rows.truncate(rows.len() - FOOTER_ROWS);
+    rows.drain(..HEADER_ROWS);
+    rows
+}
+
+#[test]
+fn a_puts_the_marked_panes_into_a_new_formation() {
+    let mut state = formation_state(3);
+    state.marked.extend([1, 3]);
+    state.handle_nav_key(key(BareKey::Char('a')));
+    // 1件も無いうちは選択肢を挟まず名前入力へ直行する
+    assert!(matches!(
+        state.formation_prompt,
+        Some(FormationPrompt::Name { .. })
+    ));
+    type_name(&mut state, "alpha");
+
+    assert!(state.formation_prompt.is_none(), "確定でプロンプトを畳む");
+    let formation = &state.formations[0];
+    assert_eq!(formation.name, "alpha");
+    assert_eq!(members(&state, formation.id), vec![1, 3]);
+    assert_eq!(formation.commander, None, "作った時点では司令は居ない");
+}
+
+#[test]
+fn a_offers_the_existing_formations_once_there_is_one() {
+    let mut state = formation_state(3);
+    state.marked.insert(1);
+    create_formation(&mut state, "alpha");
+    state.clear_marks();
+
+    // 2枚目からは新規作成と既存の選択になる
+    state.selected = 1;
+    state.handle_nav_key(key(BareKey::Char('a')));
+    assert!(matches!(
+        state.formation_prompt,
+        Some(FormationPrompt::Pick { .. })
+    ));
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  add 1  n:new");
+
+    // 番号で既存を選ぶ
+    state.handle_nav_key(key(BareKey::Char('1')));
+    assert!(state.formation_prompt.is_none());
+    let id = state.formations[0].id;
+    assert_eq!(members(&state, id), vec![1, 2]);
+}
+
+#[test]
+fn n_in_the_pick_prompt_keeps_the_targets_for_a_new_formation() {
+    let mut state = formation_state(3);
+    state.marked.insert(1);
+    create_formation(&mut state, "alpha");
+    state.clear_marks();
+
+    state.selected = 2;
+    state.handle_nav_key(key(BareKey::Char('a')));
+    state.handle_nav_key(key(BareKey::Char('n')));
+    type_name(&mut state, "bravo");
+
+    assert_eq!(state.formations.len(), 2);
+    assert_eq!(members(&state, state.formations[1].id), vec![3]);
+    assert_eq!(members(&state, state.formations[0].id), vec![1]);
+}
+
+#[test]
+fn without_marks_the_formation_keys_fall_back_to_the_selected_row() {
+    let mut state = formation_state(3);
+    state.selected = 1;
+    create_formation(&mut state, "alpha");
+    let id = state.formations[0].id;
+    assert_eq!(members(&state, id), vec![2], "選択行のペイン1枚だけが入る");
+
+    // 除外も同じ対象の引き方
+    state.handle_nav_key(key(BareKey::Char('x')));
+    assert!(members(&state, id).is_empty());
+}
+
+#[test]
+fn adding_a_member_moves_it_out_of_its_previous_formation() {
+    // 単一所属モデル（要件）。「追加」に「移動」の意味が内包されている
+    let mut state = formation_state(3);
+    create_formation(&mut state, "alpha");
+    state.selected = 1;
+    create_formation(&mut state, "bravo");
+
+    let (alpha, bravo) = (state.formations[0].id, state.formations[1].id);
+    state.selected = 0;
+    state.handle_nav_key(key(BareKey::Char('a')));
+    state.handle_nav_key(key(BareKey::Char('2')));
+
+    assert_eq!(members(&state, bravo), vec![1, 2]);
+    assert!(members(&state, alpha).is_empty());
+}
+
+#[test]
+fn x_excludes_the_marked_panes_but_keeps_the_formation() {
+    // 空になっても消さない（要件）。名付けた班を一時的に空にする運用のため
+    let mut state = formation_state(3);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    let id = state.formations[0].id;
+
+    state.handle_nav_key(key(BareKey::Char('x')));
+    assert!(members(&state, id).is_empty());
+    assert_eq!(state.formations.len(), 1, "メンバー0件でも定義は残る");
+}
+
+#[test]
+fn the_formation_keys_are_no_ops_for_an_ungrouped_pane() {
+    // 対象が無所属なら x / R / c は静かに何もしない（要件）
+    let mut state = formation_state(3);
+    create_formation(&mut state, "alpha");
+    let before = state.formation_dump();
+
+    state.selected = 2; // どこにも属していないペイン
+    for c in ['x', 'R', 'c'] {
+        state.handle_nav_key(key(BareKey::Char(c)));
+        assert!(state.nav_mode, "{} で退場してはいけない", c);
+        assert!(
+            state.formation_prompt.is_none(),
+            "{} でプロンプトを開いてはいけない",
+            c
+        );
+        assert_eq!(state.formation_dump(), before, "{} で内容が変わっている", c);
+    }
+}
+
+#[test]
+fn r_renames_the_formation_starting_from_its_current_name() {
+    let mut state = formation_state(3);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('R')));
+
+    // 既存の名前が初期値。フッターはリネームだと分かる形で出す
+    // （入力欄なので検索クエリと同じく右端に `?:help` が付く）
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  rename alpha▏         ?:help"
+    );
+    for _ in 0.."alpha".len() {
+        state.handle_nav_key(key(BareKey::Backspace));
+    }
+    type_name(&mut state, "bravo");
+    assert_eq!(state.formations[0].name, "bravo");
+}
+
+#[test]
+fn a_duplicate_name_is_rejected_without_confirming() {
+    // リネームも新規作成も、既存の名前とぶつかったら確定しない（要件）
+    let mut state = formation_state(3);
+    create_formation(&mut state, "alpha");
+    state.selected = 1;
+    create_formation(&mut state, "bravo");
+
+    state.handle_nav_key(key(BareKey::Char('R')));
+    for _ in 0.."bravo".len() {
+        state.handle_nav_key(key(BareKey::Backspace));
+    }
+    type_name(&mut state, "alpha");
+    assert!(
+        matches!(
+            state.formation_prompt,
+            Some(FormationPrompt::Name { taken: true, .. })
+        ),
+        "重複はエラーとして残る"
+    );
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  !name taken");
+    assert_eq!(state.formations[1].name, "bravo", "リネームは確定しない");
+
+    // 打ち直しを始めればエラー表示は畳まれ、入力欄へ戻る
+    state.handle_nav_key(key(BareKey::Backspace));
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  rename alph▏          ?:help"
+    );
+
+    // 新規作成側も同じ
+    state.handle_nav_key(key(BareKey::Esc));
+    state.selected = 2;
+    state.handle_nav_key(key(BareKey::Char('a')));
+    state.handle_nav_key(key(BareKey::Char('n')));
+    type_name(&mut state, "alpha");
+    assert_eq!(state.formations.len(), 2, "重複した名前では作られない");
+}
+
+#[test]
+fn an_empty_name_does_not_confirm() {
+    // 名前の無い班は一覧で見分けられない。エラーは出さず入力を続けさせる
+    let mut state = formation_state(3);
+    state.handle_nav_key(key(BareKey::Char('a')));
+    type_name(&mut state, "   ");
+    assert!(state.formations.is_empty());
+    assert!(state.formation_prompt.is_some(), "プロンプトに留まる");
+}
+
+#[test]
+fn c_toggles_the_commander_within_the_formation() {
+    let mut state = formation_state(3);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+
+    state.handle_nav_key(key(BareKey::Char('c')));
+    assert_eq!(state.formations[0].commander, Some(1));
+    // 同じペインでもう一度押すと解除
+    state.handle_nav_key(key(BareKey::Char('c')));
+    assert_eq!(state.formations[0].commander, None);
+
+    // 別のメンバーを指定すると元の司令は自動的に外れる（0または1）
+    state.handle_nav_key(key(BareKey::Char('c')));
+    state.selected = 1;
+    state.handle_nav_key(key(BareKey::Char('c')));
+    assert_eq!(state.formations[0].commander, Some(2));
+}
+
+#[test]
+fn leaving_a_formation_gives_up_the_commander_badge() {
+    // 班に居ないペインを指した司令が残ると、記号だけがどこにも出なくなる
+    let mut state = formation_state(3);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('c')));
+    assert_eq!(state.formations[0].commander, Some(1));
+
+    state.clear_marks();
+    state.handle_nav_key(key(BareKey::Char('x')));
+    assert_eq!(state.formations[0].commander, None);
+}
+
+#[test]
+fn the_roster_is_flat_and_notes_the_tab_of_each_member() {
+    // 名簿はフラット形式（要件）。タブごとのネスト構造は持たない
+    let mut state = state_with_two_tabs();
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+
+    let rows = content_rows_of(&state);
+    let heading = rows
+        .iter()
+        .position(|r| matches!(r, Row::FormationHeader { .. }))
+        .expect("見出し行が無い");
+    let Row::FormationHeader { formation, members } = &rows[heading] else {
+        unreachable!()
+    };
+    assert_eq!(
+        formation_heading(formation, *members, SIDEBAR).content(),
+        "▾ alpha (2)"
+    );
+    // メンバーは元のタブ位置に関わらず平坦に並び、各行に所属タブ名が付く
+    let rosters: Vec<(&str, &str)> = rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Roster {
+                entry, tab_name, ..
+            } => Some((entry.title.as_str(), *tab_name)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rosters, vec![("alpha", "tab1"), ("bravo", "tab2")]);
+}
+
+#[test]
+fn the_roster_row_marks_the_commander_with_a_glyph() {
+    // 司令は色を使わず記号だけで表す（要件）。カーソルバーと同じ位置・同じ幅
+    let mut state = formation_state(2);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('c')));
+
+    let rows = content_rows_of(&state);
+    let mut rosters = rows.iter().filter_map(|r| match r {
+        Row::Roster {
+            entry,
+            tab_name,
+            commander,
+        } => Some((entry, tab_name, commander)),
+        _ => None,
+    });
+    let (entry, tab_name, commander) = rosters.next().expect("名簿行が無い");
+    assert!(commander, "先頭のメンバーが司令");
+    let commander_row = state.roster_row(entry, tab_name, *commander, 4, None, SIDEBAR);
+    assert!(
+        commander_row.content().starts_with("▲ "),
+        "司令の記号: {}",
+        commander_row.content()
+    );
+    let (entry, tab_name, commander) = rosters.next().expect("2行目が無い");
+    assert!(!commander);
+    let plain_row = state.roster_row(entry, tab_name, *commander, 4, None, SIDEBAR);
+    assert!(
+        plain_row.content().starts_with("  "),
+        "司令でない行は空白のまま: {}",
+        plain_row.content()
+    );
+    // 桁は揃える（記号ぶんだけペイン名がずれない）。バイト位置ではなく文字位置で
+    // 比べること — `▲` は1セルだが3バイトある
+    let name_column = |line: &str| line.chars().position(|c| c == 'p');
+    assert_eq!(
+        name_column(commander_row.content()),
+        name_column(plain_row.content())
+    );
+}
+
+#[test]
+fn an_empty_formation_still_shows_its_heading() {
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('x')));
+
+    let rows = content_rows_of(&state);
+    let Some(Row::FormationHeader { formation, members }) = rows
+        .iter()
+        .find(|r| matches!(r, Row::FormationHeader { .. }))
+    else {
+        panic!("メンバー0件でも見出しは残る");
+    };
+    assert_eq!(*members, 0);
+    assert_eq!(
+        formation_heading(formation, *members, SIDEBAR).content(),
+        "▾ alpha (0)"
+    );
+}
+
+#[test]
+fn the_roster_is_hidden_while_filtering() {
+    // 絞り込み結果に班の一覧が混ざると、どこまでが検索結果か読めなくなる
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('/')));
+
+    let rows = content_rows_of(&state);
+    assert!(!rows
+        .iter()
+        .any(|r| matches!(r, Row::FormationHeader { .. } | Row::Roster { .. })));
+}
+
+#[test]
+fn the_formation_keys_are_swallowed_by_the_search_query() {
+    // 検索中の印字可能文字はすべてクエリへ（既存の規則。要件にも明記されている）
+    let mut state = formation_state(2);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "ax");
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("ax"),
+        "a も x もクエリへ入る"
+    );
+    assert!(state.formations.is_empty());
+    assert!(state.formation_prompt.is_none());
+}
+
+#[test]
+fn the_formation_keys_leave_nav_mode_from_the_triage_list() {
+    // トリアージ一覧はフォーメーションの文脈を持たないので未定義キー扱い（要件）
+    for c in ['a', 'x', 'R', 'c'] {
+        let mut state = triage_state();
+        set_agent_state(&mut state, 1, AgentState::Working);
+        state.handle_nav_key(key(BareKey::Char('p')));
+        state.handle_nav_key(key(BareKey::Char(c)));
+        assert!(!state.nav_mode, "{} でnavモードごと抜けるべき", c);
+        assert!(state.formations.is_empty());
+        assert!(state.formation_prompt.is_none());
+    }
+}
+
+#[test]
+fn esc_cancels_the_formation_prompt_without_leaving_nav_mode() {
+    for keys in [vec!['a'], vec!['a', 'n']] {
+        let mut state = formation_state(2);
+        create_formation(&mut state, "alpha");
+        state.selected = 1;
+        for c in keys {
+            state.handle_nav_key(key(BareKey::Char(c)));
+        }
+        state.handle_nav_key(key(BareKey::Esc));
+        assert!(state.formation_prompt.is_none());
+        assert!(state.nav_mode, "取り消しでnavモードは抜けない");
+        assert_eq!(state.formations.len(), 1);
+    }
+}
+
+#[test]
+fn the_safety_valve_reaches_the_formation_prompt() {
+    // Shift 以外の修飾キーはサブモードだけでなく navモードごと抜ける（決定12）
+    for k in [
+        key(BareKey::Char('j')).with_ctrl_modifier(),
+        key(BareKey::Char('a')).with_alt_modifier(),
+    ] {
+        let mut state = formation_state(2);
+        state.handle_nav_key(key(BareKey::Char('a')));
+        state.handle_nav_key(k.clone());
+        assert!(!state.nav_mode, "{:?} で退場するべき", k);
+        assert!(state.formation_prompt.is_none());
+        assert!(state.formations.is_empty());
+    }
+}
+
+#[test]
+fn a_control_character_never_enters_a_formation_name() {
+    // 名前は兄弟インスタンスへTSVで運ぶので、タブ・改行が混ざると行が壊れる
+    let mut state = formation_state(2);
+    state.handle_nav_key(key(BareKey::Char('a')));
+    state.handle_nav_key(key(BareKey::Char('a')));
+    state.handle_nav_key(key(BareKey::Char('\t')));
+    state.handle_nav_key(key(BareKey::Char('\n')));
+    state.handle_nav_key(key(BareKey::Enter));
+    assert_eq!(state.formations[0].name, "a");
+}
+
+#[test]
+fn exiting_nav_mode_drops_the_half_typed_name() {
+    let mut state = formation_state(2);
+    state.handle_nav_key(key(BareKey::Char('a')));
+    state.handle_nav_key(key(BareKey::Char('x')));
+    state.exit_nav_mode();
+    assert!(state.formation_prompt.is_none());
+    assert!(state.formations.is_empty());
+}
+
+#[test]
+fn formations_travel_to_a_sibling_instance_whole() {
+    // 差分ではなく定義と割り当てをまるごと運ぶ（マークと同じ。決定13）
+    let mut state = formation_state(3);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('c')));
+
+    let mut sibling = formation_state(3);
+    assert!(sibling.apply_formations(&state.formation_dump()));
+    assert_eq!(sibling.formations, state.formations);
+    assert_eq!(sibling.assignments, state.assignments);
+    assert_eq!(members(&sibling, sibling.formations[0].id), vec![1, 2]);
+    // 同じ内容をもう一度受け取っても再描画は要らない
+    assert!(!sibling.apply_formations(&state.formation_dump()));
+    // 採番は配られた最大IDの次まで進める（権威が交代してもIDを再利用しない）
+    assert!(sibling.next_formation_id > state.formations[0].id);
+}
+
+#[test]
+fn an_empty_payload_means_no_formations_at_all() {
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    assert!(state.handle_formation_pipe(Some("")));
+    assert!(state.formations.is_empty());
+    assert!(state.assignments.is_empty());
+}
+
+#[test]
+fn an_assignment_without_its_definition_is_dropped() {
+    // 定義ファイルと割り当てファイルを分ける永続化（決定44）と同じフォールバック。
+    // 定義を失ったペインは暗黙の「無所属」に落ちるだけで済む
+    let mut state = formation_state(2);
+    state.apply_formations("A\t1\t7\nF\t3\talpha\t\nA\t2\t3\n");
+    assert_eq!(state.formations.len(), 1);
+    assert_eq!(state.assignments.get(&1), None, "定義の無い所属は落ちる");
+    assert_eq!(state.assignments.get(&2), Some(&3));
+}
+
+#[test]
+fn a_broken_dump_line_is_skipped_not_fatal() {
+    let mut state = formation_state(2);
+    state.apply_formations("F\tnope\talpha\t\nF\t1\tbravo\t\nA\tx\t1\nA\t1\t1\n");
+    assert_eq!(state.formations.len(), 1);
+    assert_eq!(state.formations[0].name, "bravo");
+    assert_eq!(state.assignments.get(&1), Some(&1));
+}
+
+#[test]
+fn closing_a_pane_drops_its_assignment_and_keeps_the_formation() {
+    // マークの prune と同じ場所で掃除する。閉じたペインが名簿に残ると
+    // メンバー数だけが合わない見出しが出る
+    let mut state = formation_state(2);
+    state.marked.extend([1, 2]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('c')));
+
+    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, "pane1")])]));
+    state.rebuild_selectable();
+
+    let id = state.formations[0].id;
+    assert_eq!(members(&state, id), vec![1]);
+    assert_eq!(state.assignments.len(), 1);
+    assert_eq!(state.formations.len(), 1, "空でなくても定義は残す");
+    assert_eq!(
+        state.formations[0].commander,
+        Some(1),
+        "閉じられたのは司令ではないペイン"
+    );
+
+    // 司令だったペインが閉じられたら司令だけ外す
+    state.panes = Some(manifest(vec![(0, vec![])]));
+    state.rebuild_selectable();
+    assert_eq!(state.formations[0].commander, None);
+    assert!(state.assignments.is_empty());
+}
+
+#[test]
+fn the_help_overlay_explains_the_formation_prompt() {
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+    state.selected = 1;
+    state.handle_nav_key(key(BareKey::Char('a')));
+    let picks: Vec<&str> = help_keys(&state);
+    assert!(
+        picks.contains(&"1-9") && picks.contains(&"n"),
+        "追加先の選択のキー: {:?}",
+        picks
+    );
+
+    state.handle_nav_key(key(BareKey::Char('n')));
+    let naming: Vec<&str> = help_keys(&state);
+    assert!(
+        naming.contains(&"type") && naming.contains(&"enter"),
+        "名前入力のキー: {:?}",
+        naming
+    );
+}
+
+#[test]
+fn the_help_overlay_lists_the_formation_keys() {
+    let state = formation_state(2);
+    let keys = help_keys(&state);
+    for expected in ["a x", "R", "c"] {
+        assert!(keys.contains(&expected), "{} が無い: {:?}", expected, keys);
+    }
 }

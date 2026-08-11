@@ -195,6 +195,8 @@ impl State {
         self.triage = None;
         self.jump = None;
         self.termination = None;
+        // 入力途中のフォーメーション名も持ち越さない（確認を経ていない終了操作と同じ）
+        self.formation_prompt = None;
         // プレビューを畳むのは**預かったフォーカスを返すより前**（決定42）。
         // 順が逆だと、返した先のフォーカスがプレビューの後始末で持って行かれかねない
         self.close_preview();
@@ -284,6 +286,12 @@ impl State {
         if self.termination.is_some() {
             return self.handle_termination_key(key);
         }
+        // フォーメーション編集のプロンプト（要件: formation）も同様。名前入力中は
+        // 印字可能文字が名前へ入るので、navモード本体の1文字ショートカットより
+        // 手前に置く（検索サブモードと同じ理由）
+        if self.formation_prompt.is_some() {
+            return self.handle_formation_prompt_key(key);
+        }
         // Shift は素通し（`G` が Shift付きで来る端末があるため）。
         // Ctrl/Alt/Super 付きは未定義なので抜けて安全側に倒す
         if has_hard_modifier(&key) {
@@ -314,6 +322,13 @@ impl State {
             // として安全弁に倒れる（判定は mark_preview_read の中）
             BareKey::Char('v') => self.toggle_preview(),
             BareKey::Char('r') => self.mark_preview_read(),
+            // フォーメーションの編集（要件: docs/requirements/formation/）。入力経路は
+            // マークの再利用で、専用モードは作らない。対象が無所属・不在なら no-op。
+            // `a`/`R` は対象を捕まえてフッターのプロンプトへ入る
+            BareKey::Char('a') => self.begin_formation_add(),
+            BareKey::Char('x') => self.exclude_from_formation(),
+            BareKey::Char('R') => self.begin_formation_rename(),
+            BareKey::Char('c') => self.toggle_commander(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
             BareKey::Char('g') => self.selected = 0,
@@ -643,6 +658,8 @@ impl State {
             self.triage_help_lines()
         } else if self.termination.is_some() {
             self.termination_help_lines()
+        } else if self.formation_prompt.is_some() {
+            self.formation_prompt_help_lines()
         } else if self.jump.is_some() {
             &[
                 Section("keys"),
@@ -684,6 +701,11 @@ impl State {
                 Entry("v", "preview off"),
                 Entry("r", "mark read"),
                 Entry("d", "terminate pane"),
+                // フォーメーション（要件: formation）。削除・アーカイブ等の残りの
+                // キーは受け皿（FORMATIONSセクションの見出し行）ができる F2 以降
+                Entry("a x", "formation +/-"),
+                Entry("R", "rename formation"),
+                Entry("c", "commander"),
                 Entry("?", "this help"),
                 Entry("esc", "exit"),
             ]
@@ -700,6 +722,11 @@ impl State {
                 Entry("m M", "mark / clear all"),
                 Entry("v", "preview"),
                 Entry("d", "terminate pane"),
+                // フォーメーション（要件: formation）。削除・アーカイブ等の残りの
+                // キーは受け皿（FORMATIONSセクションの見出し行）ができる F2 以降
+                Entry("a x", "formation +/-"),
+                Entry("R", "rename formation"),
+                Entry("c", "commander"),
                 Entry("?", "this help"),
                 Entry("esc", "exit"),
             ]
@@ -739,6 +766,9 @@ impl State {
         // 場所で済ませる）。一覧を組めなかった場合は上で return しているので、
         // 一覧が空＝本当にペインが無いときにしか消えない
         self.prune_marks();
+        // フォーメーションの割り当ても同じ場所で掃除する（要件: formation）。
+        // 閉じたペインが名簿に残ると、メンバー数だけが合わない見出しが出る
+        self.prune_assignments();
         // 検索中にペインが増減したら絞り込みを引き直す。
         // 古い hits のままだと閉じたペインが結果に残り続ける
         if self.search.is_some() {
