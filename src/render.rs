@@ -126,6 +126,9 @@ pub(crate) enum HelpRow {
     // 状態アイコン凡例の1行（決定25）。アイコン・色・説明はすべて
     // AgentState のテーブルから引くので、ここは状態だけを持つ
     Legend(AgentState),
+    // エージェントが乗っていないペインの印（`NO_AGENT_ICON`）の凡例。
+    // AgentState のテーブルには無い別概念なので、Legend とは別の行として持つ
+    NoAgent,
     Blank,
 }
 
@@ -134,10 +137,11 @@ pub(crate) enum HelpRow {
 // 出るので、どのオーバーレイから引いても同じ表が要る。
 //
 // アイコン・色・説明はもちろん、**並びと状態の数まで** AgentState 側のテーブルから
-// 引く。状態が増減しても凡例は自動で追従し、ここを直す必要はない
-const STATUS_LEGEND: [HelpRow; LEGEND_HEAD + AgentState::ALL.len()] = {
+// 引く。状態が増減しても凡例は自動で追従し、ここを直す必要はない。
+// 末尾の1行だけは AgentState に無い「エージェントが乗っていないペイン」の印
+const STATUS_LEGEND: [HelpRow; LEGEND_HEAD + AgentState::ALL.len() + 1] = {
     // キー一覧との間の空行・見出し・見出し下の空行
-    let mut rows = [HelpRow::Blank; LEGEND_HEAD + AgentState::ALL.len()];
+    let mut rows = [HelpRow::Blank; LEGEND_HEAD + AgentState::ALL.len() + 1];
     rows[1] = HelpRow::Section("status");
     // const 文脈では for も iterator も使えないので添字で回す
     let mut i = 0;
@@ -145,6 +149,10 @@ const STATUS_LEGEND: [HelpRow; LEGEND_HEAD + AgentState::ALL.len()] = {
         rows[LEGEND_HEAD + i] = HelpRow::Legend(AgentState::ALL[i]);
         i += 1;
     }
+    // 状態の並びの後ろに置く。同じ `status` 節に入れるのは、状態アイコンと同じ列に
+    // 出る記号だから — 節を分けると引くのに探す手数が増えるうえ、オーバーレイが
+    // 見出し・空行のぶんさらに縦に伸びる（決定25の凡例は高さに余裕が無い）
+    rows[LEGEND_HEAD + AgentState::ALL.len()] = HelpRow::NoAgent;
     rows
 };
 
@@ -189,6 +197,15 @@ const PREVIEW_HEAD: usize = 2;
 // 対象ペイン名がまだ届いていないときに見出しへ出す文言。開いた直後の一瞬だけ
 // 通る。UI文言は英語で統一する（ui-design.md）
 const PREVIEW_PLACEHOLDER: &str = "preview";
+// エージェント状態もコマンド状態も持たないペイン（CLIエージェントが乗っていない
+// 作業ペイン）の状態アイコン列に置く印。**AgentState には含めない** — 既存の5状態は
+// どれも「エージェントが居る」前提の状態で、「居ない」はその一種ではないため、
+// 表示層のプレースホルダーとして持つ（docs/issues/sidebar-cwd-row-legibility.md）。
+// **状態色（0/1/2/3/6）は乗せない** — 意味の軸が違うものに状態色を割り当てない
+// （原則2）。装飾も持たせず既定色のまま出す
+pub(crate) const NO_AGENT_ICON: &str = "›";
+// 凡例に出す説明。状態名（AgentState::label）と同じ書き方に揃える
+pub(crate) const NO_AGENT_LABEL: &str = "no agent";
 
 // 文字を置いてよい幅。選択行の背景は右マージンも含めて塗るので、
 // 背景のパディング（pad_to_width）はこれではなく cols を使うこと
@@ -517,7 +534,15 @@ impl State {
                 // ただしペイン名フォールバック中の行では出さない。ペイン名の位置に
                 // 既に同じパスが出ており、2行並べても情報が増えない（決定26）
                 let cwd_hit = hit.filter(|h| h.field == Field::Cwd);
-                if (self.show_cwd || cwd_hit.is_some()) && self.title_fallback(entry).is_none() {
+                // エージェントが終了したペインでは出さない
+                //（docs/issues/sidebar-cwd-persists-after-exit.md）。cwd はフック由来
+                // なので `pane_cwds` はエージェントが去った後も残るが、show_cwd が
+                // 見せたいのは動いているエージェントの居場所。終了後も出し続けると、
+                // シェルがタイトルを cwd に戻した瞬間から同じパスが2行並ぶ。
+                // 検索ヒットの側はこの条件を通さない — 一覧に出ている以上、
+                // 何に一致したかは示す必要がある
+                let show_for_agent = self.show_cwd && self.agents.contains_key(&entry.pane_id);
+                if (show_for_agent || cwd_hit.is_some()) && self.title_fallback(entry).is_none() {
                     if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
                         rows.push(Row::Cwd {
                             entry,
@@ -1241,6 +1266,20 @@ impl State {
                     cols,
                 )
             }
+            HelpRow::NoAgent => {
+                // 状態の行と同じ列割りで置くが、アイコンには状態色を乗せずに
+                // dim で出す（ツリー側の見た目と揃える）
+                let gap = " ".repeat(help_key_pad(NO_AGENT_ICON, column));
+                compose(
+                    &[
+                        (&indent, Ink::Plain),
+                        (NO_AGENT_ICON, Ink::Plain),
+                        (&gap, Ink::Plain),
+                        (NO_AGENT_LABEL, Ink::Plain),
+                    ],
+                    cols,
+                )
+            }
             HelpRow::Blank => Text::new(""),
         }
     }
@@ -1325,7 +1364,9 @@ impl State {
         let agent = self.agents.get(&entry.pane_id);
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定32）
         let status = self.pane_status(entry.pane_id);
-        let icon = status.map(|s| s.icon()).unwrap_or(" ");
+        // 状態を持たないペインでも列は埋める。空白のままだと、エージェントが乗る行と
+        // 並べたときに左端が欠けて見える（docs/issues/sidebar-cwd-row-legibility.md）
+        let icon = status.map(|s| s.icon()).unwrap_or(NO_AGENT_ICON);
         // 司令列はツリーのペイン行には出さない（要件: 名簿の中での役割なので、
         // ツリー側に持ち込むと階段の桁がフォーメーションの有無で動く）
         let head = row_head(cursor_lead(is_highlighted), None, number, mark, icon);

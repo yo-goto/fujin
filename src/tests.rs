@@ -21,7 +21,7 @@ use crate::deploy::TROOP;
 use crate::formation::FormationPrompt;
 use crate::render::{
     cwd_row, divider_line, formation_heading, overflow_row, reconcile_scroll, section_heading,
-    CounterColumn, HeadCells, HelpRow, RosterCells, Row,
+    CounterColumn, HeadCells, HelpRow, RosterCells, Row, NO_AGENT_ICON, NO_AGENT_LABEL,
 };
 use crate::termination::Termination;
 use crate::width::{
@@ -955,7 +955,7 @@ fn the_number_column_appears_only_in_the_jump_submode() {
         SIDEBAR,
     );
     assert!(
-        plain.content().starts_with("    pane1"),
+        plain.content().starts_with("  › pane1"),
         "{}",
         plain.content()
     );
@@ -973,7 +973,7 @@ fn the_number_column_appears_only_in_the_jump_submode() {
         SIDEBAR,
     );
     assert!(
-        numbered.content().starts_with("  01   pane1"),
+        numbered.content().starts_with("  01 › pane1"),
         "番号列はアイコンの前に挟む: {}",
         numbered.content()
     );
@@ -1002,7 +1002,12 @@ fn numbers_off_the_candidate_list_are_dimmed() {
     let candidate = render_with_number(&state, 9); // "10"
     assert_eq!(ink_at(&candidate, 2), vec![2, 3]);
     let dropped = render_with_number(&state, 0); // "01"
-    assert_eq!(ink_at(&dropped, DIM_LEVEL), vec![2, 3]);
+                                                 // アイコン列の未起動の印も dim なので、番号の位置だけを取り出して見る
+    let number_dim: Vec<usize> = ink_at(&dropped, DIM_LEVEL)
+        .into_iter()
+        .filter(|at| *at < 4)
+        .collect();
+    assert_eq!(number_dim, vec![2, 3]);
     assert!(ink_at(&dropped, 2).is_empty());
 }
 
@@ -1354,7 +1359,7 @@ fn the_mark_column_shows_up_only_when_something_is_marked() {
         SIDEBAR,
     );
     assert!(
-        marked.content().starts_with("  ✓   pane1"),
+        marked.content().starts_with("  ✓ › pane1"),
         "マーク列はアイコンの前: {}",
         marked.content()
     );
@@ -1425,7 +1430,7 @@ fn the_mark_column_sits_between_the_number_and_the_icon() {
         SIDEBAR,
     );
     assert!(
-        row.content().starts_with("  01 ✓   pane1"),
+        row.content().starts_with("  01 ✓ › pane1"),
         "{}",
         row.content()
     );
@@ -1919,6 +1924,8 @@ fn ink_at(text: &Text, level: usize) -> Vec<usize> {
 }
 
 const DIM_LEVEL: usize = 4;
+// unbold。zellij 側の基底スタイルが bold なので、落とさない＝太いまま残る
+const UNBOLD_LEVEL: usize = 5;
 // error_color。状態アイコン `error` と終了操作サブモードの警告色（決定35）
 const ERROR_LEVEL: usize = 6;
 
@@ -2715,8 +2722,9 @@ fn the_help_overlay_ends_with_the_status_icon_legend() {
         .filter(|line| !line.trim().is_empty())
         .collect();
 
-    // 並び・アイコン・説明はすべて AgentState のテーブル由来（決定25）
-    assert_eq!(legend.len(), AgentState::ALL.len(), "{:?}", legend);
+    // 並び・アイコン・説明はすべて AgentState のテーブル由来（決定25）。
+    // 末尾の1行だけは AgentState に無い「エージェントが乗っていないペイン」の印
+    assert_eq!(legend.len(), AgentState::ALL.len() + 1, "{:?}", legend);
     for (line, agent_state) in legend.iter().zip(AgentState::ALL.iter()) {
         assert!(
             line.starts_with(&format!("  {}", agent_state.icon())),
@@ -2729,6 +2737,12 @@ fn the_help_overlay_ends_with_the_status_icon_legend() {
             line
         );
     }
+    let no_agent = legend.last().expect("未起動の行がある");
+    assert!(
+        no_agent.starts_with(&format!("  {}", NO_AGENT_ICON)) && no_agent.ends_with(NO_AGENT_LABEL),
+        "エージェントが乗っていないペインの印も同じ節で引ける: {}",
+        no_agent
+    );
     // キー一覧より後ろに置く。先に読むべきは操作のほう
     let last_key = lines
         .iter()
@@ -2824,6 +2838,40 @@ fn the_key_column_fits_the_widest_key_of_the_mode() {
         .find(|line| line.ends_with("delete char"))
         .expect("backspace の行がある");
     assert_eq!(column_at(delete, "delete char"), 2 + 9 + 2);
+}
+
+#[test]
+fn the_no_agent_legend_carries_no_decoration() {
+    // 他の凡例行はアイコンに状態色が乗るが、この行は状態ではないので何も乗せない。
+    // dim も掛けない — 掛けると zellij が dim の解除に出す `\e[22m` が端末側で
+    // bold まで消し、説明文だけ他の行と太さが揃わなくなる（実測。
+    // docs/dev/implementation-notes.md）
+    let mut state = state_with_panes(2);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    let overlay: Vec<Text> = state
+        .screen_rows(40)
+        .iter()
+        .filter_map(|row| match row {
+            Row::Help(help) => Some(state.help_line(help, SIDEBAR)),
+            _ => None,
+        })
+        .collect();
+    let line = overlay
+        .iter()
+        .find(|text| text.content().ends_with(NO_AGENT_LABEL))
+        .expect("未起動の凡例がある");
+    assert!(ink_at(line, DIM_LEVEL).is_empty(), "{}", line.content());
+    assert!(ink_at(line, UNBOLD_LEVEL).is_empty(), "{}", line.content());
+    for level in [0, 1, 2, 3, ERROR_LEVEL] {
+        assert!(
+            ink_at(line, level).is_empty(),
+            "凡例のアイコンに状態色は乗せない（レベル{}）: {}",
+            level,
+            line.content()
+        );
+    }
 }
 
 #[test]
@@ -4085,6 +4133,68 @@ fn repeat_status(state: &mut State, pane_id: u32, event: &str, times: usize) {
 }
 
 #[test]
+fn a_pane_without_a_status_gets_the_no_agent_marker() {
+    // 状態アイコン列を空白のままにすると、エージェントが乗る行と並べたときに
+    // 左端が欠けて見える（docs/issues/sidebar-cwd-row-legibility.md）
+    let state = state_with_one_pane("shell");
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        HeadCells::default(),
+        SIDEBAR,
+    );
+    let content = text.content();
+    assert!(
+        content.starts_with(&format!("  {} shell", NO_AGENT_ICON)),
+        "状態アイコンの位置に印を出す: {}",
+        content
+    );
+    // 状態色（0/1/2/3/6）も dim も乗せない。意味の軸が違うものに状態色を
+    // 割り当てないための印なので、装飾は持たせない
+    assert!(!ink_at(&text, DIM_LEVEL).contains(&2), "{}", content);
+    for level in [0, 1, 2, 3, ERROR_LEVEL] {
+        assert!(
+            !ink_at(&text, level).contains(&2),
+            "状態色は乗せない（レベル{}）: {}",
+            level,
+            content
+        );
+    }
+}
+
+#[test]
+fn a_status_replaces_the_no_agent_marker() {
+    // 印はあくまで「状態が無いとき」の埋め草。状態が来たらアイコンごと譲る
+    let mut state = state_with_one_pane("claude");
+    set_agent_state(&mut state, 1, AgentState::Working);
+
+    let text = state.pane_row(
+        &state.selectable[0],
+        false,
+        None,
+        column_of(&state),
+        HeadCells::default(),
+        SIDEBAR,
+    );
+    let content = text.content();
+    assert!(
+        content.starts_with(&format!("  {} claude", AgentState::Working.icon())),
+        "{}",
+        content
+    );
+    assert!(!content.contains(NO_AGENT_ICON), "{}", content);
+    assert!(
+        ink_at(&text, AgentState::Working.color()).contains(&2),
+        "{}",
+        content
+    );
+    assert!(!ink_at(&text, DIM_LEVEL).contains(&2), "{}", content);
+}
+
+#[test]
 fn counters_are_flush_with_the_right_edge() {
     let mut state = state_with_one_pane("要件定義とドキュメント整理タスクの続き");
     repeat_status(&mut state, 1, "SubagentStart", 2);
@@ -4276,7 +4386,7 @@ fn the_counter_column_costs_nothing_when_nobody_has_counters() {
         SIDEBAR,
     );
     let content = text.content();
-    assert!(content.starts_with("    abcdefghij"), "{}", content);
+    assert!(content.starts_with("  › abcdefghij"), "{}", content);
     assert!(content.ends_with('…'), "{}", content);
     assert_eq!(unicode_width::UnicodeWidthStr::width(content), CONTENT);
 }
@@ -4311,6 +4421,7 @@ fn a_pane_name_that_is_a_path_keeps_its_tail() {
 fn the_cwd_is_rendered_as_its_own_row() {
     let mut state = state_with_one_pane("claude-worker");
     state.show_cwd = true;
+    set_agent_state(&mut state, 1, AgentState::Idle);
     state
         .pane_cwds
         .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
@@ -4380,6 +4491,7 @@ fn the_cwd_row_is_not_highlighted_by_a_pane_name_hit() {
     // ペイン名に当たっただけの行では cwd行を光らせない
     let mut state = searchable_state();
     state.show_cwd = true;
+    set_agent_state(&mut state, 2, AgentState::Idle);
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "bravo");
 
@@ -4388,6 +4500,57 @@ fn the_cwd_row_is_not_highlighted_by_a_pane_name_hit() {
         panic!("cwd行が無い");
     };
     assert!(hit.is_none());
+}
+
+#[test]
+fn the_cwd_row_disappears_when_the_agent_exits() {
+    // エージェントが去ったら cwd行も引っ込める
+    //（docs/issues/sidebar-cwd-persists-after-exit.md）
+    let mut state = state_with_one_pane("claude-worker");
+    state.show_cwd = true;
+    set_agent_state(&mut state, 1, AgentState::Idle);
+    state
+        .pane_cwds
+        .insert(1, "/work/oss/zellij-plugins/fujin".to_string());
+    assert!(
+        state
+            .visible_rows()
+            .iter()
+            .any(|r| matches!(r, Row::Cwd { .. })),
+        "動いている間は出る"
+    );
+
+    state.apply_status(status(1, "SessionEnd"));
+
+    assert!(
+        !state
+            .visible_rows()
+            .iter()
+            .any(|r| matches!(r, Row::Cwd { .. })),
+        "終了後は出ない"
+    );
+    // cwd 自体は捨てない。ペイン名フォールバック（決定26）が使う
+    assert!(state.pane_cwds.contains_key(&1));
+}
+
+#[test]
+fn an_exited_agent_still_gets_a_cwd_row_for_a_search_hit() {
+    // 表示条件を絞っても、絞り込み結果の提示は変えない — 一覧に残っている以上、
+    // 何に一致したかは示す（決定18）
+    let mut state = searchable_state();
+    state.show_cwd = true;
+    // pane2 は cwd を持つがエージェントは居ない（＝終了後と同じ状態）
+    assert!(!state.agents.contains_key(&2));
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "fujin");
+
+    let rows = state.visible_rows();
+    let Some(Row::Cwd { entry, hit, .. }) = rows.iter().find(|r| matches!(r, Row::Cwd { .. }))
+    else {
+        panic!("cwd行が無い");
+    };
+    assert_eq!(entry.pane_id, 2);
+    assert!(hit.is_some());
 }
 
 #[test]
@@ -4478,7 +4641,8 @@ fn a_non_empty_pane_name_is_left_alone() {
 
 #[test]
 fn an_empty_pane_name_without_a_cwd_stays_blank() {
-    // 落とす先が無いペインは空欄のまま。名前を捏造しない
+    // 落とす先が無いペインは名前の位置が空欄のまま。名前を捏造しない
+    //（アイコン列の未起動の印だけは出る）
     let state = state_with_one_pane("");
 
     let text = state.pane_row(
@@ -4489,7 +4653,7 @@ fn an_empty_pane_name_without_a_cwd_stays_blank() {
         HeadCells::default(),
         SIDEBAR,
     );
-    assert_eq!(text.content().trim(), "", "{}", text.content());
+    assert_eq!(text.content().trim(), NO_AGENT_ICON, "{}", text.content());
 }
 
 #[test]
@@ -4694,7 +4858,7 @@ fn a_floating_pane_falling_back_to_its_cwd_wraps_the_cwd() {
 fn a_floating_pane_without_a_name_or_a_cwd_stays_blank() {
     // 囲むものが無い行に括弧だけ出しても、フローティングだと分かる以前に読めない
     let state = state_with_one_floating_pane("");
-    assert_eq!(pane_row_content(&state).trim(), "");
+    assert_eq!(pane_row_content(&state).trim(), NO_AGENT_ICON);
 }
 
 #[test]
@@ -4939,6 +5103,7 @@ fn the_cwd_row_stays_with_its_pane_row_at_the_bottom_edge() {
     const ROWS: usize = 11;
     let mut state = overflowing_state();
     state.show_cwd = true;
+    set_agent_state(&mut state, 5, AgentState::Idle);
     state.pane_cwds.insert(5, "/work/fujin".to_string());
     state.selected = 4; // pane5
     state.render(ROWS, 32);

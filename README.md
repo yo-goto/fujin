@@ -31,11 +31,23 @@ jump to them with global keybindings.
   your focus stays in your working pane (with fuzzy search over pane name, tab
   name, and cwd)
 
+## Design principles
+
+> Local-first. Free. Zellij only. Just simple.
+
+No network or cloud dependency — configuration lives entirely in local files.
+Free forever, with no plan to bolt on cloud features to monetize later. Not a
+general-purpose multiplexer replacement, but a zellij-only plugin that doesn't
+take on features that would add complexity.
+
 ## Status icons
 
 Every pane row starts with a one-character state icon, and each state has its
 own color. **The legend lives in the plugin**: press `?` in nav mode and it
 sits right under the key list, so you never have to come back here to read it.
+
+Panes without an agent (a plain shell, say) show `›` in that same spot. It is
+not one of the states, so it carries no color.
 
 Two counters may follow the pane name: `+N` for active subagents, `[N]` for
 incomplete tasks.
