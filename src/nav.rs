@@ -290,13 +290,13 @@ impl State {
             self.leave_nav_mode();
             return true;
         }
-        // 1文字ショートカットは頭文字（p=priority, n=number, d=delete, m=mark,
-        // v=view, r=read）で、いずれも navモード内で未使用だったキー
+        // 1文字ショートカットは頭文字（t=triage, n=number, d=delete, m=mark,
+        // p=preview, r=read）で、いずれも navモード内で未使用だったキー
         match key.bare_key {
             // 検索サブモードへ（要件: docs/requirements/search-explorer/）
             BareKey::Char('/') => self.enter_search(),
             // トリアージモードへ（要件: docs/requirements/triage-mode/）
-            BareKey::Char('p') => self.enter_triage(),
+            BareKey::Char('t') => self.enter_triage(),
             // 番号ジャンプサブモードへ（要件: docs/requirements/pane-number-jump/）。
             // かつての 1-9 直行ジャンプはここへ一本化して削除した（決定29）。
             // navモード最上位の数字は未定義キー＝安全弁の扱い
@@ -312,7 +312,7 @@ impl State {
             // プレビューのトグルと、プレビュー中の既読化（決定42。マークと同じく
             // サブモード無しの横断的操作）。`r` はプレビューがオフの間、未定義キー
             // として安全弁に倒れる（判定は mark_preview_read の中）
-            BareKey::Char('v') => self.toggle_preview(),
+            BareKey::Char('p') => self.toggle_preview(),
             BareKey::Char('r') => self.mark_preview_read(),
             BareKey::Down | BareKey::Tab | BareKey::Char('j') => self.select_next(),
             BareKey::Up | BareKey::Char('k') => self.select_previous(),
@@ -348,7 +348,7 @@ impl State {
             self.toggle_mark();
             return true;
         }
-        if key.bare_key == BareKey::Char('v') && key.key_modifiers.contains(&KeyModifier::Alt) {
+        if key.bare_key == BareKey::Char('p') && key.key_modifiers.contains(&KeyModifier::Alt) {
             self.toggle_preview();
             return true;
         }
@@ -661,7 +661,7 @@ impl State {
                 // クエリ入力と両立しないので、マークとプレビューは Alt付き
                 //（決定39・決定42）
                 Entry("alt+m", "mark"),
-                Entry("alt+v", "preview"),
+                Entry("alt+p", "preview"),
                 Entry("up down", "move cursor"),
                 Entry("shift+tab", "move back"),
                 Entry("enter", "jump & exit"),
@@ -678,10 +678,10 @@ impl State {
                 Entry("g G", "top / bottom"),
                 Entry("enter", "jump & exit"),
                 Entry("/", "search"),
-                Entry("p", "triage"),
+                Entry("t", "triage"),
                 Entry("n", "number jump"),
                 Entry("m M", "mark / clear all"),
-                Entry("v", "preview off"),
+                Entry("p", "preview off"),
                 Entry("r", "mark read"),
                 Entry("d", "terminate pane"),
                 Entry("?", "this help"),
@@ -695,10 +695,10 @@ impl State {
                 Entry("g G", "top / bottom"),
                 Entry("enter", "jump & exit"),
                 Entry("/", "search"),
-                Entry("p", "triage"),
+                Entry("t", "triage"),
                 Entry("n", "number jump"),
                 Entry("m M", "mark / clear all"),
-                Entry("v", "preview"),
+                Entry("p", "preview"),
                 Entry("d", "terminate pane"),
                 Entry("?", "this help"),
                 Entry("esc", "exit"),

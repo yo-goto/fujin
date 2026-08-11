@@ -492,10 +492,10 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
 | `/` | enter search sub-mode (below) |
 | `n` | enter number jump sub-mode (below) |
-| `p` | enter triage mode (panes that need attention, most urgent first) |
+| `t` | enter triage mode (panes that need attention, most urgent first) |
 | `d` | enter the pane termination sub-mode (below) |
 | `m` / `M` | mark / unmark a pane, or clear every mark (targets for termination) |
-| `v` | toggle the preview (below) |
+| `p` | toggle the preview (below) |
 | `r` | mark the previewed pane as read (only while the preview is up) |
 | `?` | open the key help (below) |
 | `Esc` / `q` | exit the mode |
@@ -581,17 +581,17 @@ command has already exited does nothing.
 The targets are every pane you marked with `m`, or just the selected pane if
 nothing is marked. Marks may span tabs, and `M` clears them all at once.
 
-### Preview (`v` inside nav mode)
+### Preview (`p` inside nav mode)
 
-Pressing `v` opens a preview to the right of the sidebar showing the contents of
+Pressing `p` opens a preview to the right of the sidebar showing the contents of
 the selected pane (or, in the filtered results and the triage list, the pane
 under the cursor). The focus does not move, so you can keep walking the list
-with `j` / `k` and see what each pane is up to. Pressing `v` again — or jumping,
+with `j` / `k` and see what each pane is up to. Pressing `p` again — or jumping,
 or leaving nav mode — closes it.
 
 | Key | Action |
 |---|---|
-| `v` | toggle the preview (`alt+v` inside the search sub-mode) |
+| `p` | toggle the preview (`alt+p` inside the search sub-mode) |
 | `r` | mark the previewed pane as read (`done` / `blocked` / `error` only) |
 
 What you get is a **snapshot taken when the selection moved**. The pane may keep

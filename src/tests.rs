@@ -1294,7 +1294,7 @@ fn a_pane_that_leaves_the_list_loses_its_mark() {
 fn the_triage_list_marks_the_row_under_the_cursor() {
     let mut state = triage_state();
     set_agent_state(&mut state, 3, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     assert_eq!(state.triage_cursor(), Some(3));
 
     state.handle_nav_key(mark_key());
@@ -1442,7 +1442,7 @@ fn marked_triage_rows_wear_the_mark_too() {
     // トリアージ一覧の上でもマークできる以上、印も同じ位置に出す
     let mut state = triage_state();
     set_agent_state(&mut state, 2, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.handle_nav_key(mark_key());
 
     let rows = state.visible_rows();
@@ -1618,7 +1618,7 @@ fn the_nav_help_advertises_the_mark_keys() {
 // ホスト関数には触れない
 
 fn preview_key() -> KeyWithModifier {
-    key(BareKey::Char('v'))
+    key(BareKey::Char('p'))
 }
 
 fn preview_read_key() -> KeyWithModifier {
@@ -1665,7 +1665,7 @@ fn the_filtered_results_preview_with_the_alt_key() {
     type_query(&mut state, "cha");
     assert_eq!(state.search.as_ref().and_then(|s| s.cursor), Some(3));
 
-    state.handle_nav_key(KeyWithModifier::new(BareKey::Char('v')).with_alt_modifier());
+    state.handle_nav_key(KeyWithModifier::new(BareKey::Char('p')).with_alt_modifier());
     assert_eq!(
         preview_target(&state),
         Some(3),
@@ -1679,8 +1679,8 @@ fn the_filtered_results_preview_with_the_alt_key() {
     state.handle_nav_key(preview_key());
     assert_eq!(
         state.search.as_ref().map(|s| s.query.as_str()),
-        Some("chav"),
-        "素の `v` はクエリの文字"
+        Some("chap"),
+        "素の `p` はクエリの文字"
     );
 }
 
@@ -1688,7 +1688,7 @@ fn the_filtered_results_preview_with_the_alt_key() {
 fn the_triage_list_previews_the_row_under_the_cursor() {
     let mut state = triage_state();
     set_agent_state(&mut state, 3, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     assert_eq!(state.triage_cursor(), Some(3));
 
     state.handle_nav_key(preview_key());
@@ -1832,7 +1832,7 @@ fn the_read_key_is_undefined_in_the_number_jump_submode() {
 fn the_triage_list_reads_the_previewed_pane_too() {
     let mut state = triage_state();
     set_agent_state(&mut state, 3, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.handle_nav_key(preview_key());
 
     state.handle_nav_key(preview_read_key());
@@ -1980,7 +1980,7 @@ fn the_header_labels_the_triage_mode() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
     state.nav_mode = true;
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     assert_eq!(state.header_line(SIDEBAR).content(), "▲ fujin  [tri]");
 }
@@ -2026,7 +2026,7 @@ fn the_header_triangle_carries_the_mode_color() {
     // navモードはレベル2、トリアージモードはレベル0
     state.nav_mode = true;
     assert!(ink_at(&state.header_line(SIDEBAR), 2).contains(&0));
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     assert!(ink_at(&state.header_line(SIDEBAR), 0).contains(&0));
 }
 
@@ -2067,7 +2067,7 @@ fn the_frame_keeps_its_rows_across_every_mode_boundary() {
                 state.handle_nav_key(key(BareKey::Char('/')));
             }
             "triage" => {
-                state.handle_nav_key(key(BareKey::Char('p')));
+                state.handle_nav_key(key(BareKey::Char('t')));
             }
             "jump" => {
                 state.handle_nav_key(key(BareKey::Char('n')));
@@ -2420,7 +2420,7 @@ fn the_nav_footer_shows_the_help_and_exit_hints() {
 fn the_triage_footer_says_esc_goes_back() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     // Esc の行き先はツリー表示であってnavモードの退場ではない
     assert_eq!(state.footer_line(SIDEBAR).content(), "  ?:help  esc:back");
@@ -2491,7 +2491,7 @@ fn the_footer_wears_the_state_color_including_its_keys() {
     // ヘッダーの三角とトーンを揃えるほうを取る
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     let footer = state.footer_line(SIDEBAR);
     let indent = 2;
@@ -2690,7 +2690,7 @@ fn the_sidebar_never_shows_japanese_text() {
     type_query(&mut no_hits, "zzz");
     lines.extend(chrome_lines(&no_hits));
     let mut nothing_to_triage = triage_state(); // 状態を持つペインが1つも無い
-    nothing_to_triage.handle_nav_key(key(BareKey::Char('p')));
+    nothing_to_triage.handle_nav_key(key(BareKey::Char('t')));
     lines.extend(chrome_lines(&nothing_to_triage));
 
     for line in &lines {
@@ -2795,7 +2795,7 @@ fn the_help_headings_leave_the_mode_name_to_the_header() {
     jump.handle_nav_key(key(BareKey::Char('n')));
     let mut triage = triage_state();
     set_agent_state(&mut triage, 1, AgentState::Working);
-    triage.handle_nav_key(key(BareKey::Char('p')));
+    triage.handle_nav_key(key(BareKey::Char('t')));
 
     for (label, state) in [
         ("nav", &mut nav),
@@ -2936,7 +2936,7 @@ fn the_status_legend_shows_up_in_every_overlay() {
     // オーバーレイからでも同じ表を引けるようにする
     let mut state = triage_state();
     state.nav_mode = true;
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.handle_nav_key(key(BareKey::Char('?')));
     assert!(
         overlay_lines(&state, SIDEBAR)
@@ -4782,7 +4782,7 @@ fn triage_rows_fall_back_to_the_cwd_too() {
     state.nav_mode = true;
     set_agent_state(&mut state, 1, AgentState::Blocked);
     state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     let rows = state.visible_rows();
     let tab_column = state.triage_tab_column(&rows, SIDEBAR);
@@ -4948,7 +4948,7 @@ fn triage_rows_wrap_floating_pane_names_too() {
     let mut state = state_with_one_floating_pane("claude");
     state.nav_mode = true;
     set_agent_state(&mut state, 1, AgentState::Blocked);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     let rows = state.visible_rows();
     let tab_column = state.triage_tab_column(&rows, SIDEBAR);
@@ -5577,7 +5577,7 @@ fn the_triage_list_follows_state_changes() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 2, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     assert_eq!(triage_ids(&state), vec![2, 1]);
 
     // 表示中に別のペインが blocked になったら、次の描画で上に来る
@@ -5586,10 +5586,10 @@ fn the_triage_list_follows_state_changes() {
 }
 
 #[test]
-fn p_switches_the_sidebar_to_the_triage_list() {
+fn t_switches_the_sidebar_to_the_triage_list() {
     let mut state = triage_state();
     set_agent_state(&mut state, 2, AgentState::Blocked);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     assert!(state.triage.is_some());
     assert!(state.nav_mode, "トリアージモードはnavモードの内側");
@@ -5614,7 +5614,7 @@ fn esc_returns_to_the_tree_view_and_stays_in_nav_mode() {
     let mut state = triage_state();
     set_agent_state(&mut state, 3, AgentState::Blocked);
     state.selected = 1; // bravo を選択した状態で入る
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.handle_nav_key(key(BareKey::Esc));
 
     assert!(state.triage.is_none());
@@ -5634,7 +5634,7 @@ fn enter_jumps_from_the_triage_list_and_leaves_nav_mode() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 4, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     // カーソルは一覧の先頭（error のタブ1のペイン）
     state.handle_nav_key(key(BareKey::Enter));
 
@@ -5650,7 +5650,7 @@ fn a_triage_jump_clears_the_read_state_through_the_usual_path() {
     // 罠を再発明することになる（要件: triage-mode-entry-exit.feature）
     let mut state = triage_state();
     set_agent_state(&mut state, 2, AgentState::Blocked);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.handle_nav_key(key(BareKey::Enter));
     assert_eq!(state.selectable[state.selected].pane_id, 2);
 
@@ -5681,7 +5681,7 @@ fn the_triage_cursor_moves_within_the_list() {
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 2, AgentState::Working);
     set_agent_state(&mut state, 3, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     // 一覧は [3, 2, 1]
     assert_eq!(state.triage_cursor(), Some(3), "カーソルは先頭から");
 
@@ -5710,7 +5710,7 @@ fn the_triage_cursor_starts_at_the_most_urgent_row() {
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 2, AgentState::Error);
     state.selected = 0; // alpha（working。一覧では2番目）
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     assert_eq!(state.triage_cursor(), Some(2));
 }
 
@@ -5723,7 +5723,7 @@ fn the_triage_cursor_does_not_move_the_selection() {
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 3, AgentState::Working);
     state.selected = 1; // bravo（一覧には出ないペイン）
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     // 一覧は [3, 1]
     assert_eq!(state.triage_cursor(), Some(3));
@@ -5744,7 +5744,7 @@ fn the_triage_cursor_falls_back_when_its_pane_leaves_the_list() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Blocked);
     set_agent_state(&mut state, 2, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     assert_eq!(state.triage_cursor(), Some(1));
 
     // 既読になって一覧から消えたら、残った先頭へ寄せる
@@ -5766,11 +5766,12 @@ fn triage_leaves_nav_mode_on_undefined_keys() {
         key(BareKey::Char('z')),
         key(BareKey::Char('q')),
         key(BareKey::Char('j')).with_ctrl_modifier(),
+        // alt+p（プレビュー）は検索サブモード限定の例外で、トリアージ一覧では効かない
         key(BareKey::Char('p')).with_alt_modifier(),
     ] {
         let mut state = triage_state();
         set_agent_state(&mut state, 1, AgentState::Working);
-        state.handle_nav_key(key(BareKey::Char('p')));
+        state.handle_nav_key(key(BareKey::Char('t')));
         state.handle_nav_key(k.clone());
         assert!(!state.nav_mode, "{:?} でnavモードごと抜けるべき", k);
         assert!(state.triage.is_none());
@@ -5780,7 +5781,7 @@ fn triage_leaves_nav_mode_on_undefined_keys() {
 #[test]
 fn an_empty_triage_list_says_so() {
     let mut state = triage_state();
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     let rows = state.visible_rows();
     let Some(Row::Notice(notice)) = rows.get(HEADER_ROWS) else {
         panic!("空リストのままだと壊れて見える: {}", rows.len());
@@ -5792,7 +5793,7 @@ fn an_empty_triage_list_says_so() {
 fn triage_rows_carry_the_pane_name_and_its_tab_name() {
     let mut state = triage_state();
     set_agent_state(&mut state, 4, AgentState::Blocked); // タブ1の delta
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     let rows = state.visible_rows();
     let tab_column = state.triage_tab_column(&rows, SIDEBAR);
@@ -5829,7 +5830,7 @@ fn a_long_pane_name_does_not_push_the_tab_name_off_the_row() {
     )]));
     state.rebuild_selectable();
     set_agent_state(&mut state, 1, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     let rows = state.visible_rows();
     let tab_column = state.triage_tab_column(&rows, SIDEBAR);
@@ -5860,7 +5861,7 @@ fn triage_rows_drop_the_counter_column_and_the_cwd_row() {
     set_agent_state(&mut state, 4, AgentState::Working);
     state.apply_status(status(4, "SubagentStart")); // サブエージェント数 +1
     state.apply_status(status(4, "TaskCreated")); // 未完了タスク数 [1]
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
 
     let rows = state.visible_rows();
     assert!(
@@ -5894,7 +5895,7 @@ fn triage_rows_drop_the_counter_column_and_the_cwd_row() {
 fn the_triage_help_overlay_lists_its_own_keys() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.handle_nav_key(key(BareKey::Char('?')));
 
     let lines: Vec<String> = state
@@ -5936,7 +5937,7 @@ fn clicking_a_triage_row_jumps_to_that_pane() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 4, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     // 0-2: ヘッダ / 3: delta（error）/ 4: alpha（working）
     assert!(state.handle_click(HEADER_ROWS as isize + 1));
     assert_eq!(state.selectable[state.selected].pane_id, 1);
@@ -5949,7 +5950,7 @@ fn render_survives_triage_mode() {
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
     set_agent_state(&mut state, 4, AgentState::Error);
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.render(40, 20);
     state.render(3, 2);
     state.render(2, 1);
@@ -5957,7 +5958,7 @@ fn render_survives_triage_mode() {
 
     // 対象なしの通知行（`nothing to triage`）も通す
     let mut state = triage_state();
-    state.handle_nav_key(key(BareKey::Char('p')));
+    state.handle_nav_key(key(BareKey::Char('t')));
     state.render(40, 20);
     state.render(1, 1);
 }

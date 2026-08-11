@@ -141,7 +141,7 @@ impl State {
             BareKey::Char('M') => self.clear_marks(),
             // プレビューもトリアージ一覧の上で同じキーで効く（決定42）。
             // 対象はマークと同じくカーソル位置のペイン
-            BareKey::Char('v') => self.toggle_preview(),
+            BareKey::Char('p') => self.toggle_preview(),
             BareKey::Char('r') => self.mark_preview_read(),
             // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
             _ => self.leave_nav_mode(),
@@ -197,7 +197,7 @@ impl State {
                 Entry("g G", "top / bottom"),
                 Entry("enter", "jump & exit"),
                 Entry("m M", "mark / clear all"),
-                Entry("v", "preview off"),
+                Entry("p", "preview off"),
                 Entry("r", "mark read"),
                 Entry("esc", "back to tree"),
                 Entry("?", "this help"),
@@ -210,7 +210,7 @@ impl State {
             Entry("g G", "top / bottom"),
             Entry("enter", "jump & exit"),
             Entry("m M", "mark / clear all"),
-            Entry("v", "preview"),
+            Entry("p", "preview"),
             Entry("esc", "back to tree"),
             Entry("?", "this help"),
         ]
