@@ -6857,3 +6857,34 @@ fn the_input_cursor_follows_the_query_end() {
     state.handle_nav_key(key(BareKey::Esc));
     assert_eq!(state.input_cursor_position(), None);
 }
+
+#[test]
+fn pasted_text_lands_in_the_search_query() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    // 入力欄の外に落ちたテキストは捨てる（navモードは抜けない）
+    assert!(!state.handle_pasted_text("日本語"));
+    assert!(state.nav_mode);
+
+    state.handle_nav_key(key(BareKey::Char('/')));
+    assert!(state.handle_pasted_text("日本語"));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("日本語")
+    );
+    // 打鍵と混ぜても積み上がる（IMEの確定とキー入力は別経路で届く）
+    state.handle_nav_key(key(BareKey::Char('x')));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("日本語x")
+    );
+    // 改行・タブは欄を壊すので落とす
+    state.handle_pasted_text("\n\tあ");
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("日本語xあ")
+    );
+    // 制御文字だけのペーストは何も変えない
+    assert!(!state.handle_pasted_text("\n"));
+}

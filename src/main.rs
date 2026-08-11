@@ -276,6 +276,10 @@ impl ZellijPlugin for State {
             EventType::PermissionRequestResult,
             EventType::Visible,
             EventType::InterceptedKeyPress,
+            // 一括で届くテキスト入力（貼り付けと**IMEの変換確定**）。横取りとは
+            // 別の経路で来るので、これが無いと確定した文字列が消える
+            //（docs/issues/ime-input-support.md）
+            EventType::PastedText,
             // 行クリックでのフォーカス移動（要件: docs/requirements/click-to-focus/）
             EventType::Mouse,
             // 配置演出のフレーム送り（要件: docs/requirements/header-animation/）。
@@ -389,6 +393,9 @@ impl ZellijPlugin for State {
                 }
                 self.handle_nav_key(key)
             }
+            // 貼り付け・IMEの変換確定。フォーカスを預かっている（決定34）間だけ
+            // 自分に届く。入力欄の外なら中で捨てる
+            Event::PastedText(text) => self.handle_pasted_text(&text),
             _ => false,
         };
         // 入力欄の実カーソル（IMEの候補窓が付いてくる）はここで伝える。
