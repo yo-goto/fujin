@@ -457,7 +457,11 @@ impl State {
             // 臨時召喚（決定16）と同じ理由で、一時的に出ているだけのペインは
             // 「必ず自分で消せる」ほうを取る
             if let Some(id) = self.own_plugin_id {
-                rename_plugin_pane(id, "preview");
+                // 記号付きで通常ペインと見分けを付ける。枠色は zellij 側に
+                // API が無く（決定34）、内容領域の背景色は「色はテーマから
+                // 借りる」原則（ui-design.md 原則1）と衝突するため、
+                // ネイティブのタイトルバー文字列で代替している
+                rename_plugin_pane(id, "▣ preview");
             }
         }
         true
