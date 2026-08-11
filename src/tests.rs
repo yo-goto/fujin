@@ -6827,3 +6827,33 @@ fn search_query_accepts_japanese() {
         Some("日本")
     );
 }
+
+#[test]
+fn the_input_cursor_follows_the_query_end() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    // 画面高は描画で決まる（まだ描いていなければ位置は決まらない）
+    assert_eq!(state.input_cursor_position(), None);
+    state.render(20, SIDEBAR);
+    // 入力欄が無い間はカーソルを隠す
+    assert_eq!(state.input_cursor_position(), None);
+
+    state.handle_nav_key(key(BareKey::Char('/')));
+    let (x, y) = state
+        .input_cursor_position()
+        .expect("検索サブモード中はカーソルが出る");
+    // 字下げ2 + タグ `/` の1
+    assert_eq!(x, 3);
+    assert!(matches!(state.screen_rows(20)[y], Row::Footer));
+
+    // 全角は表示セル幅で数える（文字数で数えると `▏` とずれる）
+    for c in "日本".chars() {
+        state.handle_nav_key(key(BareKey::Char(c)));
+    }
+    assert_eq!(state.input_cursor_position().map(|(x, _)| x), Some(7));
+
+    // 抜ければまた隠れる
+    state.handle_nav_key(key(BareKey::Esc));
+    assert_eq!(state.input_cursor_position(), None);
+}

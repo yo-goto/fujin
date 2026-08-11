@@ -654,8 +654,6 @@ impl State {
         let marks = self.mark_column(&screen);
         // カーソルは一覧から導出されるので、行ごとに引き直さず1度だけ求める
         let triage_cursor = self.triage_cursor();
-        // 入力欄を出している間だけ実カーソルをそこへ置く（下記 input_cursor_column）
-        let mut cursor = None;
         for (y, row) in screen.into_iter().enumerate() {
             match row {
                 Row::Header => {
@@ -663,7 +661,6 @@ impl State {
                 }
                 Row::Footer => {
                     print_text_with_coordinates(self.footer_line(cols), 0, y, None, None);
-                    cursor = self.input_cursor_column().map(|x| (x, y));
                 }
                 // 高さを占めるだけの行。描くものは無い
                 Row::Blank => {}
@@ -730,12 +727,40 @@ impl State {
                 }
             }
         }
-        // 入力欄が無い間は隠す（None）。サイドバーは読むための面なので、
-        // 平常時にカーソルが点いていると入力できるように見えてしまう
-        show_cursor(cursor);
     }
 
-    // 入力欄（検索・番号ジャンプ）を出している間の、実カーソルを置く列。
+    // 入力欄の実カーソル位置をホストへ伝える。位置が変わったときだけ送る。
+    //
+    // **`render()` の中からは呼べない。** 描画中の stdout はホストコマンドの
+    // 経路と混線し、zellij 側が毎フレーム
+    // 「failed to deserialize object from WASI env」で落とす（実測。
+    // [`../../docs/dev/implementation-notes.md`]）。呼ぶのはイベント処理の側
+    pub(crate) fn sync_input_cursor(&mut self) {
+        let next = self.input_cursor_position();
+        if next != self.cursor_shown {
+            show_cursor(next);
+            self.cursor_shown = next;
+        }
+    }
+
+    // 入力欄（検索・番号ジャンプ）を出している間の、実カーソルの位置。
+    // 入力欄が無ければ None ＝ カーソルを隠す。サイドバーは読むための面なので、
+    // 平常時にカーソルが点いていると入力できるように見えてしまう
+    pub(crate) fn input_cursor_position(&self) -> Option<(usize, usize)> {
+        let x = self.input_cursor_column()?;
+        // 行は描画と同じ組み立てから引く（直近に描いた画面高を使う）。
+        // まだ一度も描いていなければ位置が決まらない
+        if self.viewport_rows == 0 {
+            return None;
+        }
+        let y = self
+            .screen_rows(self.viewport_rows)
+            .iter()
+            .position(|row| matches!(row, Row::Footer))?;
+        Some((x, y))
+    }
+
+    // 入力欄の中で実カーソルを置く列。
     //
     // **IME の変換候補ウィンドウは端末が実カーソルの位置に出す**ので、置かないと
     // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと

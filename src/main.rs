@@ -228,6 +228,9 @@ struct State {
     // 設定の警告をフッターに出しておく期限（`elapsed` 基準）。None は
     // 「出していない・もう出さない」
     config_warning_until: Option<f64>,
+    // 直近にホストへ伝えた実カーソル位置（`show_cursor`）。同じ値を送り直さない
+    //（`sync_input_cursor`）
+    cursor_shown: Option<(usize, usize)>,
 }
 
 // `register_plugin!(State)` は使わない。エクスポート関数は entry.rs が持つ
@@ -293,7 +296,7 @@ impl ZellijPlugin for State {
         if self.is_preview {
             return self.update_as_preview(event);
         }
-        match event {
+        let should_render = match event {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
                 if self.permissions_granted {
@@ -387,7 +390,11 @@ impl ZellijPlugin for State {
                 self.handle_nav_key(key)
             }
             _ => false,
-        }
+        };
+        // 入力欄の実カーソル（IMEの候補窓が付いてくる）はここで伝える。
+        // **`render()` の中からは呼べない**（`sync_input_cursor` 参照）
+        self.sync_input_cursor();
+        should_render
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
@@ -420,7 +427,7 @@ impl ZellijPlugin for State {
         }
         // 各アームの中身は担当モジュール側のハンドラにある。ここは配線だけ
         let payload = pipe_message.payload.as_deref();
-        match pipe_message.name.as_str() {
+        let should_render = match pipe_message.name.as_str() {
             STATUS_PIPE => self.handle_status_pipe(payload),
             NAV_UP_PIPE => self.handle_nav_step_pipe(false),
             NAV_DOWN_PIPE => self.handle_nav_step_pipe(true),
@@ -435,7 +442,11 @@ impl ZellijPlugin for State {
             COMMAND_STATE_PIPE => self.handle_command_state_pipe(payload),
             SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload),
             _ => false,
-        }
+        };
+        // navモードへの入場は pipe 経由でも起きる（fujin_mode）ので、
+        // 実カーソルの追従は update と同じくこちらでも行う
+        self.sync_input_cursor();
+        should_render
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
