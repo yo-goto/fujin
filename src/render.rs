@@ -729,6 +729,79 @@ impl State {
         }
     }
 
+    // 入力欄の実カーソル位置をホストへ伝える。位置が変わったときだけ送る。
+    //
+    // **`render()` の中からは呼べない。** 描画中の stdout はホストコマンドの
+    // 経路と混線し、zellij 側が毎フレーム
+    // 「failed to deserialize object from WASI env」で落とす（実測。
+    // [`../../docs/dev/implementation-notes.md`]）。呼ぶのはイベント処理の側
+    pub(crate) fn sync_input_cursor(&mut self) {
+        let next = self.input_cursor_position();
+        if next != self.cursor_shown {
+            show_cursor(next);
+            self.cursor_shown = next;
+        }
+    }
+
+    // 入力欄（検索・番号ジャンプ）を出している間の、実カーソルの位置。
+    // 入力欄が無ければ None ＝ カーソルを隠す。サイドバーは読むための面なので、
+    // 平常時にカーソルが点いていると入力できるように見えてしまう
+    pub(crate) fn input_cursor_position(&self) -> Option<(usize, usize)> {
+        let x = self.input_cursor_column()?;
+        // 行は描画と同じ組み立てから引く（直近に描いた画面高を使う）。
+        // まだ一度も描いていなければ位置が決まらない
+        if self.viewport_rows == 0 {
+            return None;
+        }
+        let y = self
+            .screen_rows(self.viewport_rows)
+            .iter()
+            .position(|row| matches!(row, Row::Footer))?;
+        // クエリが欄からあふれてもペインの外の列を指さない。zellij は範囲外の
+        // 座標を非表示扱いにする（zellij-server `plugin_pane.rs` の
+        // `cursor_coordinates`）ので、送ると候補窓がまた左上へ飛ぶ
+        let x = x.min(content_cols(self.viewport_cols).saturating_sub(1));
+        Some((x, y))
+    }
+
+    // 入力欄を出している間、**自分の打鍵以外での再描画を見送るか**。
+    //
+    // サイドバーを描き直すと、zellij は描画の最後に実カーソルを入力欄へ戻す。
+    // IMEで変換している最中にこれが起きると、端末が描いていた未確定文字列が
+    // 上書きされ、**変換候補ウィンドウが打っている途中で飛ぶ**（実測。
+    // docs/issues/ime-input-support.md）。外から届くイベント（他ペインの変化・
+    // 状態通知・タイマー）は入力が終わるまで描画を待たせる。
+    //
+    // 代償: 入力中は一覧が古いまま止まる。**状態そのものは更新し続けている**
+    // ので、入力欄を抜けた時点の描画で追いつく
+    pub(crate) fn defers_render_while_typing(&self) -> bool {
+        self.input_cursor_column().is_some()
+    }
+
+    // 入力欄の中で実カーソルを置く列。
+    //
+    // **IME の変換候補ウィンドウは端末が実カーソルの位置に出す**ので、置かないと
+    // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
+    // 変換の確定そのものが効かない端末もある（docs/issues/ime-input-support.md）。
+    // 位置は input_footer の組み立てと同じ勘定で、`▏` を出している列に重ねる。
+    //
+    // **分岐は `footer_line` と同じ順序で見ること。** 入力欄が出ていないのに
+    // カーソルだけ残すと、候補窓が見当違いの場所に出る（検索サブモード中に
+    // ヘルプを開くとフッターは閉じ方の案内に変わる、など）
+    fn input_cursor_column(&self) -> Option<usize> {
+        if self.help_overlay || self.termination.is_some() {
+            return None;
+        }
+        let (tag, input) = if let Some(search) = &self.search {
+            ("/", search.query.as_str())
+        } else if let Some(jump) = &self.jump {
+            ("n ", jump.buffer.as_str())
+        } else {
+            return None;
+        };
+        Some(HEADER_INDENT + UnicodeWidthStr::width(tag) + UnicodeWidthStr::width(input))
+    }
+
     // プレビュー用フローティングペインの描画（決定42。要件: preview）。
     //
     // 見出し（対象ペイン名）＋境界線＋スナップショット本文だけの簡素な作り。

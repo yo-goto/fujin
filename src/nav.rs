@@ -533,6 +533,37 @@ impl State {
         self.focus_selected();
     }
 
+    // 一括で届くテキスト入力（貼り付けと、**IMEの変換確定**）の受け口。
+    //
+    // 複数文字が一度に来る入力は `InterceptedKeyPress` ではなく `PastedText` に
+    // 分かれる（zellij クライアントの入力ハンドラが、まとまった文字列を
+    // `InputEvent::Paste` として解釈するため）。購読していないと、変換で確定した
+    // 文字列が丸ごと消えたように見える（docs/issues/ime-input-support.md）。
+    //
+    // navモードの安全弁（決定12）はここには効かせない — 未定義の**キー**で抜ける
+    // 仕組みであって、入力欄の外に落ちたテキストは操作ではないので黙って捨てる
+    pub(crate) fn handle_pasted_text(&mut self, text: &str) -> bool {
+        // ヘルプオーバーレイ中は入力欄が画面に無い（キーも「閉じる」にしか
+        // 使われない）。キーと扱いを揃え、見えないクエリへは流さない
+        if self.help_overlay {
+            return false;
+        }
+        let Some(search) = &mut self.search else {
+            return false;
+        };
+        // クエリは1行。改行やタブが混ざったペーストでも欄を壊さない
+        let before = search.query.len();
+        search
+            .query
+            .extend(text.chars().filter(|c| !c.is_control()));
+        if search.query.len() == before {
+            return false;
+        }
+        self.refilter();
+        self.refresh_preview();
+        true
+    }
+
     // 絞り込みの再計算。クエリの変化と一覧の作り直し（rebuild_selectable）の
     // 両方から呼ばれる。ペインの増減で古い結果のまま表示しないため
     fn refilter(&mut self) {
