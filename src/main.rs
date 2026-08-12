@@ -389,11 +389,9 @@ impl ZellijPlugin for State {
             // ダブルクリック・ドラッグ・右クリックはv1対象外
             Event::Mouse(Mouse::LeftClick(line, _column)) => self.handle_click(line),
             Event::InterceptedKeyPress(key) => {
-                // 横取りを要求したインスタンスにしか届かないが、念のため
-                if !self.nav_mode {
-                    return false;
-                }
-                self.handle_nav_key(key)
+                // 横取りを要求したインスタンスにしか届かないが、念のため。
+                // `return` で抜けない — 下の実カーソルの追従はここでも通す
+                self.nav_mode && self.handle_nav_key(key)
             }
             // 貼り付け・IMEの変換確定。フォーカスを預かっている（決定34）間だけ
             // 自分に届く。入力欄の外なら中で捨てる
