@@ -63,8 +63,12 @@ pub fn update() -> bool {
         };
         // Event へ畳む前に生の値を控える。畳んだ後では復元に要る情報が消えている
         let char_key = decoded_char(&protobuf);
-        let Ok(mut event) = Event::try_from(protobuf) else {
-            return false;
+        let mut event = match Event::try_from(protobuf) {
+            Ok(event) => event,
+            Err(e) => {
+                eprintln!("fujin: failed to convert an event: {e}");
+                return false;
+            }
         };
         restore_char_key(&mut event, char_key);
         state.borrow_mut().update(event)
@@ -77,8 +81,12 @@ pub fn pipe() -> bool {
         let Some(protobuf) = decode_from_stdin::<ProtobufPipeMessage>() else {
             return false;
         };
-        let Ok(message) = PipeMessage::try_from(protobuf) else {
-            return false;
+        let message = match PipeMessage::try_from(protobuf) {
+            Ok(message) => message,
+            Err(e) => {
+                eprintln!("fujin: failed to convert a pipe message: {e}");
+                return false;
+            }
         };
         state.borrow_mut().pipe(message)
     })
@@ -99,10 +107,17 @@ pub fn plugin_version() {
 }
 
 // stdin に載ってくる protobuf のデコード。ホスト関数の戻り値は
-// バイト列として1行の JSON で渡ってくる（zellij-tile の shim と同じ経路）
+// バイト列として1行の JSON で渡ってくる（zellij-tile の shim と同じ経路）。
+//
+// 失敗はログに残して畳む — マクロ版なら unwrap の panic で気づけた
+// バージョン不整合が、黙って捨てると「無反応なサイドバー」にしか見えない
 fn decode_from_stdin<T: Message + Default>() -> Option<T> {
-    let bytes: Vec<u8> = object_from_stdin().ok()?;
-    T::decode(bytes.as_slice()).ok()
+    let bytes: Vec<u8> = object_from_stdin()
+        .map_err(|e| eprintln!("fujin: failed to read a host payload: {e}"))
+        .ok()?;
+    T::decode(bytes.as_slice())
+        .map_err(|e| eprintln!("fujin: failed to decode a host payload: {e}"))
+        .ok()
 }
 
 fn plugin_configuration() -> Option<BTreeMap<String, String>> {
