@@ -6890,6 +6890,27 @@ fn pasted_text_lands_in_the_search_query() {
 }
 
 #[test]
+fn pasted_text_is_ignored_while_the_help_overlay_is_open() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(state.help_overlay);
+    // オーバーレイ中のキーは「閉じる」にしか使われない。ペーストも同じ扱いで、
+    // 画面に出ていないクエリへは流さない
+    assert!(!state.handle_pasted_text("日本語"));
+    assert_eq!(state.search.as_ref().map(|s| s.query.as_str()), Some(""));
+    // 閉じればまた入る
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(state.handle_pasted_text("日本語"));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("日本語")
+    );
+}
+
+#[test]
 fn the_input_cursor_hides_when_the_footer_is_not_an_input() {
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1, 2]);
