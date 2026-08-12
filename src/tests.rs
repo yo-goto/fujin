@@ -6913,3 +6913,31 @@ fn the_input_cursor_hides_when_the_footer_is_not_an_input() {
     assert!(state.termination.is_some());
     assert_eq!(state.input_cursor_position(), None);
 }
+
+#[test]
+fn typing_defers_renders_that_come_from_outside() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    state.render(20, SIDEBAR);
+    // 入力欄を出していない間は、外から来たイベントでも普通に描き直す
+    assert!(!state.defers_render_while_typing());
+
+    // 入力中は描き直しを見送る（描くと実カーソルが入力欄へ戻され、IMEの
+    // 変換候補ウィンドウが打っている途中で飛ぶ）
+    state.handle_nav_key(key(BareKey::Char('/')));
+    assert!(state.defers_render_while_typing());
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(!state.defers_render_while_typing());
+
+    // 番号ジャンプの入力欄も同じ扱い
+    state.handle_nav_key(key(BareKey::Char('n')));
+    assert!(state.defers_render_while_typing());
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(!state.defers_render_while_typing());
+
+    // フッターが入力欄でなくなる場面（ヘルプ）では見送らない
+    state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(!state.defers_render_while_typing());
+}

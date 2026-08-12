@@ -300,6 +300,8 @@ impl ZellijPlugin for State {
         if self.is_preview {
             return self.update_as_preview(event);
         }
+        // 打っている本人の入力か（下の `defers_render_while_typing` の例外）
+        let from_input = matches!(event, Event::InterceptedKeyPress(_) | Event::PastedText(_));
         let should_render = match event {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
@@ -401,7 +403,7 @@ impl ZellijPlugin for State {
         // 入力欄の実カーソル（IMEの候補窓が付いてくる）はここで伝える。
         // **`render()` の中からは呼べない**（`sync_input_cursor` 参照）
         self.sync_input_cursor();
-        should_render
+        should_render && (from_input || !self.defers_render_while_typing())
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
@@ -453,7 +455,8 @@ impl ZellijPlugin for State {
         // navモードへの入場は pipe 経由でも起きる（fujin_mode）ので、
         // 実カーソルの追従は update と同じくこちらでも行う
         self.sync_input_cursor();
-        should_render
+        // pipe は全て「外から」来るので、入力中は描き直さない（update と同じ理由）
+        should_render && !self.defers_render_while_typing()
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
