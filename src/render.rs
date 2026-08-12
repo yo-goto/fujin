@@ -757,6 +757,10 @@ impl State {
             .screen_rows(self.viewport_rows)
             .iter()
             .position(|row| matches!(row, Row::Footer))?;
+        // クエリが欄からあふれてもペインの外の列を指さない。zellij は範囲外の
+        // 座標を非表示扱いにする（zellij-server `plugin_pane.rs` の
+        // `cursor_coordinates`）ので、送ると候補窓がまた左上へ飛ぶ
+        let x = x.min(content_cols(self.viewport_cols).saturating_sub(1));
         Some((x, y))
     }
 

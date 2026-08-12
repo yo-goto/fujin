@@ -6911,6 +6911,23 @@ fn pasted_text_is_ignored_while_the_help_overlay_is_open() {
 }
 
 #[test]
+fn the_input_cursor_stays_inside_the_pane_when_the_query_overflows() {
+    let mut state = sidebar_state();
+    observe_panes(&mut state, &[1, 2]);
+    state.nav_mode = true;
+    state.render(20, SIDEBAR);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    // 幅32の欄に収まらないクエリ。範囲外の列を伝えると zellij 側がカーソルを
+    // 非表示扱いにし、候補窓が左上へ飛ぶ（input_cursor_position のクランプ）
+    state.handle_pasted_text(&"あ".repeat(20));
+    let (x, _) = state
+        .input_cursor_position()
+        .expect("検索サブモード中はカーソルが出る");
+    // 文字を置ける最終列 = 幅32 − 右マージン2 − 1
+    assert_eq!(x, 29);
+}
+
+#[test]
 fn the_input_cursor_hides_when_the_footer_is_not_an_input() {
     let mut state = sidebar_state();
     observe_panes(&mut state, &[1, 2]);
