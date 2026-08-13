@@ -88,6 +88,11 @@ const SELECTION_PIPE: &str = "fujin_selection";
 const MARK_PIPE: &str = "fujin_mark";
 // プレビューのスナップショット送付（決定42）。1行目が対象ペイン名、2行目以降が内容
 const PREVIEW_PIPE: &str = "fujin_preview";
+// サイドバー幅のタブ間追従（docs/issues/sidebar-width-persist-across-tabs.md）。
+// zellij の `new_tab_template` はタブ生成時に複製されるだけの静的な雛形なので、
+// あるタブでリサイズしても他タブには伝播しない。観測した幅を配って各自に
+// 寄せさせる
+const WIDTH_PIPE: &str = "fujin_width";
 // 取り残された召喚インスタンスの強制掃除（決定16）。取り残された召喚はキーを
 // 横取りしておらず Esc が届かず、unselectable なので普段のペイン操作でも消せない。
 // pipe 経由の逃げ道を用意しておく
@@ -209,6 +214,22 @@ struct State {
     // 直近に描画した画面幅。配置演出の着地列は幅から決まるが、タイマーは
     // 描画の外で進むのでここに控えておく
     viewport_cols: usize,
+    // タブ間で揃えたいサイドバー幅（docs/issues/sidebar-width-persist-across-tabs.md）。
+    // 誰かがリサイズしたらその桁数が権威になり、兄弟インスタンスへ配られる
+    width_target: Option<usize>,
+    // 目標へ寄せるために撃ったリサイズの回数。相対リサイズは端末幅の一定割合
+    // ずつ動く量子化された操作なので、目標にぴったり乗るとは限らない。
+    // 撃ち続けて振動しないよう回数で打ち切る
+    width_attempts: usize,
+    // 自分が撃ったリサイズの着地待ち。中身は撃った向きで、幅が実際に動くまで
+    // 保持する。待っている間は次の一手を撃ち足さない — 多重に飛ばすと、あとから
+    // 届く着地を利用者の操作と取り違えて配り直してしまう（実測でこの経路を踏んだ）。
+    // 撃った向きと逆に幅が動いたときだけは自分の着地ではありえないので、
+    // 利用者の操作として扱う
+    width_adjusting: Option<Resize>,
+    // これ以上寄せられないと分かったか（目標を跨いでしまった・回数を使い切った）。
+    // 新しい目標が届いたら倒す
+    width_settled: bool,
     // 再生中の配置演出。再生中だけ Some で、終われば None に戻る
     deployment: Option<Deployment>,
     // 届いた `Event::Timer` の経過時間を積んだ値。壁時計を引けないので、
@@ -419,6 +440,7 @@ impl ZellijPlugin for State {
                 | SELECTION_PIPE
                 | MARK_PIPE
                 | PREVIEW_PIPE
+                | WIDTH_PIPE
                 | DISMISS_PIPE
         );
         // CLI pipe は即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
@@ -445,6 +467,7 @@ impl ZellijPlugin for State {
             SELECTION_PIPE => self.handle_selection_pipe(payload),
             PREVIEW_PIPE => self.handle_preview_pipe(payload),
             MARK_PIPE => self.handle_mark_pipe(payload),
+            WIDTH_PIPE => self.handle_width_pipe(payload, &pipe_message.source),
             READ_CLEAR_PIPE => self.handle_read_clear_pipe(payload),
             COMMAND_STATE_PIPE => self.handle_command_state_pipe(payload),
             SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload),
@@ -461,6 +484,9 @@ impl ZellijPlugin for State {
         // 表示範囲の寄せ直しは描画の直前に行う。画面高が分かるのがここだけで、
         // 行の増減も選択の移動もまとめて吸収できる
         self.reconcile_viewport(rows);
+        // 自分の幅が分かるのも描画のときだけ。リサイズの検出と寄せ直しは
+        // viewport_cols を更新する前に済ませる（前回との差が判定材料）
+        self.reconcile_width(cols);
         // 配置演出のタイマーは描画の外で進むので、幅を控えておく
         self.viewport_cols = cols;
         self.draw(rows, cols);

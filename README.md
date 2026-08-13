@@ -299,6 +299,12 @@ gets narrower on a narrow terminal (the footer hints and such are laid out for
 32 columns). To keep it fixed but pick a different value, pass `--width N` as a
 plain column count.
 
+**Resizing one tab's sidebar resizes them all**, and tabs opened afterwards come
+up at the new width too. A zellij layout is only a template applied when a tab is
+created, so widths would otherwise drift apart per tab; fujin notices the change
+and pulls the other tabs' sidebars to match. This only happens with a percentage
+width — a fixed column count cannot be resized in the first place.
+
 ### 4. Global keybindings (jump feature)
 
 Add these to the keybinds block in `~/.config/zellij/config.kdl` (e.g.
