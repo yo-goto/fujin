@@ -518,26 +518,23 @@ back.
 ### Search (`/` inside nav mode)
 
 Pressing `/` while in nav mode turns the header into a query input line
-(`/…▏`) and fuzzy-filters the tree against pane name, owning tab name, and
+(`/…`) and fuzzy-filters the tree against pane name, owning tab name, and
 cwd. Matched characters are highlighted, and the highlight location doubles
 as a hint for which field matched (a cwd match is shown on that row even if
 `show_cwd` is disabled).
 
 Search is split into two vim-like states: **editing** and **navigating**.
 `/` starts you in editing; pressing `Esc` moves you to navigating while
-keeping the query. Three cues tell you which state you are in:
+keeping the query. These cues tell you which state you are in:
 
 | | editing | navigating |
 |---|---|---|
-| pseudo cursor | bar `▏` | block `▌` |
 | query text | normal | dimmed |
 | footer hints | `esc:move  enter:jump` | `j/k:move  ?:help  i:edit …` |
 
-While editing, the real cursor is placed on the same column for IME input, so
-**if your terminal draws a block cursor it covers the bar underneath**. To get
-vim's "bar while inserting, block in normal mode" look, set your terminal's
-cursor to a beam (in alacritty: `shape = "Beam"` under `[cursor.style]`).
-Without that, the dimmed query and the hints still tell the states apart.
+The real cursor is placed at the end of the input field in both states, for
+IME support. fujin cannot set its shape, so it follows your terminal's
+settings — it isn't used as a cue for telling the states apart.
 
 Editing keys:
 

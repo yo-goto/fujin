@@ -1019,7 +1019,7 @@ fn the_footer_shows_the_number_buffer_while_jumping() {
     state.handle_nav_key(key(BareKey::Char('1')));
     let footer = state.footer_line(SIDEBAR);
     let content = footer.content().to_string();
-    assert!(content.starts_with("  n 1▏"), "{}", content);
+    assert!(content.starts_with("  n 1"), "{}", content);
     assert!(content.ends_with("?:help"), "{}", content);
 }
 
@@ -2437,9 +2437,10 @@ fn the_footer_becomes_the_query_field_while_searching() {
 
     let footer = state.footer_line(32);
     let footer = footer.content();
-    // 編集中はバーの疑似カーソル。`?` はクエリの文字なのでヘルプの案内は出さない
-    //（決定50。要件: nav-mode-hints.feature）
-    assert!(footer.starts_with("  /alp▏"), "{}", footer);
+    // 編集状態は疑似カーソルを描かない（実カーソルに位置を任せる。決定50論点4）。
+    // `?` はクエリの文字なのでヘルプの案内は出さない（要件: nav-mode-hints.feature）
+    assert!(footer.starts_with("  /alp"), "{}", footer);
+    assert!(!footer.contains('▏'), "{}", footer);
     assert!(footer.contains("esc:move"), "{}", footer);
     assert!(!footer.contains("?:help"), "{}", footer);
     assert!(footer.chars().count() <= 32);
@@ -2447,13 +2448,12 @@ fn the_footer_becomes_the_query_field_while_searching() {
 
 #[test]
 fn the_footer_hints_change_with_the_search_phase() {
-    // 状態インジケータは疑似カーソルの形・入力文字列の明暗・ヒント文言の3つ。
-    // ブロックは `█` ではなく `▌` を使う（`█` はセル幅の116%で隣へ食い込む。
-    // 2026-08-13 実測。render.rs の NAVIGATE_CURSOR のコメント）
+    // 状態インジケータは入力文字列の明暗とヒント文言の2つ（決定50、2026-08-13に
+    // 地の文の疑似カーソルを廃止。経緯: docs/issues/search-input-cursor-shape.md）
     let mut state = navigating_search("");
     let footer = state.footer_line(32);
     let footer = footer.content();
-    assert!(footer.starts_with("  /▌"), "{}", footer);
+    assert!(footer.starts_with("  /"), "{}", footer);
     // 移動キー・ヘルプキー・編集再開キー（要件: nav-mode-hints.feature）
     for hint in ["j/k:move", "?:help", "i:edit"] {
         assert!(footer.contains(hint), "{}: {}", hint, footer);
@@ -2464,21 +2464,21 @@ fn the_footer_hints_change_with_the_search_phase() {
         footer
     );
 
-    // `i` で編集状態へ戻せば、カーソルもヒントも編集中のものへ戻る
+    // `i` で編集状態へ戻せばヒントが編集中のものへ戻る
     state.handle_nav_key(key(BareKey::Char('i')));
     type_query(&mut state, "alp");
     let footer = state.footer_line(32);
     let footer = footer.content();
-    assert!(footer.starts_with("  /alp▏"), "{}", footer);
+    assert!(footer.starts_with("  /alp"), "{}", footer);
     assert!(!footer.contains("j/k:move"), "{}", footer);
 }
 
 #[test]
 fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
-    // **形だけに頼らないための軸**（2026-08-13 実測）。編集状態では IME用の
-    // 実カーソルが同じ列に重なり、端末のカーソル形状（alacritty 既定はブロック）が
-    // 下の字を塗り潰すので、その環境では形の比喩が逆転する。打てない状態は入力
-    // 文字列そのものを沈めて、カーソルの見え方に依存しない差も併せて持たせる
+    // 地の文の疑似カーソルは無く実カーソルへ位置表示を一本化した（決定50、
+    // 2026-08-13。経緯: docs/issues/search-input-cursor-shape.md）ので、状態を
+    // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。ここでは
+    // 明暗のほう（打てない状態ではクエリそのものを沈める）を確かめる
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "alp");
@@ -2491,16 +2491,15 @@ fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
         footer.content()
     );
 
-    // 操作状態ではクエリだけが dim。疑似カーソル（位置の手がかり）は明るいまま残す
-    let cursor_column = "  /alp".chars().count();
-    let query: Vec<usize> = ("  /".chars().count()..cursor_column).collect();
+    // 操作状態ではクエリだけが dim
+    let query_end = "  /alp".chars().count();
+    let query: Vec<usize> = ("  /".chars().count()..query_end).collect();
     state.handle_nav_key(key(BareKey::Esc));
     let footer = state.footer_line(SIDEBAR);
     assert_eq!(
         ink_at(&footer, DIM_LEVEL),
         query,
-        "クエリだけを沈める（カーソル列 {} は含めない）: {}",
-        cursor_column,
+        "クエリだけを沈める: {}",
         footer.content()
     );
 }
@@ -7123,19 +7122,21 @@ fn the_input_cursor_follows_the_query_end() {
     assert_eq!(x, 3);
     assert!(matches!(state.screen_rows(20)[y], Row::Footer));
 
-    // 全角は表示セル幅で数える（文字数で数えると `▏` とずれる）
+    // 全角は表示セル幅で数える（文字数で数えるとずれる）
     for c in "日本".chars() {
         state.handle_nav_key(key(BareKey::Char(c)));
     }
     assert_eq!(state.input_cursor_position().map(|(x, _)| x), Some(7));
 
-    // 操作状態はテキストを受け付けないので実カーソルも置かない（決定50）
+    // 操作状態もテキストは受け付けないが、位置表示は実カーソルに一本化した
+    // ので出したままにする（決定50、2026-08-13。経緯:
+    // docs/issues/search-input-cursor-shape.md）
     state.handle_nav_key(key(BareKey::Esc));
-    assert_eq!(state.input_cursor_position(), None);
+    assert!(state.input_cursor_position().is_some());
     state.handle_nav_key(key(BareKey::Char('i')));
     assert!(state.input_cursor_position().is_some());
 
-    // 抜ければまた隠れる
+    // 抜ければ隠れる
     state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Esc));
     assert_eq!(state.input_cursor_position(), None);

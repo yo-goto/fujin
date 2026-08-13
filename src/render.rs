@@ -180,26 +180,17 @@ pub(crate) const NO_AGENT_ICON: &str = "›";
 // 凡例に出す説明。状態名（AgentState::label）と同じ書き方に揃える
 pub(crate) const NO_AGENT_LABEL: &str = "no agent";
 
-// 入力欄の疑似カーソル（地の文で描く文字。IME用の実カーソルとは別物）。
-// 打てる状態は細いバー、打てない状態は太いブロックで、vimのカーソル形状変化
-//（挿入=バー/ノーマル=ブロック）に相当する視覚的合図にする（決定50）。
+// 入力欄（検索・番号ジャンプ）の状態ごとの見た目。
 //
-// **ブロックに `█`(U+2588) は使わない**（2026-08-13 実測）。ink 幅がセルの 116%
-//（HackGen Console NF）あり、隣の列へ食い込んで欄の幅が汚れる。`▌`(U+258C) なら
-// 58% でセル内に収まり、`▏`(U+258F、13%) と並べれば太さの差は十分につく。
-//
-// **ただし形だけに頼らない。** 編集状態では IME 用に置いた実カーソルが同じ列に
-// 重なり、端末のカーソル形状はこちらから決められない（alacritty の既定はブロック）。
-// その環境では編集状態もブロックに見えて比喩が逆転するので、状態の主たる手がかりは
-// 入力文字列の明暗（InputStyle::ink）に置く。端末側を beam カーソルにすれば
-// 形の差もそのまま活きる（README の検索節に案内あり）
-const EDIT_CURSOR: &str = "▏";
-const NAVIGATE_CURSOR: &str = "▌";
-
-// 入力欄（検索・番号ジャンプ）の状態ごとの見た目
+// **疑似カーソルは持たない**（決定50、2026-08-13 に地の文の疑似カーソルを廃止。
+// 経緯: docs/issues/search-input-cursor-shape.md）。位置表示は編集状態・操作状態
+// どちらも実カーソル（`sync_input_cursor`）に一本化した——プラグイン側から形状を
+// 指定できず端末既定はほぼブロックなので、地の文の字を描き分けても実カーソルの
+// 下に隠れる/隠れないでコロコロ変わり、当てにならない見分け手段だった。
+// 状態を見分ける主手がかりは入力文字列の明暗（InputStyle::ink）とフッターの
+// ヒント文言の2つ
 #[derive(Clone, Copy)]
 struct InputStyle {
-    cursor: &'static str,
     // 入力文字列の色。打てる状態は本文のまま、打てない状態は dim
     ink: Ink,
     hints: &'static [&'static str],
@@ -207,7 +198,6 @@ struct InputStyle {
 
 // 番号ジャンプサブモードは常に打てる状態しかない（決定29）
 const JUMP_INPUT: InputStyle = InputStyle {
-    cursor: EDIT_CURSOR,
     ink: Ink::Plain,
     hints: &["?:help"],
 };
@@ -219,12 +209,10 @@ const JUMP_INPUT: InputStyle = InputStyle {
 fn search_input_style(phase: SearchPhase) -> InputStyle {
     match phase {
         SearchPhase::Editing => InputStyle {
-            cursor: EDIT_CURSOR,
             ink: Ink::Plain,
             hints: &["esc:move", "enter:jump"],
         },
         SearchPhase::Navigating => InputStyle {
-            cursor: NAVIGATE_CURSOR,
             ink: Ink::Muted,
             hints: &["j/k:move", "?:help", "i:edit", "esc:cancel", "enter:jump"],
         },
@@ -825,9 +813,21 @@ impl State {
     // 状態通知・タイマー）は入力が終わるまで描画を待たせる。
     //
     // 代償: 入力中は一覧が古いまま止まる。**状態そのものは更新し続けている**
-    // ので、入力欄を抜けた時点の描画で追いつく
+    // ので、入力欄を抜けた時点の描画で追いつく。
+    //
+    // **`input_cursor_column` とは判定基準が異なる**（2026-08-13）。実カーソルは
+    // 検索サブモードの操作状態でも表示する（位置表示の一本化。決定50）が、
+    // 操作状態はIMEの変換が起きないので、ここまで見送りを広げると結果を見ながら
+    // 動かしているあいだ一覧が古いまま固まる。打鍵中（編集状態・番号ジャンプ）
+    // だけに絞る
     pub(crate) fn defers_render_while_typing(&self) -> bool {
-        self.input_cursor_column().is_some()
+        if self.help_overlay || self.termination.is_some() {
+            return false;
+        }
+        match &self.search {
+            Some(search) => search.phase == SearchPhase::Editing,
+            None => self.jump.is_some(),
+        }
     }
 
     // 入力欄の中で実カーソルを置く列。
@@ -835,7 +835,13 @@ impl State {
     // **IME の変換候補ウィンドウは端末が実カーソルの位置に出す**ので、置かないと
     // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
     // 変換の確定そのものが効かない端末もある（docs/issues/ime-input-support.md）。
-    // 位置は input_footer の組み立てと同じ勘定で、`▏` を出している列に重ねる。
+    //
+    // 検索サブモードは**編集状態・操作状態のどちらでも**カーソルを置く（決定50、
+    // 2026-08-13 に一本化）。以前は操作状態を隠して地の文の疑似カーソルに位置表示を
+    // 譲っていたが、端末のカーソル形状はこちらから指定できず地の文の字も
+    // その下に隠れるため、見分けの手がかりとして機能していなかった
+    // （docs/issues/search-input-cursor-shape.md）。実カーソルへ一本化し、
+    // 状態の違いは入力文字列の明暗とフッターのヒント文言で示す
     //
     // **分岐は `footer_line` と同じ順序で見ること。** 入力欄が出ていないのに
     // カーソルだけ残すと、候補窓が見当違いの場所に出る（検索サブモード中に
@@ -845,13 +851,6 @@ impl State {
             return None;
         }
         let (tag, input) = if let Some(search) = &self.search {
-            // 操作状態はテキストを受け付けない（決定50）ので、実カーソルは置かない。
-            // 置くと打てるように見えるうえ、入力中扱いのまま外からの描き直しを
-            // 見送り続けて一覧が古いまま止まる（defers_render_while_typing）。
-            // 入力位置は疑似カーソル（ブロック）が示す
-            if search.phase != SearchPhase::Editing {
-                return None;
-            }
             ("/", search.query.as_str())
         } else if let Some(jump) = &self.jump {
             ("n ", jump.buffer.as_str())
@@ -1494,8 +1493,9 @@ impl State {
 // 入力が伸びてぶつかるところまで来たら、入力中の文字列のほうを優先して
 // ヒント側を落とす（右寄せを使うのは枠でここ1箇所だけ）。
 //
-// `cursor` は入力位置を示す疑似カーソル（IME用の実カーソルとは別物。決定50）、
 // `hints` は右端に出す操作ヒントの項目で、収まらないぶんは末尾から落とす。
+// 入力位置は実カーソル（`sync_input_cursor`）が示す。地の文の疑似カーソルは
+// 持たない（決定50。経緯: docs/issues/search-input-cursor-shape.md）
 //
 // 入力本体は本文なので既定色のまま、先頭の `tag`（`/` や `n`）はモード名と
 // 同じ扱いでレベル3。状態色で統一するのはヒント側（要件: sidebar-footer）
@@ -1512,18 +1512,10 @@ fn input_footer(
     let budget = cols
         .saturating_sub(UnicodeWidthStr::width(indent))
         .saturating_sub(UnicodeWidthStr::width(tag))
-        .saturating_sub(UnicodeWidthStr::width(input))
-        .saturating_sub(UnicodeWidthStr::width(style.cursor));
+        .saturating_sub(UnicodeWidthStr::width(input));
     let hint = fit_hint(style.hints, budget);
     let pad = budget.saturating_sub(UnicodeWidthStr::width(hint.as_str()));
-    // 疑似カーソルは入力とは別の断片にする。入力を沈める状態でも、
-    // カーソルだけは本文の明るさで残して位置を見失わせない
-    let mut segments = vec![
-        (indent, Ink::Plain),
-        (tag, Ink::Tag),
-        (input, style.ink),
-        (style.cursor, Ink::Plain),
-    ];
+    let mut segments = vec![(indent, Ink::Plain), (tag, Ink::Tag), (input, style.ink)];
     let spacer = " ".repeat(pad);
     if !hint.is_empty() {
         segments.push((spacer.as_str(), Ink::Plain));
