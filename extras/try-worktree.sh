@@ -298,7 +298,13 @@ install_config() {
   "$script_dir/setup.sh" "${layout_args[@]}" >/dev/null
   ok "wrote $layout_file"
 
-  [ -n "$theme" ] && apply_theme
+  # **`&&` の右辺で終える形にしない。** これが関数の最後の文だと、`$theme` が
+  # 空のときの終了ステータス（左辺の失敗）がそのまま install_config の戻り値になり、
+  # 呼び出し側が if/while 等で囲んでいない bare 呼び出しのため set -e が発火して
+  # 後続の grant_permissions 以降が無言でスキップされる（2026-08-13 実測）
+  if [ -n "$theme" ]; then
+    apply_theme
+  fi
 }
 
 # --theme が指定されたときだけ呼ばれる。config.kdl 末尾に extras/themes/<name>.kdl の
