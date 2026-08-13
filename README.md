@@ -305,6 +305,11 @@ created, so widths would otherwise drift apart per tab; fujin notices the change
 and pulls the other tabs' sidebars to match. This only happens with a percentage
 width — a fixed column count cannot be resized in the first place.
 
+The follow-up uses zellij's stepped resize (5% of the terminal width per step),
+so if you **drag** the border to a width that falls between steps, other tabs
+settle at the **nearest reachable width** (off by at most half a step). Keyboard
+or CLI resizes line every tab up exactly.
+
 ### 4. Global keybindings (jump feature)
 
 Add these to the keybinds block in `~/.config/zellij/config.kdl` (e.g.

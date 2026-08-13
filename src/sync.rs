@@ -357,21 +357,35 @@ impl State {
         self.broadcast_to_siblings(WIDTH_PIPE, &cols.to_string());
     }
 
-    // 1段階撃って動いたあとの後始末。これ以上寄せられないと分かったら止める
+    // 1段階撃って動いたあとの後始末。目標を跨いだら、跨いだ両端のうち
+    // 目標に近いほうで止める。刻みが目標に乗らないのは、ドラッグリサイズが
+    // 1セル単位で動く（実測: mouse_handler が delta/viewport で percent を出す）
+    // 一方、プラグインの resize は 5% 固定刻みしか撃てないため
+    //（docs/issues/sidebar-width-persist-across-tabs.md）
     fn settle_width_after_step(&mut self, previous: usize, cols: usize) {
         let Some(target) = self.width_target else {
             return;
         };
         let before = target as isize - previous as isize;
         let after = target as isize - cols as isize;
-        if after != 0 && before.signum() != after.signum() {
-            // 目標を跨いだ。リサイズの刻みが目標に乗らないということなので、
-            // これ以上撃っても行き来するだけ
+        if after == 0 || before.signum() == after.signum() {
+            return;
+        }
+        if after.abs() <= before.abs() {
+            // 跨いだ着地点のほうが目標に近い（か同距離）。ここが最寄り
             eprintln!(
-                "fujin: sidebar width overshot {} -> {} (target {})",
+                "fujin: sidebar width overshot {} -> {} (target {}), settling",
                 previous, cols, target
             );
             self.width_settled = true;
+        } else {
+            // 跨ぐ前の幅のほうが近かった。settled を立てずに戻ると、apply が
+            // 目標へ向けて撃つ ＝ 1段階戻る。戻した着地でまた跨ぐが、その
+            // ときは目標との差が今より小さいので上の分岐で止まる
+            eprintln!(
+                "fujin: sidebar width overshot {} -> {} (target {}), stepping back",
+                previous, cols, target
+            );
         }
     }
 

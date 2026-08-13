@@ -7070,8 +7070,8 @@ fn a_width_change_against_the_fired_direction_is_the_user() {
 
 #[test]
 fn overshooting_the_target_settles_the_width() {
-    // 目標36へ32から寄せたら刻みの都合で40に着地した場合。これ以上撃っても
-    // 目標をまたいで行き来するだけなので、そこで止める
+    // 目標36へ32から寄せたら刻みの都合で40に着地した場合。両端が同距離なので
+    // 着地点で止める。これ以上撃っても目標をまたいで行き来するだけ
     let mut state = State {
         viewport_cols: 32,
         width_target: Some(36),
@@ -7083,6 +7083,28 @@ fn overshooting_the_target_settles_the_width() {
     assert!(state.width_adjusting.is_none());
     // 権威も名乗らない（目標は36のまま）
     assert_eq!(state.width_target, Some(36));
+}
+
+#[test]
+fn a_far_overshoot_steps_back_to_the_nearer_side() {
+    // 目標34へ32から寄せたら40に着地した場合（ドラッグリサイズの1セル単位の
+    // 目標は5%刻みに乗らない）。跨ぐ前の32のほうが近いので、止めずに戻す
+    let mut state = State {
+        viewport_cols: 32,
+        width_target: Some(34),
+        width_adjusting: Some(Resize::Increase),
+        ..Default::default()
+    };
+    state.reconcile_width(40);
+    assert!(!state.width_settled);
+    assert!(state.width_adjusting.is_none());
+
+    // 戻した着地（40→32）でもう一度跨ぐが、今度は着地側が近いので止まる
+    state.viewport_cols = 40;
+    state.width_adjusting = Some(Resize::Decrease);
+    state.reconcile_width(32);
+    assert!(state.width_settled);
+    assert_eq!(state.width_target, Some(34));
 }
 
 #[test]
