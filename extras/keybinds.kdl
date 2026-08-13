@@ -82,8 +82,8 @@
 //
 // keybinds {
 //     shared_except "locked" {
-//         bind "Alt Up"    { MessagePlugin "fujin" { name "fujin_up"; }; }
-//         bind "Alt Down"  { MessagePlugin "fujin" { name "fujin_down"; }; }
+//         bind "Alt u"     { MessagePlugin "fujin" { name "fujin_up"; }; }
+//         bind "Alt d"     { MessagePlugin "fujin" { name "fujin_down"; }; }
 //         bind "Alt g"     { MessagePlugin "fujin" { name "fujin_go"; }; }
 //         bind "Alt c"     { MessagePlugin "fujin" { name "fujin_toggle_cwd"; }; }
 //     }
