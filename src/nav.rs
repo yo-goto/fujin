@@ -22,10 +22,25 @@ pub(crate) struct JumpState {
     pub(crate) buffer: String,
 }
 
+// 検索サブモードの2状態（決定50。要件:
+// docs/requirements/search-explorer/search-mode-key-handling.feature）。
+// vim の挿入/ノーマルに相当する分割で、`?` のクエリ入力と `j`/`k` 移動を両立させる
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchPhase {
+    // 編集状態: 印字可能文字（`?` を含む）はすべてクエリへ積む。`/` で入った直後の既定
+    #[default]
+    Editing,
+    // 操作状態: `j`/`k` を含む移動キーでカーソルを動かし、`?` でヘルプを開く。
+    // コマンドキー以外は無反応（押し間違いで状態が黙って変わる事故を避ける）
+    Navigating,
+}
+
 // 検索サブモード（navモード内の `/`）のローカルUI状態。
 // 権威インスタンスにしか発生しないため、兄弟への同期は不要（決定13の範囲外）
 #[derive(Debug, Default)]
 pub(crate) struct SearchState {
+    // 編集状態/操作状態（決定50）。キー処理・フッターの出し分けの軸
+    pub(crate) phase: SearchPhase,
     pub(crate) query: String,
     // ペインID -> ヒット情報。ツリー順は selectable 側が持つので順序は持たない
     pub(crate) hits: BTreeMap<u32, Hit>,
@@ -260,9 +275,13 @@ impl State {
         }
         // `?` はヘルプオーバーレイを開く。検索サブモードへの振り分けより手前に
         // 置く — 検索中の印字可能文字はクエリになるので、後ろに置くと `?` が
-        // クエリへ入ってヘルプを呼べなくなる（検索サブモード中も `?` で開ける
-        // ことが要件。代償としてクエリに `?` は打てない）
-        if key.bare_key == BareKey::Char('?') && !has_hard_modifier(&key) {
+        // クエリへ入ってヘルプを呼べなくなる。
+        // **例外は検索サブモードの編集状態だけ**（決定50）。そこでは `?` を
+        // クエリに打てることを優先し、ヘルプは操作状態（Esc で移る）から開く
+        if key.bare_key == BareKey::Char('?')
+            && !has_hard_modifier(&key)
+            && !self.search_is_editing()
+        {
             self.help_overlay = true;
             return true;
         }
@@ -359,11 +378,37 @@ impl State {
             return true;
         }
         let shifted = key.key_modifiers.contains(&KeyModifier::Shift);
+        // 状態で使えるキーが変わる（決定50）。`?` はここへ来る前に
+        // handle_nav_key が拾う（操作状態ならヘルプ、編集状態なら下の Char へ）
+        match self.search_phase() {
+            SearchPhase::Editing => self.handle_search_editing_key(&key, shifted),
+            SearchPhase::Navigating => {
+                if !self.handle_search_navigating_key(&key, shifted) {
+                    // コマンドキー以外は無反応（決定50）。自動で編集状態へ戻して
+                    // クエリへ積む案は、押し間違いでクエリが汚れるので採らない。
+                    // 描き直しも起こさない — 画面はどこも変わっていない
+                    return false;
+                }
+            }
+        }
+        // 検索中の移動・入力では broadcast_selection() を呼ばない。
+        // Esc で「検索前の位置に戻す」以上、途中経過を配ると兄弟だけが
+        // 取り消せない位置に取り残される（決定13）。配るのは確定時
+        //（confirm_search）だけ
+        //
+        // プレビューは配布ではなく自分の表示なので、絞り込みのカーソルにも
+        // そのまま追従させる（決定42）
+        self.refresh_preview();
+        true
+    }
+
+    // 編集状態のキー解釈（決定50）。決定18 の挙動から `?` の特別扱いだけを外した形で、
+    // 印字可能文字は `?` を含めすべてクエリへ積む
+    fn handle_search_editing_key(&mut self, key: &KeyWithModifier, shifted: bool) {
         match key.bare_key {
-            // Esc は二段階の1段目: クエリを破棄して navモードへ戻るだけ。
-            // exit_nav_mode() を呼んではいけない — 召喚インスタンスなら
-            // 検索の取り消しでサイドバーごと閉じてしまう（決定16）
-            BareKey::Esc => self.exit_search(),
+            // Esc はクエリを持ったまま操作状態へ移るだけ（決定50でここが変わった。
+            // 以前はこの段でクエリを破棄していた）
+            BareKey::Esc => self.set_search_phase(SearchPhase::Navigating),
             BareKey::Enter => self.confirm_search(),
             BareKey::Backspace => {
                 if let Some(search) = &mut self.search {
@@ -383,15 +428,46 @@ impl State {
             // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
             _ => self.leave_nav_mode(),
         }
-        // 検索中の移動・入力では broadcast_selection() を呼ばない。
-        // Esc で「検索前の位置に戻す」以上、途中経過を配ると兄弟だけが
-        // 取り消せない位置に取り残される（決定13）。配るのは確定時
-        //（confirm_search）だけ
-        //
-        // プレビューは配布ではなく自分の表示なので、絞り込みのカーソルにも
-        // そのまま追従させる（決定42）
-        self.refresh_preview();
+    }
+
+    // 操作状態のキー解釈（決定50）。戻り値は**コマンドキーとして解釈したか**で、
+    // false ならそのキーは無反応（安全弁にも倒さない。vimのnormalモードに近い
+    // 予測可能性を優先し、押し間違いで状態が黙って変わる事故を避ける）
+    fn handle_search_navigating_key(&mut self, key: &KeyWithModifier, shifted: bool) -> bool {
+        match key.bare_key {
+            // ここで初めてクエリを破棄して navモードのツリー表示へ戻る
+            //（決定18の1段目Escに相当。Esc は決定50で三段階になった）。
+            // exit_nav_mode() を呼んではいけない — 召喚インスタンスなら
+            // 検索の取り消しでサイドバーごと閉じてしまう（決定16）
+            BareKey::Esc => self.exit_search(),
+            BareKey::Enter => self.confirm_search(),
+            BareKey::Up | BareKey::Char('k') => self.move_search_cursor(false),
+            BareKey::Down | BareKey::Char('j') => self.move_search_cursor(true),
+            BareKey::Tab => self.move_search_cursor(!shifted),
+            // 編集の再開は専用キーに限る（vim由来。navモードで未使用のキー）
+            BareKey::Char('i') => self.set_search_phase(SearchPhase::Editing),
+            _ => return false,
+        }
         true
+    }
+
+    // いまの検索サブモードの状態。検索中でなければ既定（編集状態）を返す —
+    // 呼び出し元は検索中しか通らないので、この値は使われない
+    fn search_phase(&self) -> SearchPhase {
+        self.search.as_ref().map(|s| s.phase).unwrap_or_default()
+    }
+
+    // 検索サブモードの編集状態にいるか。`?` の最優先チェックの例外条件（決定50）
+    fn search_is_editing(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|s| s.phase == SearchPhase::Editing)
+    }
+
+    fn set_search_phase(&mut self, phase: SearchPhase) {
+        if let Some(search) = &mut self.search {
+            search.phase = phase;
+        }
     }
 
     // 番号ジャンプサブモード（要件: docs/requirements/pane-number-jump/）。
@@ -506,8 +582,8 @@ impl State {
         self.refilter();
     }
 
-    // Esc の1段目。クエリを破棄し、検索サブモードに入る前の選択へ戻して
-    // navモードに留まる
+    // 操作状態の Esc（決定50で三段階になったうちの2段目）。クエリを破棄し、
+    // 検索サブモードに入る前の選択へ戻して navモードに留まる
     fn exit_search(&mut self) {
         let Some(search) = self.search.take() else {
             return;
@@ -551,6 +627,11 @@ impl State {
         let Some(search) = &mut self.search else {
             return false;
         };
+        // 操作状態はテキストを受け付けない（決定50。キーと同じく無反応）。
+        // 画面の疑似カーソルもブロックで「いま打てない」と示している
+        if search.phase != SearchPhase::Editing {
+            return false;
+        }
         // クエリは1行。改行やタブが混ざったペーストでも欄を壊さない
         let before = search.query.len();
         search
@@ -684,17 +765,20 @@ impl State {
                 Entry("?", "this help"),
             ]
         } else if self.search.is_some() {
+            // 開けるのは操作状態からだけ（編集状態の `?` はクエリの文字。決定50）
+            // なので操作状態のキーを先に置き、`i` で戻る先の編集状態のキーを続ける
             &[
                 Section("keys"),
                 Blank,
+                Entry("j k", "move cursor"),
+                Entry("shift+tab", "move back"),
+                Entry("i", "edit query"),
                 Entry("type", "filter panes"),
                 Entry("backspace", "delete char"),
                 // クエリ入力と両立しないので、マークとプレビューは Alt付き
                 //（決定39・決定42）
                 Entry("alt+m", "mark"),
                 Entry("alt+p", "preview"),
-                Entry("up down", "move cursor"),
-                Entry("shift+tab", "move back"),
                 Entry("enter", "jump & exit"),
                 Entry("esc", "cancel search"),
                 Entry("?", "this help"),

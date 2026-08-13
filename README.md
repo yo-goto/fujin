@@ -523,13 +523,40 @@ cwd. Matched characters are highlighted, and the highlight location doubles
 as a hint for which field matched (a cwd match is shown on that row even if
 `show_cwd` is disabled).
 
+Search is split into two vim-like states: **editing** and **navigating**.
+`/` starts you in editing; pressing `Esc` moves you to navigating while
+keeping the query. Three cues tell you which state you are in:
+
+| | editing | navigating |
+|---|---|---|
+| pseudo cursor | bar `▏` | block `▌` |
+| query text | normal | dimmed |
+| footer hints | `esc:move  enter:jump` | `j/k:move  ?:help  i:edit …` |
+
+While editing, the real cursor is placed on the same column for IME input, so
+**if your terminal draws a block cursor it covers the bar underneath**. To get
+vim's "bar while inserting, block in normal mode" look, set your terminal's
+cursor to a beam (in alacritty: `shape = "Beam"` under `[cursor.style]`).
+Without that, the dimmed query and the hints still tell the states apart.
+
+Editing keys:
+
 | Key | Action |
 |---|---|
-| printable characters | append to the query (nav mode's single-letter shortcuts are all disabled while searching) |
+| printable characters | append to the query (`?` included; nav mode's single-letter shortcuts are all disabled while searching) |
 | `Backspace` | delete the last character of the query |
 | `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
 | `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
-| `?` | open the key help (below; `?` is the one character that does not go into the query) |
+| `Esc` | switch to navigating (the query is kept) |
+
+Navigating keys (**every other key does nothing**):
+
+| Key | Action |
+|---|---|
+| `j` / `k`, `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
+| `i` | go back to editing (the query is kept) |
+| `?` | open the key help (below) |
+| `Enter` | jump to the selected row and exit nav mode entirely |
 | `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
 
 The query is discarded every time you leave search, so it always starts empty
