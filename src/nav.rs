@@ -628,7 +628,7 @@ impl State {
             return false;
         };
         // 操作状態はテキストを受け付けない（決定50。キーと同じく無反応）。
-        // 画面の疑似カーソルもブロックで「いま打てない」と示している
+        // 画面ではクエリを dim にして「いま打てない」と示している
         if search.phase != SearchPhase::Editing {
             return false;
         }

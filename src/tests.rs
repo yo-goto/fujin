@@ -2437,11 +2437,12 @@ fn the_footer_becomes_the_query_field_while_searching() {
 
     let footer = state.footer_line(32);
     let footer = footer.content();
-    // 編集状態は疑似カーソルを描かない（実カーソルに位置を任せる。決定50論点4）。
-    // `?` はクエリの文字なのでヘルプの案内は出さない（要件: nav-mode-hints.feature）
+    // 地の文の疑似カーソルは描かない（位置はテキストカーソルに任せる。決定50、
+    // 2026-08-13 に廃止）。`?` はクエリの文字なのでヘルプの案内は出さない
+    //（要件: nav-mode-hints.feature）
     assert!(footer.starts_with("  /alp"), "{}", footer);
     assert!(!footer.contains('▏'), "{}", footer);
-    assert!(footer.contains("esc:move"), "{}", footer);
+    assert!(footer.contains("esc:browse"), "{}", footer);
     assert!(!footer.contains("?:help"), "{}", footer);
     assert!(footer.chars().count() <= 32);
 }
@@ -2475,11 +2476,13 @@ fn the_footer_hints_change_with_the_search_phase() {
 
 #[test]
 fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
-    // 地の文の疑似カーソルは無く実カーソルへ位置表示を一本化した（決定50、
+    // 地の文の疑似カーソルは無くテキストカーソルへ位置表示を一本化した（決定50、
     // 2026-08-13。経緯: docs/issues/search-input-cursor-shape.md）ので、状態を
-    // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。ここでは
-    // 明暗のほう（打てない状態ではクエリそのものを沈める）を確かめる
+    // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。打てない状態でも
+    // 位置を見失わせないよう、沈めるのはクエリだけでテキストカーソルは点いたまま残す
     let mut state = searchable_state();
+    // テキストカーソルの行は描画で決まる（描く前は位置が定まらない）
+    state.render(20, SIDEBAR);
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "alp");
 
@@ -2491,7 +2494,7 @@ fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
         footer.content()
     );
 
-    // 操作状態ではクエリだけが dim
+    // 操作状態ではクエリだけが dim。テキストカーソル（位置の手がかり）は消さない
     let query_end = "  /alp".chars().count();
     let query: Vec<usize> = ("  /".chars().count()..query_end).collect();
     state.handle_nav_key(key(BareKey::Esc));
@@ -2501,6 +2504,11 @@ fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
         query,
         "クエリだけを沈める: {}",
         footer.content()
+    );
+    assert_eq!(
+        state.input_cursor_position().map(|(x, _)| x),
+        Some(query_end),
+        "操作状態でもテキストカーソルはクエリ末尾に残す"
     );
 }
 
@@ -2612,7 +2620,7 @@ fn the_footer_never_runs_off_the_right_margin() {
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "日本語のクエリで幅を埋める");
     widths.push(state.footer_line(SIDEBAR));
-    // 操作状態（疑似カーソルがブロック・ヒントが長い）でも同じ（決定50）
+    // 操作状態（ヒントが長い）でも同じ（決定50）
     state.handle_nav_key(key(BareKey::Esc));
     widths.push(state.footer_line(SIDEBAR));
 
@@ -7128,7 +7136,7 @@ fn the_input_cursor_follows_the_query_end() {
     }
     assert_eq!(state.input_cursor_position().map(|(x, _)| x), Some(7));
 
-    // 操作状態もテキストは受け付けないが、位置表示は実カーソルに一本化した
+    // 操作状態もテキストは受け付けないが、位置表示はテキストカーソルに一本化した
     // ので出したままにする（決定50、2026-08-13。経緯:
     // docs/issues/search-input-cursor-shape.md）
     state.handle_nav_key(key(BareKey::Esc));
@@ -7250,19 +7258,34 @@ fn typing_defers_renders_that_come_from_outside() {
     // 入力欄を出していない間は、外から来たイベントでも普通に描き直す
     assert!(!state.defers_render_while_typing());
 
-    // 入力中は描き直しを見送る（描くと実カーソルが入力欄へ戻され、IMEの
+    // 入力中は描き直しを見送る（描くとテキストカーソルが入力欄へ戻され、IMEの
     // 変換候補ウィンドウが打っている途中で飛ぶ）
     state.handle_nav_key(key(BareKey::Char('/')));
     assert!(state.defers_render_while_typing());
     // 操作状態は打っていないので見送らない（決定50）。ここで止め続けると
-    // 結果を見ながら動かしているあいだ一覧が古いまま固まる
+    // 結果を見ながら動かしているあいだ一覧が古いまま固まる。
+    // **テキストカーソルは操作状態でも出ている**ので、カーソルの有無で判定していた
+    // 頃の実装（input_cursor_column への委譲）ではここが固まる
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.defers_render_while_typing());
+    assert!(state.input_cursor_position().is_some());
+    // `i` で編集状態へ戻ればまた見送る
+    state.handle_nav_key(key(BareKey::Char('i')));
+    assert!(state.defers_render_while_typing());
+    state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.defers_render_while_typing());
 
     // 番号ジャンプの入力欄も同じ扱い
     state.handle_nav_key(key(BareKey::Char('n')));
+    assert!(state.defers_render_while_typing());
+    // 番号ジャンプ中の `?` はヘルプを開く。入力欄は画面から消えるのにバッファは
+    // 残るので、`jump.is_some()` だけで見ると見送ったまま一覧が固まる
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(state.help_overlay && state.jump.is_some());
+    assert!(!state.defers_render_while_typing());
+    // ヘルプを閉じれば番号ジャンプの入力欄へ戻る
+    state.handle_nav_key(key(BareKey::Esc));
     assert!(state.defers_render_while_typing());
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.defers_render_while_typing());

@@ -530,11 +530,12 @@ keeping the query. These cues tell you which state you are in:
 | | editing | navigating |
 |---|---|---|
 | query text | normal | dimmed |
-| footer hints | `esc:move  enter:jump` | `j/k:move  ?:help  i:edit …` |
+| footer hints | `esc:browse  enter:jump` | `j/k:move  ?:help  i:edit …` |
 
-The real cursor is placed at the end of the input field in both states, for
-IME support. fujin cannot set its shape, so it follows your terminal's
-settings — it isn't used as a cue for telling the states apart.
+The text cursor (the terminal-drawn cursor that the IME candidate window
+follows) sits at the end of the input field in both states. fujin cannot set
+its shape, so it follows your terminal settings and is not used as a cue for
+telling the states apart.
 
 Editing keys:
 

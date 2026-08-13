@@ -228,7 +228,7 @@ struct State {
     // 設定の警告をフッターに出しておく期限（`elapsed` 基準）。None は
     // 「出していない・もう出さない」
     config_warning_until: Option<f64>,
-    // 直近にホストへ伝えた実カーソル位置（`show_cursor`）。同じ値を送り直さない
+    // 直近にホストへ伝えたテキストカーソル位置（`show_cursor`）。同じ値を送り直さない
     //（`sync_input_cursor`）
     cursor_shown: Option<(usize, usize)>,
 }
@@ -390,7 +390,7 @@ impl ZellijPlugin for State {
             Event::Mouse(Mouse::LeftClick(line, _column)) => self.handle_click(line),
             Event::InterceptedKeyPress(key) => {
                 // 横取りを要求したインスタンスにしか届かないが、念のため。
-                // `return` で抜けない — 下の実カーソルの追従はここでも通す
+                // `return` で抜けない — 下のテキストカーソルの追従はここでも通す
                 self.nav_mode && self.handle_nav_key(key)
             }
             // 貼り付け・IMEの変換確定。フォーカスを預かっている（決定34）間だけ
@@ -398,7 +398,7 @@ impl ZellijPlugin for State {
             Event::PastedText(text) => self.handle_pasted_text(&text),
             _ => false,
         };
-        // 入力欄の実カーソル（IMEの候補窓が付いてくる）はここで伝える。
+        // 入力欄のテキストカーソル（IMEの候補窓が付いてくる）はここで伝える。
         // **`render()` の中からは呼べない**（`sync_input_cursor` 参照）
         self.sync_input_cursor();
         should_render && (from_input || !self.defers_render_while_typing())
@@ -451,7 +451,7 @@ impl ZellijPlugin for State {
             _ => false,
         };
         // navモードへの入場は pipe 経由でも起きる（fujin_mode）ので、
-        // 実カーソルの追従は update と同じくこちらでも行う
+        // テキストカーソルの追従は update と同じくこちらでも行う
         self.sync_input_cursor();
         // pipe は全て「外から」来るので、入力中は描き直さない（update と同じ理由）
         should_render && !self.defers_render_while_typing()
