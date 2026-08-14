@@ -19,6 +19,7 @@ use crate::command::{CommandState, PaneStatus};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::entry::{decoded_char, restore_char_key};
+use crate::nav::SearchPhase;
 use crate::render::{
     cwd_row, divider_line, overflow_row, reconcile_scroll, CounterColumn, HeadCells, Row,
     NO_AGENT_ICON, NO_AGENT_LABEL,
@@ -1018,7 +1019,7 @@ fn the_footer_shows_the_number_buffer_while_jumping() {
     state.handle_nav_key(key(BareKey::Char('1')));
     let footer = state.footer_line(SIDEBAR);
     let content = footer.content().to_string();
-    assert!(content.starts_with("  n 1▏"), "{}", content);
+    assert!(content.starts_with("  n 1"), "{}", content);
     assert!(content.ends_with("?:help"), "{}", content);
 }
 
@@ -2436,13 +2437,83 @@ fn the_footer_becomes_the_query_field_while_searching() {
 
     let footer = state.footer_line(32);
     let footer = footer.content();
+    // 地の文の疑似カーソルは描かない（位置はテキストカーソルに任せる。決定50、
+    // 2026-08-13 に廃止）。`?` はクエリの文字なのでヘルプの案内は出さない
+    //（要件: nav-mode-hints.feature）
     assert!(footer.starts_with("  /alp"), "{}", footer);
-    assert!(footer.contains("?:help"), "{}", footer);
+    assert!(!footer.contains('▏'), "{}", footer);
+    assert!(footer.contains("esc:browse"), "{}", footer);
+    assert!(!footer.contains("?:help"), "{}", footer);
     assert!(footer.chars().count() <= 32);
 }
 
 #[test]
-fn a_long_query_wins_over_the_help_hint() {
+fn the_footer_hints_change_with_the_search_phase() {
+    // 状態インジケータは入力文字列の明暗とヒント文言の2つ（決定50、2026-08-13に
+    // 地の文の疑似カーソルを廃止。経緯: docs/issues/search-input-cursor-shape.md）
+    let mut state = navigating_search("");
+    let footer = state.footer_line(32);
+    let footer = footer.content();
+    assert!(footer.starts_with("  /"), "{}", footer);
+    // 移動キー・ヘルプキー・編集再開キー（要件: nav-mode-hints.feature）
+    for hint in ["j/k:move", "?:help", "i:edit"] {
+        assert!(footer.contains(hint), "{}: {}", hint, footer);
+    }
+    assert!(
+        unicode_width::UnicodeWidthStr::width(footer) <= 32 - 2,
+        "{}",
+        footer
+    );
+
+    // `i` で編集状態へ戻せばヒントが編集中のものへ戻る
+    state.handle_nav_key(key(BareKey::Char('i')));
+    type_query(&mut state, "alp");
+    let footer = state.footer_line(32);
+    let footer = footer.content();
+    assert!(footer.starts_with("  /alp"), "{}", footer);
+    assert!(!footer.contains("j/k:move"), "{}", footer);
+}
+
+#[test]
+fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
+    // 地の文の疑似カーソルは無くテキストカーソルへ位置表示を一本化した（決定50、
+    // 2026-08-13。経緯: docs/issues/search-input-cursor-shape.md）ので、状態を
+    // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。打てない状態でも
+    // 位置を見失わせないよう、沈めるのはクエリだけでテキストカーソルは点いたまま残す
+    let mut state = searchable_state();
+    // テキストカーソルの行は描画で決まる（描く前は位置が定まらない）
+    state.render(20, SIDEBAR);
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "alp");
+
+    // 編集中のクエリは本文の明るさのまま
+    let footer = state.footer_line(SIDEBAR);
+    assert!(
+        ink_at(&footer, DIM_LEVEL).is_empty(),
+        "編集中は沈めない: {}",
+        footer.content()
+    );
+
+    // 操作状態ではクエリだけが dim。テキストカーソル（位置の手がかり）は消さない
+    let query_end = "  /alp".chars().count();
+    let query: Vec<usize> = ("  /".chars().count()..query_end).collect();
+    state.handle_nav_key(key(BareKey::Esc));
+    let footer = state.footer_line(SIDEBAR);
+    assert_eq!(
+        ink_at(&footer, DIM_LEVEL),
+        query,
+        "クエリだけを沈める: {}",
+        footer.content()
+    );
+    assert_eq!(
+        state.input_cursor_position().map(|(x, _)| x),
+        Some(query_end),
+        "操作状態でもテキストカーソルはクエリ末尾に残す"
+    );
+}
+
+#[test]
+fn a_long_query_wins_over_the_hints() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "0123456789");
@@ -2450,8 +2521,31 @@ fn a_long_query_wins_over_the_help_hint() {
     // 幅12には操作ヒントを置く余地が無い。入力中のクエリのほうを残す
     let footer = state.footer_line(12);
     let footer = footer.content();
-    assert!(!footer.contains("?:help"), "{}", footer);
+    assert!(!footer.contains("esc"), "{}", footer);
     assert!(footer.chars().count() <= 12);
+}
+
+#[test]
+fn the_hints_drop_whole_items_when_they_do_not_fit() {
+    // 幅が足りないときは `…` で切らず末尾の項目ごと落とす（direct-keys の
+    // ヒントと同じ削り方。docs/issues/direct-keys-hint-overflow.md）
+    let state = navigating_search("");
+    let footer = state.footer_line(32);
+    let footer = footer.content();
+    assert!(!footer.contains('…'), "{}", footer);
+    // 予算に入りきらない末尾（`esc:cancel` 以降）だけが落ち、前は壊れずに残る
+    assert!(footer.contains("j/k:move  ?:help  i:edit"), "{}", footer);
+    assert!(!footer.contains("esc:cancel"), "{}", footer);
+
+    // クエリが伸びればさらに末尾から落ちる（項目ごと落とすので形は壊れない）
+    let mut state = state;
+    state.handle_nav_key(key(BareKey::Char('i')));
+    type_query(&mut state, "alp");
+    state.handle_nav_key(key(BareKey::Esc));
+    let footer = state.footer_line(32);
+    let footer = footer.content();
+    assert!(footer.contains("j/k:move  ?:help"), "{}", footer);
+    assert!(!footer.contains("i:edit"), "{}", footer);
 }
 
 #[test]
@@ -2526,6 +2620,9 @@ fn the_footer_never_runs_off_the_right_margin() {
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "日本語のクエリで幅を埋める");
     widths.push(state.footer_line(SIDEBAR));
+    // 操作状態（ヒントが長い）でも同じ（決定50）
+    state.handle_nav_key(key(BareKey::Esc));
+    widths.push(state.footer_line(SIDEBAR));
 
     for footer in widths {
         assert!(
@@ -2595,6 +2692,7 @@ fn the_help_lines_fit_the_sidebar_width() {
     }
     state.handle_nav_key(key(BareKey::Char('?'))); // いったん閉じる
     state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Esc)); // ヘルプを開けるのは操作状態から（決定50）
     state.handle_nav_key(key(BareKey::Char('?')));
     for line in overlay_lines(&state, 32) {
         assert!(!line.contains('…'), "検索サブモード: {}", line);
@@ -2791,8 +2889,8 @@ fn the_help_headings_leave_the_mode_name_to_the_header() {
     // ヘッダーの `▲ fujin [tri]` と重複するので、オーバーレイの見出しは
     // 節名だけにする（決定30）
     let mut nav = searchable_state();
-    let mut search = searchable_state();
-    search.handle_nav_key(key(BareKey::Char('/')));
+    // 検索サブモードのヘルプは操作状態から開く（決定50）
+    let mut search = navigating_search("");
     let mut jump = searchable_state();
     jump.handle_nav_key(key(BareKey::Char('n')));
     let mut triage = triage_state();
@@ -2840,8 +2938,7 @@ fn the_key_column_fits_the_widest_key_of_the_mode() {
     assert_eq!(column_at(widest, "jump & exit"), 9);
 
     // キーが長いモードでは列も広がる（`backspace` が最長）
-    let mut search = searchable_state();
-    search.handle_nav_key(key(BareKey::Char('/')));
+    let mut search = navigating_search("");
     search.handle_nav_key(key(BareKey::Char('?')));
     let search_lines = overlay_lines(&search, SIDEBAR);
     let delete = search_lines
@@ -2947,8 +3044,7 @@ fn the_status_legend_shows_up_in_every_overlay() {
         "トリアージモード"
     );
 
-    let mut state = searchable_state();
-    state.handle_nav_key(key(BareKey::Char('/')));
+    let mut state = navigating_search("");
     state.handle_nav_key(key(BareKey::Char('?')));
     assert!(
         overlay_lines(&state, SIDEBAR)
@@ -3038,9 +3134,8 @@ fn modified_keys_only_close_the_help_overlay() {
 
 #[test]
 fn the_help_overlay_opens_from_the_search_submode_too() {
-    let mut state = searchable_state();
-    state.handle_nav_key(key(BareKey::Char('/')));
-    type_query(&mut state, "alp");
+    // 開けるのは操作状態から（編集状態の `?` はクエリの文字。決定50）
+    let mut state = navigating_search("alp");
     state.handle_nav_key(key(BareKey::Char('?')));
 
     assert!(state.help_overlay);
@@ -3056,9 +3151,14 @@ fn the_help_overlay_opens_from_the_search_submode_too() {
         "検索サブモードのキーを出す: {:?}",
         lines
     );
+    assert!(
+        lines.iter().any(|line| line.contains("edit query")),
+        "編集状態へ戻るキーも出す: {:?}",
+        lines
+    );
 
-    // 閉じたら開く前の表示（検索サブモード）に戻る。Esc も閉じるだけで、
-    // 検索サブモードの取り消しにはならない
+    // 閉じたら開く前の表示（検索サブモードの操作状態）に戻る。Esc も閉じる
+    // だけで、検索サブモードの取り消しにはならない
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.help_overlay);
     assert_eq!(
@@ -3066,6 +3166,7 @@ fn the_help_overlay_opens_from_the_search_submode_too() {
         Some("alp"),
         "検索サブモードは中断されない"
     );
+    assert_eq!(search_phase(&state), Some(SearchPhase::Navigating));
 }
 
 #[test]
@@ -3603,14 +3704,25 @@ fn cursor_moves_in_tree_order_and_stops_at_the_edges() {
 }
 
 #[test]
-fn esc_is_two_staged_and_does_not_close_a_summoned_instance() {
+fn esc_is_three_staged_and_does_not_close_a_summoned_instance() {
+    // 決定50で編集状態→操作状態の1段が挟まった（要件:
+    // search-mode-entry-exit.feature / summoned-instance-search.feature）
     let mut state = searchable_state();
     state.summoned = true;
     state.own_plugin_id = Some(9);
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "charlie");
 
-    // 1段目: クエリ破棄のみ。召喚インスタンスでも navモードに留まる
+    // 1段目: 操作状態へ移るだけ。クエリは破棄しない
+    state.handle_nav_key(key(BareKey::Esc));
+    assert_eq!(search_phase(&state), Some(SearchPhase::Navigating));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("charlie"),
+        "編集状態のEscではクエリを破棄しない"
+    );
+
+    // 2段目: クエリ破棄のみ。召喚インスタンスでも navモードに留まる
     state.handle_nav_key(key(BareKey::Esc));
     assert!(state.search.is_none());
     assert!(
@@ -3618,9 +3730,174 @@ fn esc_is_two_staged_and_does_not_close_a_summoned_instance() {
         "検索サブモードのEscでnavモードごと抜けてはいけない"
     );
 
-    // 2段目: navモードから退場（召喚インスタンスならここで自分を閉じる）
+    // 3段目: navモードから退場（召喚インスタンスならここで自分を閉じる）
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.nav_mode);
+}
+
+// いまの検索サブモードの状態（決定50）
+fn search_phase(state: &State) -> Option<SearchPhase> {
+    state.search.as_ref().map(|s| s.phase)
+}
+
+// 検索サブモードの操作状態まで進める（`/` で入って Esc）
+fn navigating_search(query: &str) -> State {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, query);
+    state.handle_nav_key(key(BareKey::Esc));
+    state
+}
+
+#[test]
+fn slash_starts_in_the_editing_phase() {
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    assert_eq!(
+        search_phase(&state),
+        Some(SearchPhase::Editing),
+        "`/` の直後は編集状態から始まる"
+    );
+}
+
+#[test]
+fn a_question_mark_feeds_the_query_while_editing() {
+    // 決定18の「クエリに `?` は打てない」という制約を決定50で解消した
+    let mut state = searchable_state();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "a?");
+
+    assert!(!state.help_overlay, "編集状態の `?` でヘルプは開かない");
+    assert_eq!(state.search.as_ref().map(|s| s.query.as_str()), Some("a?"));
+}
+
+#[test]
+fn the_navigating_phase_moves_the_cursor_with_j_and_k() {
+    let mut state = navigating_search("");
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(1));
+
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(2));
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(3));
+    state.handle_nav_key(key(BareKey::Char('k')));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(2));
+
+    // 矢印・Tab も編集状態と同じく効く
+    state.handle_nav_key(key(BareKey::Down));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(3));
+    state.handle_nav_key(key(BareKey::Tab).with_shift_modifier());
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(2));
+    state.handle_nav_key(key(BareKey::Up));
+    assert_eq!(state.search.as_ref().unwrap().cursor, Some(1));
+
+    assert_eq!(search_phase(&state), Some(SearchPhase::Navigating));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some(""),
+        "移動キーはクエリに入らない"
+    );
+}
+
+#[test]
+fn the_navigating_phase_ignores_everything_but_its_command_keys() {
+    // vimのnormalモードに近い予測可能性を優先し、押し間違いで状態が黙って
+    // 変わる事故を避ける（決定50。要件: search-mode-key-handling.feature）
+    let mut state = navigating_search("cha");
+    state.handle_nav_key(key(BareKey::Char('j'))); // 端で止まるので動かない
+    let cursor = state.search.as_ref().unwrap().cursor;
+
+    for bare in [
+        BareKey::Char('x'),
+        BareKey::Char('/'),
+        BareKey::Char('t'),
+        BareKey::Char('n'),
+        BareKey::Char('d'),
+        BareKey::Char('g'),
+        BareKey::Backspace,
+    ] {
+        state.handle_nav_key(key(bare));
+        assert!(state.nav_mode, "{:?} で退場してはいけない", bare);
+        assert_eq!(
+            state.search.as_ref().map(|s| s.query.as_str()),
+            Some("cha"),
+            "{:?} でクエリが変わった",
+            bare
+        );
+        assert_eq!(state.search.as_ref().unwrap().cursor, cursor);
+        assert_eq!(
+            search_phase(&state),
+            Some(SearchPhase::Navigating),
+            "{:?} で編集状態へ戻ってはいけない",
+            bare
+        );
+    }
+}
+
+#[test]
+fn the_i_key_resumes_editing_with_the_query_intact() {
+    let mut state = navigating_search("cha");
+    state.handle_nav_key(key(BareKey::Char('i')));
+
+    assert_eq!(search_phase(&state), Some(SearchPhase::Editing));
+    assert_eq!(state.search.as_ref().map(|s| s.query.as_str()), Some("cha"));
+    // 続きが打てる（`i` 自体はクエリに入らない）
+    type_query(&mut state, "r");
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("char")
+    );
+}
+
+#[test]
+fn the_navigating_phase_opens_the_help_overlay_with_a_question_mark() {
+    let mut state = navigating_search("cha");
+    state.handle_nav_key(key(BareKey::Char('?')));
+
+    assert!(state.help_overlay);
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("cha"),
+        "操作状態の `?` はクエリに入らない"
+    );
+}
+
+#[test]
+fn enter_jumps_from_the_navigating_phase_too() {
+    let mut state = navigating_search("charlie");
+    state.handle_nav_key(key(BareKey::Enter));
+
+    assert!(!state.nav_mode, "確定はnavモードごと抜ける");
+    assert_eq!(state.selectable[state.selected].pane_id, 3);
+}
+
+#[test]
+fn modified_keys_leave_nav_mode_from_the_navigating_phase_too() {
+    // 安全弁（決定12）は操作状態でも効く（無反応にするのはコマンドキー以外の
+    // 素のキーだけ。要件: search-mode-key-handling.feature）
+    let mut state = navigating_search("cha");
+    state.handle_nav_key(KeyWithModifier::new(BareKey::Char('x')).with_alt_modifier());
+
+    assert!(!state.nav_mode);
+    assert!(state.search.is_none());
+}
+
+#[test]
+fn pasted_text_is_ignored_in_the_navigating_phase() {
+    // キーと同じ扱い（決定50）。IMEの確定・貼り付けもテキスト入力なので、
+    // 打てない状態では受け取らない
+    let mut state = navigating_search("cha");
+    assert!(!state.handle_pasted_text("日本語"));
+    assert_eq!(state.search.as_ref().map(|s| s.query.as_str()), Some("cha"));
+    assert_eq!(search_phase(&state), Some(SearchPhase::Navigating));
+
+    // `i` で編集状態へ戻せばまた入る
+    state.handle_nav_key(key(BareKey::Char('i')));
+    assert!(state.handle_pasted_text("ん"));
+    assert_eq!(
+        state.search.as_ref().map(|s| s.query.as_str()),
+        Some("chaん")
+    );
 }
 
 #[test]
@@ -3645,6 +3922,8 @@ fn esc_restores_the_selection_saved_on_entry() {
     ]));
     state.rebuild_selectable();
 
+    // 1段目のEscは操作状態へ移るだけ。選択が戻るのは2段目（決定50）
+    state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Esc));
     assert_eq!(state.selectable[state.selected].pane_id, 2);
 }
@@ -3694,10 +3973,13 @@ fn reentering_search_starts_with_an_empty_query() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "alpha");
-    state.handle_nav_key(key(BareKey::Esc));
+    state.handle_nav_key(key(BareKey::Esc)); // 操作状態へ
+    state.handle_nav_key(key(BareKey::Esc)); // ツリー表示へ
 
     state.handle_nav_key(key(BareKey::Char('/')));
-    assert_eq!(state.search.as_ref().unwrap().query, "");
+    let search = state.search.as_ref().unwrap();
+    assert_eq!(search.query, "");
+    assert_eq!(search.phase, SearchPhase::Editing, "入り直しも編集状態から");
 }
 
 #[test]
@@ -6848,13 +7130,22 @@ fn the_input_cursor_follows_the_query_end() {
     assert_eq!(x, 3);
     assert!(matches!(state.screen_rows(20)[y], Row::Footer));
 
-    // 全角は表示セル幅で数える（文字数で数えると `▏` とずれる）
+    // 全角は表示セル幅で数える（文字数で数えるとずれる）
     for c in "日本".chars() {
         state.handle_nav_key(key(BareKey::Char(c)));
     }
     assert_eq!(state.input_cursor_position().map(|(x, _)| x), Some(7));
 
-    // 抜ければまた隠れる
+    // 操作状態もテキストは受け付けないが、位置表示はテキストカーソルに一本化した
+    // ので出したままにする（決定50、2026-08-13。経緯:
+    // docs/issues/search-input-cursor-shape.md）
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(state.input_cursor_position().is_some());
+    state.handle_nav_key(key(BareKey::Char('i')));
+    assert!(state.input_cursor_position().is_some());
+
+    // 抜ければ隠れる
+    state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Esc));
     assert_eq!(state.input_cursor_position(), None);
 }
@@ -6896,14 +7187,16 @@ fn pasted_text_is_ignored_while_the_help_overlay_is_open() {
     observe_panes(&mut state, &[1, 2]);
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Esc)); // 操作状態へ（ここから `?` が効く）
     state.handle_nav_key(key(BareKey::Char('?')));
     assert!(state.help_overlay);
     // オーバーレイ中のキーは「閉じる」にしか使われない。ペーストも同じ扱いで、
     // 画面に出ていないクエリへは流さない
     assert!(!state.handle_pasted_text("日本語"));
     assert_eq!(state.search.as_ref().map(|s| s.query.as_str()), Some(""));
-    // 閉じればまた入る
+    // 閉じて編集状態へ戻せばまた入る
     state.handle_nav_key(key(BareKey::Esc));
+    state.handle_nav_key(key(BareKey::Char('i')));
     assert!(state.handle_pasted_text("日本語"));
     assert_eq!(
         state.search.as_ref().map(|s| s.query.as_str()),
@@ -6939,14 +7232,17 @@ fn the_input_cursor_hides_when_the_footer_is_not_an_input() {
 
     // ヘルプオーバーレイ中のフッターは閉じ方の案内（footer_line）。
     // カーソルを入力欄の位置に残すと、候補窓だけがそこに出てしまう
+    state.handle_nav_key(key(BareKey::Esc)); // 操作状態へ（ここから `?` が効く）
     state.handle_nav_key(key(BareKey::Char('?')));
     assert!(state.help_overlay);
     assert_eq!(state.input_cursor_position(), None);
-    // 閉じれば戻る
+    // 閉じて編集状態へ戻せば戻る
     state.handle_nav_key(key(BareKey::Esc));
+    state.handle_nav_key(key(BareKey::Char('i')));
     assert!(state.input_cursor_position().is_some());
 
     // 終了操作サブモードのフッターは確認プロンプト
+    state.handle_nav_key(key(BareKey::Esc)); // 操作状態へ
     state.handle_nav_key(key(BareKey::Esc)); // 検索を抜けて navモードへ
     state.handle_nav_key(key(BareKey::Char('d')));
     assert!(state.termination.is_some());
@@ -6962,21 +7258,41 @@ fn typing_defers_renders_that_come_from_outside() {
     // 入力欄を出していない間は、外から来たイベントでも普通に描き直す
     assert!(!state.defers_render_while_typing());
 
-    // 入力中は描き直しを見送る（描くと実カーソルが入力欄へ戻され、IMEの
+    // 入力中は描き直しを見送る（描くとテキストカーソルが入力欄へ戻され、IMEの
     // 変換候補ウィンドウが打っている途中で飛ぶ）
     state.handle_nav_key(key(BareKey::Char('/')));
     assert!(state.defers_render_while_typing());
+    // 操作状態は打っていないので見送らない（決定50）。ここで止め続けると
+    // 結果を見ながら動かしているあいだ一覧が古いまま固まる。
+    // **テキストカーソルは操作状態でも出ている**ので、カーソルの有無で判定していた
+    // 頃の実装（input_cursor_column への委譲）ではここが固まる
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(!state.defers_render_while_typing());
+    assert!(state.input_cursor_position().is_some());
+    // `i` で編集状態へ戻ればまた見送る
+    state.handle_nav_key(key(BareKey::Char('i')));
+    assert!(state.defers_render_while_typing());
+    state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.defers_render_while_typing());
 
     // 番号ジャンプの入力欄も同じ扱い
     state.handle_nav_key(key(BareKey::Char('n')));
     assert!(state.defers_render_while_typing());
+    // 番号ジャンプ中の `?` はヘルプを開く。入力欄は画面から消えるのにバッファは
+    // 残るので、`jump.is_some()` だけで見ると見送ったまま一覧が固まる
+    state.handle_nav_key(key(BareKey::Char('?')));
+    assert!(state.help_overlay && state.jump.is_some());
+    assert!(!state.defers_render_while_typing());
+    // ヘルプを閉じれば番号ジャンプの入力欄へ戻る
+    state.handle_nav_key(key(BareKey::Esc));
+    assert!(state.defers_render_while_typing());
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.defers_render_while_typing());
 
     // フッターが入力欄でなくなる場面（ヘルプ）では見送らない
     state.handle_nav_key(key(BareKey::Char('/')));
+    state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Char('?')));
     assert!(!state.defers_render_while_typing());
 }

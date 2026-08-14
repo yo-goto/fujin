@@ -23,6 +23,7 @@ use crate::agent::{AgentInfo, AgentState};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::mark::MARK_GLYPH;
+use crate::nav::SearchPhase;
 use crate::search::{Field, Hit};
 use crate::width::{
     colorable_char_limit, fold_highlight_indices, fold_to_width, pad_left, pad_to_width,
@@ -178,6 +179,45 @@ const PREVIEW_PLACEHOLDER: &str = "preview";
 pub(crate) const NO_AGENT_ICON: &str = "›";
 // 凡例に出す説明。状態名（AgentState::label）と同じ書き方に揃える
 pub(crate) const NO_AGENT_LABEL: &str = "no agent";
+
+// 入力欄（検索・番号ジャンプ）の状態ごとの見た目。
+//
+// **疑似カーソルは持たない**（決定50、2026-08-13 に地の文の疑似カーソルを廃止。
+// 経緯: docs/issues/search-input-cursor-shape.md）。位置表示は編集状態・操作状態
+// どちらもテキストカーソル（`sync_input_cursor`）に一本化した——プラグイン側から形状を
+// 指定できず端末既定はほぼブロックなので、地の文の字を描き分けてもテキストカーソルの
+// 下に隠れる/隠れないでコロコロ変わり、当てにならない見分け手段だった。
+// 状態を見分ける主手がかりは入力文字列の明暗（InputStyle::ink）とフッターの
+// ヒント文言の2つ
+#[derive(Clone, Copy)]
+struct InputStyle {
+    // 入力文字列の色。打てる状態は本文のまま、打てない状態は dim
+    ink: Ink,
+    hints: &'static [&'static str],
+}
+
+// 番号ジャンプサブモードは常に打てる状態しかない（決定29）
+const JUMP_INPUT: InputStyle = InputStyle {
+    ink: Ink::Plain,
+    hints: &["?:help"],
+};
+
+// 検索サブモードの入力欄の見た目（決定50。要件: nav-mode-hints）。
+// **編集状態では `?:help` を出さない** — そこでの `?` はクエリの文字になるので、
+// 押せば助けが出ると読める案内は嘘になる。
+// 幅に収まらないヒントは末尾から落ちる（fit_hint）ので、重要な順に並べる
+fn search_input_style(phase: SearchPhase) -> InputStyle {
+    match phase {
+        SearchPhase::Editing => InputStyle {
+            ink: Ink::Plain,
+            hints: &["esc:browse", "enter:jump"],
+        },
+        SearchPhase::Navigating => InputStyle {
+            ink: Ink::Muted,
+            hints: &["j/k:move", "?:help", "i:edit", "esc:cancel", "enter:jump"],
+        },
+    }
+}
 
 // 文字を置いてよい幅。選択行の背景は右マージンも含めて塗るので、
 // 背景のパディング（pad_to_width）はこれではなく cols を使うこと
@@ -729,7 +769,7 @@ impl State {
         }
     }
 
-    // 入力欄の実カーソル位置をホストへ伝える。位置が変わったときだけ送る。
+    // 入力欄のテキストカーソル位置をホストへ伝える。位置が変わったときだけ送る。
     //
     // **`render()` の中からは呼べない。** 描画中の stdout はホストコマンドの
     // 経路と混線し、zellij 側が毎フレーム
@@ -743,7 +783,7 @@ impl State {
         }
     }
 
-    // 入力欄（検索・番号ジャンプ）を出している間の、実カーソルの位置。
+    // 入力欄（検索・番号ジャンプ）を出している間の、テキストカーソルの位置。
     // 入力欄が無ければ None ＝ カーソルを隠す。サイドバーは読むための面なので、
     // 平常時にカーソルが点いていると入力できるように見えてしまう
     pub(crate) fn input_cursor_position(&self) -> Option<(usize, usize)> {
@@ -766,24 +806,42 @@ impl State {
 
     // 入力欄を出している間、**自分の打鍵以外での再描画を見送るか**。
     //
-    // サイドバーを描き直すと、zellij は描画の最後に実カーソルを入力欄へ戻す。
+    // サイドバーを描き直すと、zellij は描画の最後にテキストカーソルを入力欄へ戻す。
     // IMEで変換している最中にこれが起きると、端末が描いていた未確定文字列が
     // 上書きされ、**変換候補ウィンドウが打っている途中で飛ぶ**（実測。
     // docs/issues/ime-input-support.md）。外から届くイベント（他ペインの変化・
     // 状態通知・タイマー）は入力が終わるまで描画を待たせる。
     //
     // 代償: 入力中は一覧が古いまま止まる。**状態そのものは更新し続けている**
-    // ので、入力欄を抜けた時点の描画で追いつく
+    // ので、入力欄を抜けた時点の描画で追いつく。
+    //
+    // **`input_cursor_column` とは判定基準が異なる**（2026-08-13）。テキストカーソルは
+    // 検索サブモードの操作状態でも表示する（位置表示の一本化。決定50）が、
+    // 操作状態はIMEの変換が起きないので、ここまで見送りを広げると結果を見ながら
+    // 動かしているあいだ一覧が古いまま固まる。打鍵中（編集状態・番号ジャンプ）
+    // だけに絞る
     pub(crate) fn defers_render_while_typing(&self) -> bool {
-        self.input_cursor_column().is_some()
+        if self.help_overlay || self.termination.is_some() {
+            return false;
+        }
+        match &self.search {
+            Some(search) => search.phase == SearchPhase::Editing,
+            None => self.jump.is_some(),
+        }
     }
 
-    // 入力欄の中で実カーソルを置く列。
+    // 入力欄の中でテキストカーソルを置く列。
     //
-    // **IME の変換候補ウィンドウは端末が実カーソルの位置に出す**ので、置かないと
+    // **IME の変換候補ウィンドウは端末がテキストカーソルの位置に出す**ので、置かないと
     // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
     // 変換の確定そのものが効かない端末もある（docs/issues/ime-input-support.md）。
-    // 位置は input_footer の組み立てと同じ勘定で、`▏` を出している列に重ねる。
+    //
+    // 検索サブモードは**編集状態・操作状態のどちらでも**カーソルを置く（決定50、
+    // 2026-08-13 に一本化）。以前は操作状態を隠して地の文の疑似カーソルに位置表示を
+    // 譲っていたが、端末のカーソル形状はこちらから指定できず地の文の字も
+    // その下に隠れるため、見分けの手がかりとして機能していなかった
+    // （docs/issues/search-input-cursor-shape.md）。テキストカーソルへ一本化し、
+    // 状態の違いは入力文字列の明暗とフッターのヒント文言で示す
     //
     // **分岐は `footer_line` と同じ順序で見ること。** 入力欄が出ていないのに
     // カーソルだけ残すと、候補窓が見当違いの場所に出る（検索サブモード中に
@@ -979,14 +1037,16 @@ impl State {
             );
             return compose(&[(&indent, Ink::Plain), (&prompt, ink)], inner);
         }
-        // 検索サブモード中はクエリ入力欄に転用する
+        // 検索サブモード中はクエリ入力欄に転用する。クエリの明暗と操作ヒントは
+        // 編集状態/操作状態で出し分ける（決定50。要件: nav-mode-hints）
         if let Some(search) = &self.search {
-            return input_footer("/", &search.query, &indent, ink, inner);
+            let style = search_input_style(search.phase);
+            return input_footer("/", &search.query, style, &indent, ink, inner);
         }
         // 番号ジャンプサブモード中は番号入力バッファの表示に転用する（決定29）。
         // 先頭の `n` は検索サブモードの `/` と同じく入場キーの提示
         if let Some(jump) = &self.jump {
-            return input_footer("n ", &jump.buffer, &indent, ink, inner);
+            return input_footer("n ", &jump.buffer, JUMP_INPUT, &indent, ink, inner);
         }
         // 解釈できなかった設定の警告（決定40）。**入力欄・確認プロンプト・
         // ヘルプより後、静的なヒントより先**に見る（`showing_config_warning`）。
@@ -1433,29 +1493,48 @@ impl State {
 // 入力が伸びてぶつかるところまで来たら、入力中の文字列のほうを優先して
 // ヒント側を落とす（右寄せを使うのは枠でここ1箇所だけ）。
 //
+// `hints` は右端に出す操作ヒントの項目で、収まらないぶんは末尾から落とす。
+// 入力位置はテキストカーソル（`sync_input_cursor`）が示す。地の文の疑似カーソルは
+// 持たない（決定50。経緯: docs/issues/search-input-cursor-shape.md）
+//
 // 入力本体は本文なので既定色のまま、先頭の `tag`（`/` や `n`）はモード名と
 // 同じ扱いでレベル3。状態色で統一するのはヒント側（要件: sidebar-footer）
-fn input_footer(tag: &str, input: &str, indent: &str, ink: Ink, cols: usize) -> Text {
-    let input = format!("{}▏", input);
+fn input_footer(
+    tag: &str,
+    input: &str,
+    style: InputStyle,
+    indent: &str,
+    ink: Ink,
+    cols: usize,
+) -> Text {
     // 余白は表示セル幅で数える。入力に全角文字が入ると文字数とセル数が
     // ずれ、操作ヒントが右端からはみ出す
-    let hint = "?:help";
-    let pad = cols
+    let budget = cols
         .saturating_sub(UnicodeWidthStr::width(indent))
         .saturating_sub(UnicodeWidthStr::width(tag))
-        .saturating_sub(UnicodeWidthStr::width(input.as_str()))
-        .saturating_sub(UnicodeWidthStr::width(hint));
-    let mut segments = vec![
-        (indent, Ink::Plain),
-        (tag, Ink::Tag),
-        (input.as_str(), Ink::Plain),
-    ];
+        .saturating_sub(UnicodeWidthStr::width(input));
+    let hint = fit_hint(style.hints, budget);
+    let pad = budget.saturating_sub(UnicodeWidthStr::width(hint.as_str()));
+    let mut segments = vec![(indent, Ink::Plain), (tag, Ink::Tag), (input, style.ink)];
     let spacer = " ".repeat(pad);
-    if pad > 0 {
+    if !hint.is_empty() {
         segments.push((spacer.as_str(), Ink::Plain));
-        segments.push((hint, ink));
+        segments.push((hint.as_str(), ink));
     }
     compose(&segments, cols)
+}
+
+// 入力欄の右に出せるだけのヒント。**末尾の項目ごと落とす** — `キー:動作` の形が
+// 壊れたヒントは読めないので `…` で切らない（direct-keys のヒントと同じ削り方。
+// docs/issues/direct-keys-hint-overflow.md）。入力とヒントの間は最低1セル空ける
+fn fit_hint(hints: &[&str], budget: usize) -> String {
+    for count in (1..=hints.len()).rev() {
+        let line = hints[..count].join("  ");
+        if UnicodeWidthStr::width(line.as_str()) < budget {
+            return line;
+        }
+    }
+    String::new()
 }
 
 // フローティングペインのペイン名を囲む丸括弧（要件:

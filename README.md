@@ -529,18 +529,43 @@ back.
 ### Search (`/` inside nav mode)
 
 Pressing `/` while in nav mode turns the header into a query input line
-(`/…▏`) and fuzzy-filters the tree against pane name, owning tab name, and
+(`/…`) and fuzzy-filters the tree against pane name, owning tab name, and
 cwd. Matched characters are highlighted, and the highlight location doubles
 as a hint for which field matched (a cwd match is shown on that row even if
 `show_cwd` is disabled).
 
+Search is split into two vim-like states: **editing** and **navigating**.
+`/` starts you in editing; pressing `Esc` moves you to navigating while
+keeping the query. These cues tell you which state you are in:
+
+| | editing | navigating |
+|---|---|---|
+| query text | normal | dimmed |
+| footer hints | `esc:browse  enter:jump` | `j/k:move  ?:help  i:edit …` |
+
+The text cursor (the terminal-drawn cursor that the IME candidate window
+follows) sits at the end of the input field in both states. fujin cannot set
+its shape, so it follows your terminal settings and is not used as a cue for
+telling the states apart.
+
+Editing keys:
+
 | Key | Action |
 |---|---|
-| printable characters | append to the query (nav mode's single-letter shortcuts are all disabled while searching) |
+| printable characters | append to the query (`?` included; nav mode's single-letter shortcuts are all disabled while searching) |
 | `Backspace` | delete the last character of the query |
 | `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
 | `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
-| `?` | open the key help (below; `?` is the one character that does not go into the query) |
+| `Esc` | switch to navigating (the query is kept) |
+
+Navigating keys (**every other key does nothing**):
+
+| Key | Action |
+|---|---|
+| `j` / `k`, `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
+| `i` | go back to editing (the query is kept) |
+| `?` | open the key help (below) |
+| `Enter` | jump to the selected row and exit nav mode entirely |
 | `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
 
 The query is discarded every time you leave search, so it always starts empty
