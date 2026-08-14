@@ -423,8 +423,21 @@ If the pane's space is reserved but its contents are **completely blank**, the
 permission approval is likely stuck: with even one requested permission left
 unapproved, neither the prompt nor fujin's own drawing appears. This also
 happens when you approved an earlier version and the set of requested
-permissions has grown since. Remove that wasm's entry from `permissions.kdl` in
-zellij's cache directory, then start a fresh session and approve again.
+permissions has grown since.
+
+**A sidebar started from a layout never shows the approval prompt**, so open
+fujin as a floating pane instead — that one does show it:
+
+```bash
+zellij action new-pane --floating \
+  --plugin file:$HOME/.config/zellij/plugins/fujin.wasm
+```
+
+Press `y` on the prompt that appears there, then start a fresh session (the
+blank sidebar in the current session stays blank).
+
+Point at your own path if you keep the wasm elsewhere: approvals are recorded
+per resolved absolute path.
 
 ### Updated the wasm but the old behaviour persists
 
