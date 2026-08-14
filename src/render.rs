@@ -2018,8 +2018,10 @@ pub(crate) fn formation_heading(
         if is_highlighted { cols } else { inner },
     );
     if is_highlighted {
-        // カーソルバーを持たない行なので、行頭に色を乗せず帯だけで示す（決定48）
-        text = text.selected().opaque();
+        // カーソルバーを持たない行なので、行頭に色を乗せず帯だけで示す（決定48）。
+        // **`selected()` は付けない** — 付けると上流のパース順の不整合で行が壊れる
+        // （`highlight_row` と同じ理由。docs/issues/zellij-selected-opaque-prefix-order.md）
+        text = text.opaque();
     }
     text
 }
