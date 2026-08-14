@@ -28,11 +28,13 @@
 // - width  — 表示セル幅の計算・切り詰めの純粋関数
 // - sync   — インスタンス間の状態同期（決定13）
 // - summon — フローティングでの臨時召喚（決定16）
+// - entry  — wasm のエクスポート関数（`register_plugin!` の自前版。決定47）
 
 mod agent;
 mod command;
 mod config;
 mod deploy;
+mod entry;
 mod formation;
 mod mark;
 mod nav;
@@ -96,6 +98,11 @@ const MARK_PIPE: &str = "fujin_mark";
 const FORMATION_PIPE: &str = "fujin_formation";
 // プレビューのスナップショット送付（決定42）。1行目が対象ペイン名、2行目以降が内容
 const PREVIEW_PIPE: &str = "fujin_preview";
+// サイドバー幅のタブ間追従（docs/issues/sidebar-width-persist-across-tabs.md）。
+// zellij の `new_tab_template` はタブ生成時に複製されるだけの静的な雛形なので、
+// あるタブでリサイズしても他タブには伝播しない。観測した幅を配って各自に
+// 寄せさせる
+const WIDTH_PIPE: &str = "fujin_width";
 // 取り残された召喚インスタンスの強制掃除（決定16）。取り残された召喚はキーを
 // 横取りしておらず Esc が届かず、unselectable なので普段のペイン操作でも消せない。
 // pipe 経由の逃げ道を用意しておく
@@ -244,6 +251,22 @@ struct State {
     // 直近に描画した画面幅。配置演出の着地列は幅から決まるが、タイマーは
     // 描画の外で進むのでここに控えておく
     viewport_cols: usize,
+    // タブ間で揃えたいサイドバー幅（docs/issues/sidebar-width-persist-across-tabs.md）。
+    // 誰かがリサイズしたらその桁数が権威になり、兄弟インスタンスへ配られる
+    width_target: Option<usize>,
+    // 目標へ寄せるために撃ったリサイズの回数。相対リサイズは端末幅の一定割合
+    // ずつ動く量子化された操作なので、目標にぴったり乗るとは限らない。
+    // 撃ち続けて振動しないよう回数で打ち切る
+    width_attempts: usize,
+    // 自分が撃ったリサイズの着地待ち。中身は撃った向きで、幅が実際に動くまで
+    // 保持する。待っている間は次の一手を撃ち足さない — 多重に飛ばすと、あとから
+    // 届く着地を利用者の操作と取り違えて配り直してしまう（実測でこの経路を踏んだ）。
+    // 撃った向きと逆に幅が動いたときだけは自分の着地ではありえないので、
+    // 利用者の操作として扱う
+    width_adjusting: Option<Resize>,
+    // これ以上寄せられないと分かったか（目標を跨いでしまった・回数を使い切った）。
+    // 新しい目標が届いたら倒す
+    width_settled: bool,
     // 再生中の配置演出。再生中だけ Some で、終われば None に戻る
     deployment: Option<Deployment>,
     // 届いた `Event::Timer` の経過時間を積んだ値。壁時計を引けないので、
@@ -263,9 +286,16 @@ struct State {
     // 設定の警告をフッターに出しておく期限（`elapsed` 基準）。None は
     // 「出していない・もう出さない」
     config_warning_until: Option<f64>,
+    // 直近にホストへ伝えたテキストカーソル位置（`show_cursor`）。同じ値を送り直さない
+    //（`sync_input_cursor`）
+    cursor_shown: Option<(usize, usize)>,
 }
 
-register_plugin!(State);
+// `register_plugin!(State)` は使わない。エクスポート関数は entry.rs が持つ
+//（IME経由の非ASCII入力を拾うため。決定47 / docs/issues/ime-input-support.md）
+fn main() {
+    entry::install_panic_hook();
+}
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
@@ -309,6 +339,10 @@ impl ZellijPlugin for State {
             EventType::PermissionRequestResult,
             EventType::Visible,
             EventType::InterceptedKeyPress,
+            // 一括で届くテキスト入力（貼り付けと**IMEの変換確定**）。横取りとは
+            // 別の経路で来るので、これが無いと確定した文字列が消える
+            //（docs/issues/ime-input-support.md）
+            EventType::PastedText,
             // 行クリックでのフォーカス移動（要件: docs/requirements/click-to-focus/）
             EventType::Mouse,
             // 配置演出のフレーム送り（要件: docs/requirements/header-animation/）。
@@ -335,7 +369,9 @@ impl ZellijPlugin for State {
         if self.is_preview {
             return self.update_as_preview(event);
         }
-        match event {
+        // 打っている本人の入力か（下の `defers_render_while_typing` の例外）
+        let from_input = matches!(event, Event::InterceptedKeyPress(_) | Event::PastedText(_));
+        let should_render = match event {
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
                 if self.permissions_granted {
@@ -431,14 +467,19 @@ impl ZellijPlugin for State {
             // ダブルクリック・ドラッグ・右クリックはv1対象外
             Event::Mouse(Mouse::LeftClick(line, _column)) => self.handle_click(line),
             Event::InterceptedKeyPress(key) => {
-                // 横取りを要求したインスタンスにしか届かないが、念のため
-                if !self.nav_mode {
-                    return false;
-                }
-                self.handle_nav_key(key)
+                // 横取りを要求したインスタンスにしか届かないが、念のため。
+                // `return` で抜けない — 下のテキストカーソルの追従はここでも通す
+                self.nav_mode && self.handle_nav_key(key)
             }
+            // 貼り付け・IMEの変換確定。フォーカスを預かっている（決定34）間だけ
+            // 自分に届く。入力欄の外なら中で捨てる
+            Event::PastedText(text) => self.handle_pasted_text(&text),
             _ => false,
-        }
+        };
+        // 入力欄のテキストカーソル（IMEの候補窓が付いてくる）はここで伝える。
+        // **`render()` の中からは呼べない**（`sync_input_cursor` 参照）
+        self.sync_input_cursor();
+        should_render && (from_input || !self.defers_render_while_typing())
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
@@ -457,6 +498,7 @@ impl ZellijPlugin for State {
                 | MARK_PIPE
                 | FORMATION_PIPE
                 | PREVIEW_PIPE
+                | WIDTH_PIPE
                 | DISMISS_PIPE
         );
         // CLI pipe は即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
@@ -472,7 +514,7 @@ impl ZellijPlugin for State {
         }
         // 各アームの中身は担当モジュール側のハンドラにある。ここは配線だけ
         let payload = pipe_message.payload.as_deref();
-        match pipe_message.name.as_str() {
+        let should_render = match pipe_message.name.as_str() {
             STATUS_PIPE => self.handle_status_pipe(payload),
             NAV_UP_PIPE => self.handle_nav_step_pipe(false),
             NAV_DOWN_PIPE => self.handle_nav_step_pipe(true),
@@ -484,17 +526,26 @@ impl ZellijPlugin for State {
             PREVIEW_PIPE => self.handle_preview_pipe(payload),
             MARK_PIPE => self.handle_mark_pipe(payload),
             FORMATION_PIPE => self.handle_formation_pipe(payload),
+            WIDTH_PIPE => self.handle_width_pipe(payload, &pipe_message.source),
             READ_CLEAR_PIPE => self.handle_read_clear_pipe(payload),
             COMMAND_STATE_PIPE => self.handle_command_state_pipe(payload),
             SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload),
             _ => false,
-        }
+        };
+        // navモードへの入場は pipe 経由でも起きる（fujin_mode）ので、
+        // テキストカーソルの追従は update と同じくこちらでも行う
+        self.sync_input_cursor();
+        // pipe は全て「外から」来るので、入力中は描き直さない（update と同じ理由）
+        should_render && !self.defers_render_while_typing()
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
         // 表示範囲の寄せ直しは描画の直前に行う。画面高が分かるのがここだけで、
         // 行の増減も選択の移動もまとめて吸収できる
         self.reconcile_viewport(rows);
+        // 自分の幅が分かるのも描画のときだけ。リサイズの検出と寄せ直しは
+        // viewport_cols を更新する前に済ませる（前回との差が判定材料）
+        self.reconcile_width(cols);
         // 配置演出のタイマーは描画の外で進むので、幅を控えておく
         self.viewport_cols = cols;
         self.draw(rows, cols);
@@ -516,7 +567,11 @@ impl State {
             // 臨時召喚（決定16）と同じ理由で、一時的に出ているだけのペインは
             // 「必ず自分で消せる」ほうを取る
             if let Some(id) = self.own_plugin_id {
-                rename_plugin_pane(id, "preview");
+                // 記号付きで通常ペインと見分けを付ける。枠色は zellij 側に
+                // API が無く（決定34）、内容領域の背景色は「色はテーマから
+                // 借りる」原則（ui-design.md 原則1）と衝突するため、
+                // ネイティブのタイトルバー文字列で代替している
+                rename_plugin_pane(id, "▣ preview");
             }
         }
         true

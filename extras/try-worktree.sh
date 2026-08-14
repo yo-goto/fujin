@@ -36,6 +36,7 @@ base_config=${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}
 layout_name=fujin
 sidebar_width=32
 resizable=0
+theme=
 minimal=0
 do_build=1
 do_grant=1
@@ -45,6 +46,15 @@ nested=0
 open_window=0
 terminal=auto
 dry_run=0
+
+# extras/themes/*.kdl のファイル名（拡張子抜き）を --theme が受け付ける名前として列挙する
+theme_names() {
+  local f names=()
+  for f in "$script_dir"/themes/*.kdl; do
+    [ -f "$f" ] && names+=("$(basename "$f" .kdl)")
+  done
+  IFS=', '; printf '%s' "${names[*]}"
+}
 
 usage() {
   cat <<'EOS'
@@ -64,6 +74,10 @@ resident fujin session are never touched.
       --minimal       do not copy the base config; write a minimal config.kdl
       --width N       sidebar width in columns (default: 32)
       --resizable     write the width as a percentage so zellij's resize works
+      --theme NAME    append a theme from extras/themes/NAME.kdl and select it
+                      (comments out any existing "theme" line first). Used to
+                      check that fujin's colors follow zellij's theme instead
+                      of hardcoding RGB (docs/issues/agent-status-color-theme-variance.md).
 
       --no-build      skip `cargo build --release`
       --no-grant      do not pre-register the permissions (approve by hand instead)
@@ -76,6 +90,7 @@ resident fujin session are never touched.
   -n, --dry-run       show what would happen, write nothing
   -h, --help          this message
 EOS
+  printf '                      available themes: %s\n' "$(theme_names)"
 }
 
 while [ $# -gt 0 ]; do
@@ -86,6 +101,7 @@ while [ $# -gt 0 ]; do
     --minimal) minimal=1; shift ;;
     --width) sidebar_width=$2; shift 2 ;;
     --resizable) resizable=1; shift ;;
+    --theme) theme=$2; shift 2 ;;
     --layout-name) layout_name=$2; shift 2 ;;
     --no-build) do_build=0; shift ;;
     --no-grant) do_grant=0; shift ;;
@@ -140,6 +156,11 @@ name=$(basename "$worktree")
 wasm_path="$worktree/target/wasm32-wasip1/release/fujin.wasm"
 layout_file="$config_dir/layouts/$layout_name.kdl"
 config_file="$config_dir/config.kdl"
+theme_file=
+if [ -n "$theme" ]; then
+  theme_file="$script_dir/themes/$theme.kdl"
+  [ -f "$theme_file" ] || die "no such theme: $theme (available: $(theme_names))"
+fi
 
 command -v zellij >/dev/null 2>&1 || die "zellij is not on PATH"
 
@@ -231,6 +252,9 @@ install_config() {
     else
       info "would write a minimal config.kdl"
     fi
+    if [ -n "$theme" ]; then
+      info "would comment out any existing \"theme\" line and append theme \"$theme\" from $theme_file"
+    fi
     return 0
   fi
 
@@ -273,6 +297,31 @@ install_config() {
   [ "$resizable" -eq 1 ] && layout_args+=(--resizable)
   "$script_dir/setup.sh" "${layout_args[@]}" >/dev/null
   ok "wrote $layout_file"
+
+  # **`&&` の右辺で終える形にしない。** これが関数の最後の文だと、`$theme` が
+  # 空のときの終了ステータス（左辺の失敗）がそのまま install_config の戻り値になり、
+  # 呼び出し側が if/while 等で囲んでいない bare 呼び出しのため set -e が発火して
+  # 後続の grant_permissions 以降が無言でスキップされる（2026-08-13 実測）
+  if [ -n "$theme" ]; then
+    apply_theme
+  fi
+}
+
+# --theme が指定されたときだけ呼ばれる。config.kdl 末尾に extras/themes/<name>.kdl の
+# themes ブロックと theme 宣言を追記し、既存の有効な theme 行はコメントアウトする
+# （2つ以上残すとどちらが効くか zellij のパース順まかせになる）
+apply_theme() {
+  if grep -qE '^[[:space:]]*theme[[:space:]]+"' "$config_file"; then
+    local tmp="$config_file.theme.$$"
+    sed -E 's/^([[:space:]]*)(theme[[:space:]]+")/\1\/\/ \2/' "$config_file" >"$tmp"
+    mv "$tmp" "$config_file"
+  fi
+  {
+    printf '\n// --theme %s (appended by extras/try-worktree.sh from %s)\n' "$theme" "$theme_file"
+    printf 'theme "%s"\n\n' "$theme"
+    cat "$theme_file"
+  } >>"$config_file"
+  ok "appended theme \"$theme\" from $theme_file"
 }
 
 # ---------------------------------------------------------------- permissions

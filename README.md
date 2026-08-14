@@ -299,6 +299,17 @@ gets narrower on a narrow terminal (the footer hints and such are laid out for
 32 columns). To keep it fixed but pick a different value, pass `--width N` as a
 plain column count.
 
+**Resizing one tab's sidebar resizes them all**, and tabs opened afterwards come
+up at the new width too. A zellij layout is only a template applied when a tab is
+created, so widths would otherwise drift apart per tab; fujin notices the change
+and pulls the other tabs' sidebars to match. This only happens with a percentage
+width — a fixed column count cannot be resized in the first place.
+
+The follow-up uses zellij's stepped resize (5% of the terminal width per step),
+so if you **drag** the border to a width that falls between steps, other tabs
+settle at the **nearest reachable width** (off by at most half a step). Keyboard
+or CLI resizes line every tab up exactly.
+
 ### 4. Global keybindings (jump feature)
 
 Add these to the keybinds block in `~/.config/zellij/config.kdl` (e.g.
@@ -505,10 +516,10 @@ Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
 | `/` | enter search sub-mode (below) |
 | `n` | enter number jump sub-mode (below) |
-| `p` | enter triage mode (panes that need attention, most urgent first) |
+| `t` | enter triage mode (panes that need attention, most urgent first) |
 | `d` | enter the pane termination sub-mode (below) |
 | `m` / `M` | mark / unmark a pane, or clear every mark (targets for termination) |
-| `v` | toggle the preview (below) |
+| `p` | toggle the preview (below) |
 | `r` | mark the previewed pane as read (only while the preview is up) |
 | `?` | open the key help (below) |
 | `Esc` / `q` | exit the mode |
@@ -531,18 +542,43 @@ back.
 ### Search (`/` inside nav mode)
 
 Pressing `/` while in nav mode turns the header into a query input line
-(`/…▏`) and fuzzy-filters the tree against pane name, owning tab name, and
+(`/…`) and fuzzy-filters the tree against pane name, owning tab name, and
 cwd. Matched characters are highlighted, and the highlight location doubles
 as a hint for which field matched (a cwd match is shown on that row even if
 `show_cwd` is disabled).
 
+Search is split into two vim-like states: **editing** and **navigating**.
+`/` starts you in editing; pressing `Esc` moves you to navigating while
+keeping the query. These cues tell you which state you are in:
+
+| | editing | navigating |
+|---|---|---|
+| query text | normal | dimmed |
+| footer hints | `esc:browse  enter:jump` | `j/k:move  ?:help  i:edit …` |
+
+The text cursor (the terminal-drawn cursor that the IME candidate window
+follows) sits at the end of the input field in both states. fujin cannot set
+its shape, so it follows your terminal settings and is not used as a cue for
+telling the states apart.
+
+Editing keys:
+
 | Key | Action |
 |---|---|
-| printable characters | append to the query (nav mode's single-letter shortcuts are all disabled while searching) |
+| printable characters | append to the query (`?` included; nav mode's single-letter shortcuts are all disabled while searching) |
 | `Backspace` | delete the last character of the query |
 | `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
 | `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
-| `?` | open the key help (below; `?` is the one character that does not go into the query) |
+| `Esc` | switch to navigating (the query is kept) |
+
+Navigating keys (**every other key does nothing**):
+
+| Key | Action |
+|---|---|
+| `j` / `k`, `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
+| `i` | go back to editing (the query is kept) |
+| `?` | open the key help (below) |
+| `Enter` | jump to the selected row and exit nav mode entirely |
 | `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
 
 The query is discarded every time you leave search, so it always starts empty
@@ -594,17 +630,17 @@ command has already exited does nothing.
 The targets are every pane you marked with `m`, or just the selected pane if
 nothing is marked. Marks may span tabs, and `M` clears them all at once.
 
-### Preview (`v` inside nav mode)
+### Preview (`p` inside nav mode)
 
-Pressing `v` opens a preview to the right of the sidebar showing the contents of
+Pressing `p` opens a preview to the right of the sidebar showing the contents of
 the selected pane (or, in the filtered results and the triage list, the pane
 under the cursor). The focus does not move, so you can keep walking the list
-with `j` / `k` and see what each pane is up to. Pressing `v` again — or jumping,
+with `j` / `k` and see what each pane is up to. Pressing `p` again — or jumping,
 or leaving nav mode — closes it.
 
 | Key | Action |
 |---|---|
-| `v` | toggle the preview (`alt+v` inside the search sub-mode) |
+| `p` | toggle the preview (`alt+p` inside the search sub-mode) |
 | `r` | mark the previewed pane as read (`done` / `blocked` / `error` only) |
 
 What you get is a **snapshot taken when the selection moved**. The pane may keep
