@@ -42,7 +42,8 @@ pub(crate) enum Row<'a> {
     // モード中だけ直後にモードラベルが付く
     Header,
     // chrome（ヘッダー・フッター）と content（ツリー）の境目を示す横線。
-    // 最上部・ヘッダー下・フッター上の3箇所に同じ見た目で出る（決定27）
+    // 最上部・ヘッダー下・フッター上の3箇所に同じ見た目で出る（決定27）。
+    // アコーディオン表示では TABS/FORMATIONS ブロックのあいだにも1本引く（決定48）
     Divider,
     // フッター。いまの状態で使えるコマンドを1行で出す。空にはならない
     Footer,
@@ -86,11 +87,14 @@ pub(crate) enum Row<'a> {
         entry: &'a Selectable,
         tab_name: &'a str,
     },
-    // フォーメーション見出し行（要件: formation-display-accordion）。名前と
-    // メンバー数を出す。**カーソルが乗る行**で、そこでの `x`/`a` は名簿行とは
+    // フォーメーション見出し行（要件: formation-display-accordion）。識別番号・
+    // 名前・メンバー数を出す。**カーソルが乗る行**で、そこでの `x`/`a` は名簿行とは
     // 別の意味を持つ（要件: formation-management）
     FormationHeader {
         formation: &'a Formation,
+        // 一覧の並び順（現状は作成順。F5で表示順序が確定すればそちらに従う）。
+        // 行に出す識別番号はこれに1を足したもの（決定48）
+        index: usize,
         members: usize,
     },
     // 名簿行（同上）。メンバーを元のタブ位置に関わらず平坦に並べ、所属タブ名を
@@ -354,6 +358,98 @@ fn counter_labels(agent: Option<&AgentInfo>) -> (String, String) {
     (subagents, open_tasks)
 }
 
+// アコーディオン表示（要件: formation-display-accordion）で content 領域に並ぶ中身。
+//
+// セクション見出し行2本とブロック間の境界線は**表示範囲から常に確保する**ので、
+// 切り詰めの対象になる各セクションの中身とは分けて持つ（決定49。畳んでいる側の
+// 見出しごと画面外へ押し出さないため）。折りたたまれている側の中身は空
+struct Accordion<'a> {
+    tabs_heading: Row<'a>,
+    formations_heading: Row<'a>,
+    tabs: Vec<Row<'a>>,
+    formations: Vec<Row<'a>>,
+}
+
+// アコーディオンで常に確保する行数（セクション見出し行2本 + ブロック間の境界線1本）
+const ACCORDION_FIXED: usize = 3;
+
+// アコーディオンの縦幅配分の結果（決定49）
+struct SectionBudgets {
+    tabs: usize,
+    formations: usize,
+    // 縦スクロールを効かせる側。もう一方は先頭から出す（スクロール位置は1つしか
+    // 持たず、split で両方に寄せる術が無いため）
+    scrolled: crate::Section,
+}
+
+impl<'a> Accordion<'a> {
+    // 見出し・境界線・中身を上から順に並べた全量（切り詰め無し）
+    fn flatten(self) -> Vec<Row<'a>> {
+        let mut rows =
+            Vec::with_capacity(self.tabs.len() + self.formations.len() + ACCORDION_FIXED);
+        rows.push(self.tabs_heading);
+        rows.extend(self.tabs);
+        rows.push(Row::Divider);
+        rows.push(self.formations_heading);
+        rows.extend(self.formations);
+        rows
+    }
+
+    // 表示範囲 `area` を各セクションの中身へ配る（決定49の3段階）。
+    // 常に確保する行（ACCORDION_FIXED）を先に引いてから残りを配る
+    fn budgets(
+        &self,
+        area: usize,
+        tabs_anchor: Option<(usize, usize)>,
+        formations_anchor: Option<(usize, usize)>,
+    ) -> SectionBudgets {
+        let avail = area.saturating_sub(ACCORDION_FIXED);
+        let (tabs, formations) = allocate_sections(self.tabs.len(), self.formations.len(), avail);
+        // ハイライト行（選択・カーソル）を含む側に寄せる。どちらにも無ければ
+        // TABS 側 — 開いているのが FORMATIONS だけなら中身が空なので影響しない
+        let scrolled = match (tabs_anchor, formations_anchor) {
+            (None, Some(_)) => crate::Section::Formations,
+            _ => crate::Section::Tabs,
+        };
+        SectionBudgets {
+            tabs,
+            formations,
+            scrolled,
+        }
+    }
+}
+
+// 開いているセクションの中身へ縦幅を配る（決定49。参照実装は
+// docs/concept/formation-display/section-heading-emphasis.html の allocateSplit）。
+//
+//   ① 合算しても収まるなら両方フル表示
+//   ② 収まらないが少ない方だけなら収まるなら、少ない方をフル表示して残りを多い方へ
+//   ③ 少ない方だけでも収まらないなら半分ずつに割る（端数は多い方へ）
+//
+// 片方だけが開いているときは、畳んだ側の中身が空なので①で全量が通る
+fn allocate_sections(tabs: usize, formations: usize, avail: usize) -> (usize, usize) {
+    if tabs + formations <= avail {
+        return (tabs, formations);
+    }
+    let tabs_is_smaller = tabs <= formations;
+    let smaller = if tabs_is_smaller { tabs } else { formations };
+    if smaller <= avail {
+        let rest = avail - smaller;
+        return if tabs_is_smaller {
+            (tabs, rest)
+        } else {
+            (rest, formations)
+        };
+    }
+    let half = avail / 2;
+    let rest = avail - half;
+    if tabs_is_smaller {
+        (half, rest)
+    } else {
+        (rest, half)
+    }
+}
+
 impl State {
     // このフレームにマーク列を出すか（決定39）。カウンタ列と同じく**そのフレームに
     // 出る行の実測**で決める — 誰もマークしていないフレームでは列そのものが消え、
@@ -439,12 +535,25 @@ impl State {
             }
             return rows;
         }
-        // フォーメーションが1件も無ければセクションに割らない（アコーディオンは
-        // フォーメーションがあって初めて意味を持つ）。使っていない利用者の
-        // サイドバーに、中身の無い見出しを2行増やさないため
-        if self.formations.is_empty() {
-            rows.extend(self.tree_rows());
-            return rows;
+        match self.accordion() {
+            // 切り詰めずに全量を並べる。表示範囲への配分は screen_rows() の役目
+            Some(accordion) => accordion.flatten(),
+            None => {
+                rows.extend(self.tree_rows());
+                rows
+            }
+        }
+    }
+
+    // アコーディオン表示（要件: formation-display-accordion）の中身。
+    //
+    // フォーメーションが1件も無ければセクションに割らない（アコーディオンは
+    // フォーメーションがあって初めて意味を持つ）。使っていない利用者の
+    // サイドバーに、中身の無い見出しを2行増やさないため。
+    // ヘルプオーバーレイ・トリアージモードはツリーとは別の面なので対象外
+    fn accordion(&self) -> Option<Accordion<'_>> {
+        if self.formations.is_empty() || self.help_overlay || self.triage.is_some() {
+            return None;
         }
         // 絞り込み中は FORMATIONS を**見出し1行だけ**にする（2026-08-11 決定）。
         // 名簿まで出すと、どこまでが絞り込み結果なのか読めなくなる。かといって
@@ -453,30 +562,35 @@ impl State {
         let tabs_open = searching || self.split || self.section == crate::Section::Tabs;
         let formations_open =
             !searching && (self.split || self.section == crate::Section::Formations);
-        rows.push(Row::Section {
-            section: crate::Section::Tabs,
-            open: tabs_open,
-            count: self.selectable.len(),
-        });
-        if tabs_open {
-            rows.extend(self.tree_rows());
-        }
-        rows.push(Row::Section {
-            section: crate::Section::Formations,
-            open: formations_open,
-            // 畳んだときに出す件数は**名簿行の総数**（`assignments` の件数では
-            // ない）。一覧に無いペインへの割り当ては名簿にも出ないので、
-            // 数だけ合わない見出しになる
-            count: self
-                .formations
-                .iter()
-                .map(|formation| self.formation_members(formation.id).len())
-                .sum(),
-        });
-        if formations_open {
-            rows.extend(self.formation_rows());
-        }
-        rows
+        Some(Accordion {
+            tabs_heading: Row::Section {
+                section: crate::Section::Tabs,
+                open: tabs_open,
+                count: self.selectable.len(),
+            },
+            formations_heading: Row::Section {
+                section: crate::Section::Formations,
+                open: formations_open,
+                // 畳んだときに出す件数は**名簿行の総数**（`assignments` の件数では
+                // ない）。一覧に無いペインへの割り当ては名簿にも出ないので、
+                // 数だけ合わない見出しになる
+                count: self
+                    .formations
+                    .iter()
+                    .map(|formation| self.formation_members(formation.id).len())
+                    .sum(),
+            },
+            tabs: if tabs_open {
+                self.tree_rows()
+            } else {
+                Vec::new()
+            },
+            formations: if formations_open {
+                self.formation_rows()
+            } else {
+                Vec::new()
+            },
+        })
     }
 
     // ツリー表示（タブ見出し行とその配下のペイン行・cwd行）。アコーディオンでは
@@ -561,10 +675,11 @@ impl State {
     // 名簿はフラット形式で、メンバーの並びはツリー順（`formation_members`）
     fn formation_rows(&self) -> Vec<Row<'_>> {
         let mut rows = Vec::new();
-        for formation in &self.formations {
+        for (index, formation) in self.formations.iter().enumerate() {
             let members = self.formation_members(formation.id);
             rows.push(Row::FormationHeader {
                 formation,
+                index,
                 members: members.len(),
             });
             for entry in members {
@@ -600,34 +715,66 @@ impl State {
             return all;
         }
         let area = rows - frame;
+        // アコーディオンは一覧を1本で切り出さず、セクションごとに縦幅を配る（決定49）
+        if let Some(accordion) = self.accordion() {
+            return frame_around(self.accordion_content(accordion, area), area);
+        }
         let list_len = all.len() - frame;
         // 描画とクリックの逆引きで同じ位置を使う。State::scroll は描画時に
         // 寄せた値だが、そのあと一覧が縮んでいることもあるので clamp は掛け直す
         let scroll = reconcile_scroll(list_len, area, self.scroll, None);
-        let shown = rows_shown(list_len, area, scroll);
 
         // 上の枠 / 一覧 / 下の枠 の3つに割る（並びは visible_rows() が決めている）
         let bottom = all.split_off(FRAME_TOP + list_len);
         let list = all.split_off(FRAME_TOP);
         let mut screen = all;
-        if scroll > 0 {
-            screen.push(Row::Overflow {
-                hidden: scroll,
-                above: true,
-            });
-        }
-        screen.extend(list.into_iter().skip(scroll).take(shown));
-        let below = list_len.saturating_sub(scroll + shown);
-        if below > 0 {
-            screen.push(Row::Overflow {
-                hidden: below,
-                above: false,
-            });
-        }
+        screen.extend(fit_section(list, area, scroll));
         // 余った高さを空行で埋めてから下の枠を置く
         screen.resize_with(FRAME_TOP + area, || Row::Blank);
         screen.extend(bottom);
         screen
+    }
+
+    // アコーディオンの content 領域（決定49）。セクション見出し行2本と境界線を
+    // 常に確保したうえで、残りの縦幅を配ったぶんだけ各セクションの中身を出す
+    fn accordion_content<'a>(&'a self, accordion: Accordion<'a>, area: usize) -> Vec<Row<'a>> {
+        let budgets = accordion.budgets(
+            area,
+            self.highlighted_span(&accordion.tabs),
+            self.highlighted_span(&accordion.formations),
+        );
+        // スクロールを効かせない側は先頭から出す。clamp を掛け直すのは
+        // 一覧が縮んだあとの行き過ぎを直すため（枠1本の経路と同じ）
+        let scroll = |section, len, budget| {
+            if budgets.scrolled == section {
+                reconcile_scroll(len, budget, self.scroll, None)
+            } else {
+                0
+            }
+        };
+        let Accordion {
+            tabs_heading,
+            formations_heading,
+            tabs,
+            formations,
+        } = accordion;
+        let tabs_scroll = scroll(crate::Section::Tabs, tabs.len(), budgets.tabs);
+        let formations_scroll = scroll(
+            crate::Section::Formations,
+            formations.len(),
+            budgets.formations,
+        );
+        let mut rows = Vec::with_capacity(area);
+        rows.push(tabs_heading);
+        rows.extend(fit_section(tabs, budgets.tabs, tabs_scroll));
+        rows.push(Row::Divider);
+        rows.push(formations_heading);
+        rows.extend(fit_section(
+            formations,
+            budgets.formations,
+            formations_scroll,
+        ));
+        rows
     }
 
     // 光っている行（ツリー表示では選択、検索・トリアージではカーソル）が
@@ -677,19 +824,32 @@ impl State {
             return;
         }
         let frame = FRAME_TOP + FRAME_BOTTOM;
+        let area = rows.saturating_sub(frame);
         let (list_len, area, anchor) = {
-            let all = self.visible_rows();
-            let anchor = self.highlighted_span(&all).map(|(first, last)| {
-                (
-                    first.saturating_sub(FRAME_TOP),
-                    last.saturating_sub(FRAME_TOP),
-                )
-            });
-            (
-                all.len().saturating_sub(frame),
-                rows.saturating_sub(frame),
-                anchor,
-            )
+            // アコーディオンではスクロールを効かせる側だけで数える。screen_rows() と
+            // 同じ配分（決定49）を通さないと、寄せた位置と描画がずれる
+            if let Some(accordion) = self.accordion() {
+                let tabs_anchor = self.highlighted_span(&accordion.tabs);
+                let formations_anchor = self.highlighted_span(&accordion.formations);
+                let budgets = accordion.budgets(area, tabs_anchor, formations_anchor);
+                match budgets.scrolled {
+                    crate::Section::Tabs => (accordion.tabs.len(), budgets.tabs, tabs_anchor),
+                    crate::Section::Formations => (
+                        accordion.formations.len(),
+                        budgets.formations,
+                        formations_anchor,
+                    ),
+                }
+            } else {
+                let all = self.visible_rows();
+                let anchor = self.highlighted_span(&all).map(|(first, last)| {
+                    (
+                        first.saturating_sub(FRAME_TOP),
+                        last.saturating_sub(FRAME_TOP),
+                    )
+                });
+                (all.len().saturating_sub(frame), area, anchor)
+            }
         };
         self.scroll = reconcile_scroll(list_len, area, self.scroll, anchor);
     }
@@ -852,11 +1012,15 @@ impl State {
                         self.triage_row(entry, tab_name, is_highlighted, tab_column, mark, cols);
                     print_text_with_coordinates(row, 0, y, None, None);
                 }
-                Row::FormationHeader { formation, members } => {
+                Row::FormationHeader {
+                    formation,
+                    index,
+                    members,
+                } => {
                     let is_highlighted = self
                         .formation_row_is_highlighted(crate::FormationCursor::Header(formation.id));
                     print_text_with_coordinates(
-                        formation_heading(formation, members, is_highlighted, cols),
+                        formation_heading(formation, index, members, is_highlighted, cols),
                         0,
                         y,
                         None,
@@ -1643,7 +1807,8 @@ impl State {
 // 折りたたまれた側は `▸ formations (5)` の形。文言は他のUI文言と同じく
 // 英字・小文字（ui-design.md の「文言」）。
 //
-// 折りたたみ側を dim に落とすのは、いま読ませたいのが開いている側だから
+// 折りたたみ側を dim に落とすのは、いま読ませたいのが開いている側だから。
+// **マーカーもラベルと同じ開閉ルールに従う**（決定48。従来は常時dim固定だった）
 pub(crate) fn section_heading(
     section: crate::Section,
     open: bool,
@@ -1662,31 +1827,34 @@ pub(crate) fn section_heading(
     } else {
         format!(" ({})", count)
     };
+    let ink = if open { Ink::Plain } else { Ink::Muted };
     compose(
-        &[
-            (marker, Ink::Muted),
-            (label, if open { Ink::Plain } else { Ink::Muted }),
-            (count.as_str(), Ink::Muted),
-        ],
+        &[(marker, ink), (label, ink), (count.as_str(), Ink::Muted)],
         inner,
     )
 }
 
 // フォーメーション見出し行1行ぶんの Text（要件: formation-display-accordion）。
 //
-// セクション見出しの1段内側（x=2、ツリーのペイン行と同じ列）に置き、
-// `▾ 名前 (メンバー数)` の形で出す。メンバー数を先に確保して名前の側を畳むのは、
-// カウンタ列（決定22）と同じ折り合い方——名前が長くても「何人居る班か」は消えない。
+// **タブ見出し行と同じ x=0・同じ構造**（記号＋識別番号＋名前）に揃え、
+// `▾ 1 名前 (メンバー数)` の形で出す（決定48。従来は x=2 でカーソルバーを持って
+// いたが、TABS配下とFORMATIONS配下で階層の深さが違って見えた）。カーソルが乗る行
+// だが行頭2セルは予約せず、選択は帯だけで示す。
+//
+// メンバー数を先に確保して名前の側を畳むのは、カウンタ列（決定22）と同じ
+// 折り合い方——名前が長くても「何人居る班か」は消えない。
 //
 // 折りたたみと集約バッジは F5、アクセントカラーは F6 なので、三角は常に開いた向き
 pub(crate) fn formation_heading(
     formation: &Formation,
+    index: usize,
     members: usize,
     is_highlighted: bool,
     cols: usize,
 ) -> Text {
     let inner = content_cols(cols);
-    let head = format!("{}{} ", cursor_lead(is_highlighted), FORMATION_MARKER);
+    // 識別番号は一覧の並び順（現状は作成順）から振る（決定48）
+    let head = format!("{} {} ", FORMATION_MARKER, index + 1);
     let count = format!(" ({})", members);
     let budget = inner
         .saturating_sub(UnicodeWidthStr::width(head.as_str()))
@@ -1709,7 +1877,7 @@ pub(crate) fn formation_heading(
     };
     let mut text = compose(
         &[
-            (head.as_str(), subdued),
+            (head.as_str(), Ink::Plain),
             (name.as_str(), Ink::Plain),
             (count.as_str(), subdued),
             (pad.as_str(), Ink::Plain),
@@ -1717,7 +1885,8 @@ pub(crate) fn formation_heading(
         if is_highlighted { cols } else { inner },
     );
     if is_highlighted {
-        text = text.selected().opaque().color_range(2, 0..1);
+        // カーソルバーを持たない行なので、行頭に色を乗せず帯だけで示す（決定48）
+        text = text.selected().opaque();
     }
     text
 }
@@ -1961,8 +2130,9 @@ fn termination_prompt(marked: usize, budget: usize) -> String {
 
 // 境界線。chrome（ヘッダー・フッター）と content（ツリー）の境目を示す。
 // 最上部・ヘッダー下・フッター上の3本とも同じ見た目で引く（決定27）。
+// アコーディオンでは TABS/FORMATIONS ブロックの境目にも同じ線を引く（決定48）。
 //
-// サイドバーは borderless で運用していて自前の枠は引かないが、この3本だけは
+// サイドバーは borderless で運用していて自前の枠は引かないが、この4本だけは
 // 例外。領域を囲う枠ではなく境目を示す線なので許容する。
 // 右マージンは他の行と同じく空ける — 端まで引くと縁に貼り付いて見える
 pub(crate) fn divider_line(cols: usize) -> Text {
@@ -1984,6 +2154,47 @@ pub(crate) fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
     let label = format!("{} … {} more", marker, hidden);
     // 一覧の行そのものではないので、通知行と同じく落として出す
     compose(&[(&label, Ink::Muted)], content_cols(cols))
+}
+
+// content の行を枠で挟む（上: 境界線・ヘッダー・境界線 / 下: 境界線・フッター・
+// 余白）。content が短いぶんは空行で埋め、下の枠を最下部へ押し下げる
+fn frame_around<'a>(content: Vec<Row<'a>>, area: usize) -> Vec<Row<'a>> {
+    let mut screen = Vec::with_capacity(FRAME_TOP + area + FRAME_BOTTOM);
+    screen.push(Row::Divider);
+    screen.push(Row::Header);
+    screen.push(Row::Divider);
+    screen.extend(content);
+    screen.resize_with(FRAME_TOP + area, || Row::Blank);
+    screen.push(Row::Divider);
+    screen.push(Row::Footer);
+    screen.push(Row::Blank);
+    screen
+}
+
+// 一覧を割り当てられた縦幅 `budget` へ収める。隠れる行があれば上下端に
+// あふれマーカー行を足す（マーカー行も1行を消費するので、戻る行数は budget 以下）
+fn fit_section<'a>(rows: Vec<Row<'a>>, budget: usize, scroll: usize) -> Vec<Row<'a>> {
+    if budget == 0 {
+        return Vec::new();
+    }
+    let len = rows.len();
+    let shown = rows_shown(len, budget, scroll);
+    let mut fitted = Vec::with_capacity(budget);
+    if scroll > 0 {
+        fitted.push(Row::Overflow {
+            hidden: scroll,
+            above: true,
+        });
+    }
+    fitted.extend(rows.into_iter().skip(scroll).take(shown));
+    let below = len.saturating_sub(scroll + shown);
+    if below > 0 {
+        fitted.push(Row::Overflow {
+            hidden: below,
+            above: false,
+        });
+    }
+    fitted
 }
 
 // スクロール位置 `scroll` のとき、一覧を何行ぶん画面に出せるか。

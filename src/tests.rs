@@ -6975,12 +6975,18 @@ fn the_roster_is_flat_and_notes_the_tab_of_each_member() {
         .iter()
         .position(|r| matches!(r, Row::FormationHeader { .. }))
         .expect("見出し行が無い");
-    let Row::FormationHeader { formation, members } = &rows[heading] else {
+    let Row::FormationHeader {
+        formation,
+        index,
+        members,
+    } = &rows[heading]
+    else {
         unreachable!()
     };
+    // タブ見出し行と同じ x=0・同じ構造（記号＋識別番号＋名前）（決定48）
     assert_eq!(
-        formation_heading(formation, *members, false, SIDEBAR).content(),
-        "  ▾ alpha (2)"
+        formation_heading(formation, *index, *members, false, SIDEBAR).content(),
+        "▾ 1 alpha (2)"
     );
     // メンバーは元のタブ位置に関わらず平坦に並び、各行に所属タブ名が付く
     let rosters: Vec<(&str, &str)> = rows
@@ -7052,7 +7058,11 @@ fn an_empty_formation_still_shows_its_heading() {
     state.handle_nav_key(key(BareKey::Tab));
 
     let rows = content_rows_of(&state);
-    let Some(Row::FormationHeader { formation, members }) = rows
+    let Some(Row::FormationHeader {
+        formation,
+        index,
+        members,
+    }) = rows
         .iter()
         .find(|r| matches!(r, Row::FormationHeader { .. }))
     else {
@@ -7060,8 +7070,8 @@ fn an_empty_formation_still_shows_its_heading() {
     };
     assert_eq!(*members, 0);
     assert_eq!(
-        formation_heading(formation, *members, false, SIDEBAR).content(),
-        "  ▾ alpha (0)"
+        formation_heading(formation, *index, *members, false, SIDEBAR).content(),
+        "▾ 1 alpha (0)"
     );
 }
 
@@ -7232,6 +7242,257 @@ fn the_section_heading_folds_with_a_count() {
         section_heading(crate::Section::Formations, false, 5, SIDEBAR).content(),
         "▸ formations (5)"
     );
+}
+
+#[test]
+fn the_section_heading_marker_follows_the_open_state() {
+    // マーカーもラベルと同じ開閉ルールに従う（決定48。従来は常時dim固定だった）
+    let open = section_heading(crate::Section::Tabs, true, 7, SIDEBAR);
+    assert!(
+        ink_at(&open, DIM_LEVEL).is_empty(),
+        "開いている側はマーカーも通常色: {:?}",
+        ink_at(&open, DIM_LEVEL)
+    );
+    let folded = section_heading(crate::Section::Formations, false, 5, SIDEBAR);
+    assert_eq!(
+        ink_at(&folded, DIM_LEVEL),
+        (0.."▸ formations (5)".chars().count()).collect::<Vec<_>>(),
+        "折りたたみ側はマーカーまで dim"
+    );
+}
+
+#[test]
+fn a_divider_separates_the_two_blocks() {
+    // TABSブロックとFORMATIONSブロックのあいだに境界線を1本引く（決定48）
+    let mut state = formation_state(2);
+    create_formation(&mut state, "alpha");
+
+    let rows = content_rows_of(&state);
+    let formations = rows
+        .iter()
+        .position(|r| {
+            matches!(
+                r,
+                Row::Section {
+                    section: crate::Section::Formations,
+                    ..
+                }
+            )
+        })
+        .expect("FORMATIONS見出しが無い");
+    assert!(
+        matches!(rows[formations - 1], Row::Divider),
+        "FORMATIONS見出しの直前は境界線"
+    );
+    // フォーメーションが1件も無いあいだは足さない（セクションごと出ないため）
+    let plain = formation_state(2);
+    assert!(!content_rows_of(&plain)
+        .iter()
+        .any(|r| matches!(r, Row::Divider)));
+}
+
+#[test]
+fn the_formation_heading_lines_up_with_the_tab_heading() {
+    // 記号＋識別番号＋名前という構造も列もタブ見出し行に揃える（決定48）
+    let mut state = formation_state(2);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.clear_marks();
+    state.marked.extend([2]);
+    create_formation(&mut state, "bravo");
+    state.handle_nav_key(key(BareKey::Tab));
+
+    let rows = content_rows_of(&state);
+    let headings: Vec<String> = rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::FormationHeader {
+                formation,
+                index,
+                members,
+            } => Some(
+                formation_heading(formation, *index, *members, false, SIDEBAR)
+                    .content()
+                    .to_string(),
+            ),
+            _ => None,
+        })
+        .collect();
+    // 識別番号は一覧の並び順（現状は作成順）から振る
+    assert_eq!(headings, vec!["▾ 1 alpha (1)", "▾ 2 bravo (1)"]);
+    // タブ見出し行と同じ列から始まる（どちらも x=0）
+    let tab = state.tab_heading(&state.tabs[0].clone(), SIDEBAR);
+    assert_eq!(
+        tab.content().chars().next().map(|c| c == '▾'),
+        headings[0].chars().next().map(|c| c == '▾')
+    );
+}
+
+#[test]
+fn the_roster_row_lines_up_with_the_pane_row() {
+    // 司令が1人も居ないフレームでは司令列そのものが消え、名簿行はペイン行と
+    // 全く同じ列に並ぶ（決定48）
+    let mut state = formation_state(2);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    state.clear_marks();
+    state.handle_nav_key(key(BareKey::Tab));
+
+    let screen = state.screen_rows(24);
+    assert!(
+        !state.commander_column(&screen),
+        "司令が居なければ司令列は出ない"
+    );
+    let entry = state
+        .selectable
+        .iter()
+        .find(|e| e.pane_id == 1)
+        .expect("ペインが無い");
+    let pane = state.pane_row(
+        entry,
+        false,
+        None,
+        CounterColumn::default(),
+        HeadCells {
+            number: None,
+            mark: None,
+        },
+        SIDEBAR,
+    );
+    let roster = state.roster_row(
+        entry,
+        "tab1",
+        RosterCells {
+            commander: None,
+            mark: None,
+            highlighted: false,
+        },
+        4,
+        SIDEBAR,
+    );
+    let name_column = |line: &str| line.chars().position(|c| c == 'p');
+    assert_eq!(
+        name_column(pane.content()),
+        name_column(roster.content()),
+        "ペイン行 {:?} と名簿行 {:?} で桁が違う",
+        pane.content(),
+        roster.content()
+    );
+}
+
+// アコーディオンの画面から、各セクションの中身の行範囲を取り出す。
+// 目印は常に確保される見出し行2本とブロック間の境界線（決定48・49）
+fn accordion_parts(screen: &[Row<'_>]) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
+    let heading = |section| {
+        screen
+            .iter()
+            .position(move |r| matches!(r, Row::Section { section: s, .. } if *s == section))
+    };
+    let tabs = heading(crate::Section::Tabs).expect("TABS見出しが無い");
+    let formations = heading(crate::Section::Formations).expect("FORMATIONS見出しが無い");
+    assert!(
+        matches!(screen[formations - 1], Row::Divider),
+        "ブロック間の境界線が無い"
+    );
+    // 中身のあとは埋め草の空行か下の枠の境界線
+    let tail = screen[formations + 1..]
+        .iter()
+        .position(|r| matches!(r, Row::Blank | Row::Divider))
+        .map(|i| formations + 1 + i)
+        .unwrap_or(screen.len());
+    (tabs + 1..formations - 1, formations + 1..tail)
+}
+
+fn has_overflow(rows: &[Row<'_>]) -> bool {
+    rows.iter().any(|r| matches!(r, Row::Overflow { .. }))
+}
+
+#[test]
+fn the_folded_section_heading_survives_an_overflow() {
+    // TABSだけを開いてタブが多くても、折りたたんだFORMATIONSの見出し行は
+    // 表示範囲から常に確保する（決定49。以前は画面外へ押し出せた）
+    let mut state = formation_state(20);
+    state.marked.extend([1]);
+    create_formation(&mut state, "alpha");
+    const ROWS: usize = 12;
+    state.reconcile_viewport(ROWS);
+
+    let screen = state.screen_rows(ROWS);
+    assert_eq!(screen.len(), ROWS, "枠の高さは画面高ぴったり");
+    let (tabs, formations) = accordion_parts(&screen);
+    assert!(
+        has_overflow(&screen[tabs]),
+        "TABSの中身はあふれマーカーで示す"
+    );
+    assert!(formations.is_empty(), "折りたたみ側の中身は出ない");
+    assert!(matches!(
+        screen[formations.start - 1],
+        Row::Section {
+            section: crate::Section::Formations,
+            open: false,
+            ..
+        }
+    ));
+}
+
+// split（両セクション展開）であふれ配分を見るための状態。
+// TABSの中身は9行（タブ見出し1 + ペイン8）、FORMATIONSの中身は6行（見出し1 + 名簿5）
+fn split_accordion_state() -> State {
+    let mut state = formation_state(8);
+    state.marked.extend([1, 2, 3, 4, 5]);
+    create_formation(&mut state, "alpha");
+    state.handle_nav_key(key(BareKey::Char('s')));
+    assert!(state.split);
+    state
+}
+
+#[test]
+fn the_split_shows_both_sections_in_full_when_they_fit() {
+    // ①合算しても収まるなら両方フル表示（決定49）
+    let mut state = split_accordion_state();
+    const ROWS: usize = 24;
+    state.reconcile_viewport(ROWS);
+
+    let screen = state.screen_rows(ROWS);
+    let (tabs, formations) = accordion_parts(&screen);
+    assert_eq!(tabs.len(), 9);
+    assert_eq!(formations.len(), 6);
+    assert!(!has_overflow(&screen), "あふれマーカーは出ない");
+}
+
+#[test]
+fn the_split_gives_the_rest_to_the_bigger_section() {
+    // ②少ない方だけなら収まるなら、少ない方をフル表示して残りを多い方へ（決定49）
+    let mut state = split_accordion_state();
+    const ROWS: usize = 19;
+    state.reconcile_viewport(ROWS);
+
+    let screen = state.screen_rows(ROWS);
+    let (tabs, formations) = accordion_parts(&screen);
+    assert_eq!(formations.len(), 6, "少ない方はフル表示");
+    assert!(!has_overflow(&screen[formations]));
+    assert_eq!(tabs.len(), 4, "多い方は残りの縦幅に収める");
+    assert!(
+        has_overflow(&screen[tabs]),
+        "多い方だけがあふれマーカー付き"
+    );
+}
+
+#[test]
+fn the_split_halves_the_viewport_when_both_overflow() {
+    // ③少ない方だけでも収まらないなら半分ずつに割る（決定49）
+    let mut state = split_accordion_state();
+    const ROWS: usize = 14;
+    state.reconcile_viewport(ROWS);
+
+    let screen = state.screen_rows(ROWS);
+    let (tabs, formations) = accordion_parts(&screen);
+    // 表示範囲8行のうち見出し2本と境界線で3行、残り5行を3対2で割る
+    //（端数は多い方へ回す）
+    assert_eq!(tabs.len(), 3);
+    assert_eq!(formations.len(), 2);
+    assert!(has_overflow(&screen[tabs]), "両方があふれマーカー付き");
+    assert!(has_overflow(&screen[formations]));
 }
 
 #[test]
