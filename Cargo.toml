@@ -9,6 +9,8 @@ keywords = ["zellij", "terminal", "multiplexer", "tui", "ai-agent"]
 categories = ["wasm", "development-tools", "visualization"]
 
 [dependencies]
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+toml = { version = "1.1.4", default-features = false, features = ["parse", "display", "serde", "std"] }
 unicode-width = "0.2.2"
 zellij-tile = "0.44.3"
 

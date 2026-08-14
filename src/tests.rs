@@ -19,6 +19,10 @@ use crate::command::{CommandState, PaneStatus};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::formation::FormationPrompt;
+use crate::persistence::{
+    descend, guest_path, next_ancestor, reconcile, store_dir, tmp_rel, valid_internal_id,
+    validate_index, SessionEntry, SessionIndex,
+};
 use crate::render::{
     cwd_row, divider_line, formation_heading, overflow_row, reconcile_scroll, section_heading,
     CounterColumn, HeadCells, HelpRow, RosterCells, Row, NO_AGENT_ICON, NO_AGENT_LABEL,
@@ -28,6 +32,7 @@ use crate::width::{
     fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate, truncate_start,
 };
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 // zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
 // ホスト向けにリンクするにはこのシンボルを埋めてやる必要がある。
@@ -7642,4 +7647,269 @@ fn the_help_overlay_lists_the_formation_keys() {
     for expected in ["a x", "R", "c"] {
         assert!(keys.contains(&expected), "{} が無い: {:?}", expected, keys);
     }
+}
+
+// --- 永続化基盤（要件: docs/requirements/persistence/。F3） ---
+//
+// ホスト関数を跨ぐ側（`/host` の付け替え・実際の読み書き）はここでは検証できない
+// （wasm ランタイムが要る）。純粋ロジックだけをここで守り、残りは実機確認へ回す
+
+fn env_of(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+}
+
+fn index_of(entries: &[(&str, &str, u64)]) -> SessionIndex {
+    SessionIndex {
+        sessions: entries
+            .iter()
+            .map(|(id, name, last_seen)| SessionEntry {
+                id: id.to_string(),
+                name: name.to_string(),
+                last_seen: *last_seen,
+            })
+            .collect(),
+        ..SessionIndex::empty()
+    }
+}
+
+#[test]
+fn the_store_lives_under_xdg_config_home() {
+    let env = env_of(&[
+        ("XDG_CONFIG_HOME", "/Users/example/.config"),
+        ("HOME", "/Users/example"),
+    ]);
+    assert_eq!(
+        store_dir(&env),
+        Some(PathBuf::from("/Users/example/.config/fujin"))
+    );
+}
+
+#[test]
+fn without_xdg_config_home_the_store_falls_back_to_the_home_directory() {
+    let env = env_of(&[("HOME", "/Users/example")]);
+    assert_eq!(
+        store_dir(&env),
+        Some(PathBuf::from("/Users/example/.config/fujin"))
+    );
+}
+
+#[test]
+fn a_relative_config_home_is_treated_as_unset() {
+    let env = env_of(&[("XDG_CONFIG_HOME", ".config"), ("HOME", "/Users/example")]);
+    assert_eq!(
+        store_dir(&env),
+        Some(PathBuf::from("/Users/example/.config/fujin")),
+        "相対パスは未設定と同じに倒す"
+    );
+    assert_eq!(store_dir(&env_of(&[("HOME", "example")])), None);
+    assert_eq!(store_dir(&env_of(&[])), None);
+}
+
+#[test]
+fn a_failed_open_walks_up_one_ancestor_at_a_time() {
+    let target = Path::new("/Users/example/.config/fujin");
+    assert_eq!(
+        next_ancestor(target, target),
+        Some(PathBuf::from("/Users/example/.config"))
+    );
+    assert_eq!(
+        next_ancestor(target, Path::new("/Users/example/.config")),
+        Some(PathBuf::from("/Users/example"))
+    );
+    assert_eq!(
+        next_ancestor(target, Path::new("/Users")),
+        None,
+        "遡りすぎたら諦める"
+    );
+}
+
+#[test]
+fn reaching_an_ancestor_digs_the_rest_of_the_path() {
+    let target = Path::new("/Users/example/.config/fujin");
+    assert_eq!(
+        descend(target, Path::new("/Users/example/.config")),
+        Some(PathBuf::from("/host/fujin"))
+    );
+    assert_eq!(
+        descend(target, Path::new("/Users/example")),
+        Some(PathBuf::from("/host/.config/fujin"))
+    );
+    assert_eq!(
+        descend(target, target),
+        None,
+        "目的地に居るなら掘るものが無い"
+    );
+}
+
+#[test]
+fn writes_outside_the_store_are_refused() {
+    assert_eq!(
+        guest_path("session_index.toml"),
+        Some(PathBuf::from("/host/session_index.toml"))
+    );
+    assert_eq!(
+        guest_path("sessions/1/formations.toml"),
+        Some(PathBuf::from("/host/sessions/1/formations.toml"))
+    );
+    for outside in [
+        "../escape.toml",
+        "sessions/../../escape.toml",
+        "/etc/hosts",
+        "",
+    ] {
+        assert!(guest_path(outside).is_none(), "{} を弾いていない", outside);
+    }
+}
+
+#[test]
+fn temporary_files_are_kept_apart_per_instance() {
+    let tmp = tmp_rel("sessions/1/formations.toml", 7, "fujin-dev");
+    assert!(
+        tmp.starts_with("sessions/.tmp/") && tmp.ends_with("-7-sessions_1_formations.toml"),
+        "一時ファイルの置き場と形が違う: {}",
+        tmp
+    );
+    assert_ne!(
+        tmp_rel("session_index.toml", 1, "fujin-dev"),
+        tmp_rel("session_index.toml", 2, "fujin-dev"),
+        "兄弟インスタンスの一時ファイルが混ざらない"
+    );
+    // プラグインIDはzellijサーバ（=セッション）ごとに振り直されるので、
+    // 同じIDでもセッションが違えば一時ファイルは別になる
+    assert_ne!(
+        tmp_rel("session_index.toml", 1, "fujin-dev"),
+        tmp_rel("session_index.toml", 1, "another"),
+        "別セッションの同一プラグインIDと混ざらない"
+    );
+    assert!(
+        guest_path(&tmp_rel("session_index.toml", 1, "名前/../に何が来ても")).is_some(),
+        "セッション名はハッシュに畳むので guest パスとして常に安全"
+    );
+}
+
+#[test]
+fn internal_ids_stay_usable_as_a_directory_name() {
+    assert!(valid_internal_id("1") && valid_internal_id("42"));
+    for bad in ["", "..", "a1", "1/2", "1 ", "1234567890123"] {
+        assert!(!valid_internal_id(bad), "{:?} を通している", bad);
+    }
+}
+
+#[test]
+fn an_index_with_an_unknown_version_is_not_read() {
+    let mut index = index_of(&[("1", "fujin-dev", 100)]);
+    index.version = 99;
+    assert_eq!(validate_index(index), None);
+}
+
+#[test]
+fn an_index_with_an_unusable_internal_id_is_not_read() {
+    let index = index_of(&[("../escape", "fujin-dev", 100)]);
+    assert_eq!(validate_index(index), None);
+}
+
+#[test]
+fn an_index_with_an_empty_or_control_laden_name_is_not_read() {
+    assert_eq!(validate_index(index_of(&[("1", "", 100)])), None);
+    assert_eq!(validate_index(index_of(&[("1", "fujin\0dev", 100)])), None);
+}
+
+#[test]
+fn an_id_at_the_length_cap_does_not_poison_the_index() {
+    // 12桁上限のIDに +1 すると13桁になり、自分の書いた索引を次回の読み込みが
+    // 丸ごと弾いてしまう。上限のIDは連番の種として使わない
+    let index = index_of(&[("1", "other", 100), ("999999999999", "big", 100)]);
+    let (next, id) = reconcile(&index, "fujin-dev", None, 500);
+    assert!(valid_internal_id(&id), "発行したID {} が索引を壊す", id);
+    assert_eq!(id, "2");
+    let next = next.expect("索引へ書き足す");
+    assert_eq!(
+        validate_index(next.clone()),
+        Some(next),
+        "書く索引は読める索引"
+    );
+}
+
+#[test]
+fn a_well_formed_index_survives_a_round_trip_through_toml() {
+    let index = index_of(&[("1", "fujin-dev", 100), ("2", "別のセッション", 200)]);
+    let raw = toml::to_string(&index).expect("シリアライズできる");
+    let read: SessionIndex = toml::from_str(&raw).expect("読み戻せる");
+    assert_eq!(validate_index(read), Some(index));
+}
+
+#[test]
+fn a_broken_index_file_is_not_read() {
+    // TOMLとして壊れている / 型が一致しない / 必須フィールドの欠落
+    for raw in [
+        "version = 1\n[[sessions]\n",
+        "version = \"one\"\n",
+        "revision = 3\n",
+    ] {
+        assert!(
+            toml::from_str::<SessionIndex>(raw).is_err(),
+            "{:?} を読めてしまう",
+            raw
+        );
+    }
+}
+
+#[test]
+fn a_new_session_gets_a_fresh_internal_id() {
+    let (next, id) = reconcile(&SessionIndex::empty(), "fujin-dev", None, 100);
+    assert_eq!(id, "1");
+    let next = next.expect("索引へ書き足す");
+    assert_eq!(
+        next.sessions,
+        vec![SessionEntry {
+            id: "1".to_string(),
+            name: "fujin-dev".to_string(),
+            last_seen: 100,
+        }]
+    );
+}
+
+#[test]
+fn a_session_recreated_with_the_same_name_reuses_its_internal_id() {
+    let index = index_of(&[("1", "fujin-dev", 100), ("2", "other", 100)]);
+    let (next, id) = reconcile(&index, "fujin-dev", None, 500);
+    assert_eq!(id, "1", "同名のエントリの内部IDを再利用する");
+    let next = next.expect("最終確認時刻の更新が要る");
+    assert_eq!(next.sessions.len(), 2, "ディレクトリは増えない");
+    assert_eq!(next.sessions[0].last_seen, 500);
+}
+
+#[test]
+fn renaming_a_session_only_rewrites_the_name_in_the_index() {
+    let index = index_of(&[("1", "fujin-dev", 100)]);
+    let (next, id) = reconcile(&index, "renamed", Some("1"), 500);
+    assert_eq!(id, "1", "内部IDは変わらない（ディレクトリを動かさない）");
+    let next = next.expect("索引を書き換える");
+    assert_eq!(next.sessions[0].name, "renamed");
+    assert_eq!(
+        next.sessions[0].last_seen, 100,
+        "最終確認時刻は起動時にだけ更新する"
+    );
+}
+
+#[test]
+fn an_unchanged_session_name_does_not_rewrite_the_index() {
+    let index = index_of(&[("1", "fujin-dev", 100)]);
+    let (next, id) = reconcile(&index, "fujin-dev", Some("1"), 500);
+    assert_eq!((next, id), (None, "1".to_string()));
+}
+
+#[test]
+fn an_entry_deleted_by_hand_is_written_back_under_the_same_internal_id() {
+    let index = index_of(&[("2", "other", 100)]);
+    let (next, id) = reconcile(&index, "fujin-dev", Some("1"), 500);
+    assert_eq!(id, "1");
+    let next = next.expect("索引へ書き戻す");
+    assert!(next
+        .sessions
+        .iter()
+        .any(|entry| entry.id == "1" && entry.name == "fujin-dev"));
 }

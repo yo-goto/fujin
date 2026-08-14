@@ -20,6 +20,7 @@
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
 // - mark   — 複数選択（マーク。決定39）の集合と、その配布
 // - formation — フォーメーション（複数ペインのグルーピング）の定義・割り当てと編集操作
+// - persistence — 状態のディスク永続化（決定44）とセッション索引
 // - preview — プレビュー（決定42。選択行のペインの内容を覗き見る）
 // - termination — 終了操作サブモード（対象ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
@@ -35,6 +36,7 @@ mod deploy;
 mod formation;
 mod mark;
 mod nav;
+mod persistence;
 mod preview;
 mod render;
 mod search;
@@ -57,6 +59,7 @@ use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
 use formation::{Formation, FormationCursor, FormationPrompt, Section};
 use nav::{JumpState, SearchState};
+use persistence::Store;
 use preview::{PreviewContent, PreviewState};
 use termination::TerminationState;
 use triage::TriageState;
@@ -163,6 +166,14 @@ struct State {
     // FORMATIONSセクションのカーソル。ツリー側の選択（`selected`）と違って
     // 行種を持つ（見出し行にも乗る）。実効値は `State::formation_cursor()`
     formation_cursor: Option<FormationCursor>,
+    // 永続化ディレクトリの開き具合（要件: persistence。F3）。`/host` の向け先を
+    // 付け替えたうえで、その配下だけを読み書きする（persistence.rs 冒頭）
+    store: Store,
+    // このセッションの内部ID。セッション索引から引くか、無ければ新規に発行する
+    session_id: Option<String>,
+    // 直近に観測したセッション名。`SessionUpdate` の差分検知に使う（届くたびに
+    // 索引を書き換えないため）
+    session_name: Option<String>,
     visible: bool,
     own_plugin_id: Option<u32>,
     // 自分のwasm URL。実行時に判明する（同期の宛先・召喚の起動元に使う）
@@ -286,6 +297,11 @@ impl ZellijPlugin for State {
             // プレビューのスナップショット取得（決定42）。拒否されてもパニック
             // せず「取れなかった」扱い（preview::UNAVAILABLE）に落ちる
             PermissionType::ReadPaneContents,
+            // 永続化（決定44）。これが解禁するのは任意パスへの書き込みではなく
+            // `/host` の向け先を変える `change_host_folder()`（persistence.rs 冒頭）
+            PermissionType::FullHdAccess,
+            // 保存先を決めるための `$XDG_CONFIG_HOME` / `$HOME`（決定44）
+            PermissionType::ReadSessionEnvironmentVariables,
         ]);
         subscribe(&[
             EventType::TabUpdate,
@@ -300,6 +316,12 @@ impl ZellijPlugin for State {
             EventType::Timer,
             // プラグイン終了・リロード時に横取りを解除する保険
             EventType::BeforeClose,
+            // セッションのリネーム追従（要件: persistence-session-scope）。
+            // 新規 permission は要らない（`ReadApplicationState` で足りる）
+            EventType::SessionUpdate,
+            // 永続化ディレクトリを開く手順の応答（persistence.rs 冒頭）
+            EventType::HostFolderChanged,
+            EventType::FailedToChangeHostFolder,
         ]);
         // 注意: set_selectable(false) はここでは呼ばない。呼ぶと権限承認
         // プロンプトにフォーカスできず承認不能になる。
@@ -334,6 +356,10 @@ impl ZellijPlugin for State {
                     // 承認を待たずに一覧が揃うと入場の機会がここしか無い
                     self.learn_own_plugin_url();
                     self.enter_nav_mode_if_pending();
+                    // 永続化ディレクトリを開き始める（要件: persistence）。承認が
+                    // 済んでから呼ぶ — 環境変数の取得は権限が要り、未承認だと
+                    // shim 側の unwrap でプラグインごと落ちる
+                    self.open_store();
                     // 警告の時計はここから回す（決定40）。承認が済むまでフッターは
                     // 描かれないので、load() から数えると見られないまま期限が切れる
                     self.arm_config_warning();
@@ -376,6 +402,11 @@ impl ZellijPlugin for State {
                 self.enter_nav_mode_if_pending();
                 true
             }
+            // セッションのリネーム追従（要件: persistence-session-scope）。
+            // 復元可能セッションの一覧は掃除（F4）で使う
+            Event::SessionUpdate(sessions, _resurrectable) => self.handle_session_update(&sessions),
+            Event::HostFolderChanged(path) => self.on_host_folder_changed(path),
+            Event::FailedToChangeHostFolder(_) => self.on_host_folder_failed(),
             Event::BeforeClose => {
                 // 横取りしたままプラグインが消えるとキー入力が戻らなくなる。
                 // exit_nav_mode() は使わない — 閉じられている最中に自分を
