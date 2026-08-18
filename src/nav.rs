@@ -23,7 +23,7 @@ pub(crate) struct JumpState {
 }
 
 // 検索サブモードの2状態（決定202608131200。要件:
-// docs/requirements/search-explorer/search-mode-key-handling.feature）。
+// features/search-explorer/search-mode-key-handling.feature）。
 // vim の挿入/ノーマルに相当する分割で、`?` のクエリ入力と `j`/`k` 移動を両立させる
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SearchPhase {

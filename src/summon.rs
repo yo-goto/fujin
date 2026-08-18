@@ -135,7 +135,7 @@ impl State {
     }
 
     // 自分がフローティングで起動されていたら、召喚インスタンスとして自覚する
-    //（要件: docs/requirements/summon/cold-start.feature）。
+    //（要件: features/summon/cold-start.feature）。
     //
     // セッションに fujin が1つも居ないと、入場pipe（`MessagePlugin`）の宛先が
     // 存在せず **zellij 自身がプラグインを起動する**。キーバインドに
