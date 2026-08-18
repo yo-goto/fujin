@@ -12,6 +12,12 @@
 // `wasm_bridge.rs:1897 Failed to load plugin` が出て、実セッションなら
 // タブを作るたびに迷子のサイドバーペインが増えるところだった。
 // 宛先をプラグインIDで直接指定すれば起動は起こらない。
+//
+// ただし押し付けだけでは届かない（docs/issues/tab-switch-agent-status-desync.md）。
+// 新しいタブができた瞬間は**新入りが可視・既存が全員非可視**なので、押し付けの
+// 起点である `PaneUpdate` が既存側で発火しない。そこで新入りは自分が兄弟を
+// 見つけた時点で**状態ダンプを要求する**（宛先はプラグインID指定なので上記の
+// 起動事故は起きない。幅で先に同じ穴を埋めた `WIDTH_REQUEST` と同じ形）。
 
 use std::collections::BTreeSet;
 
@@ -37,6 +43,10 @@ const WIDTH_TOLERANCE: usize = 1;
 // 幅の目標を教えてほしいという問い合わせ。桁数と同じ pipe に相乗りさせる
 //（桁数は数値なので、数値にならない文字列とは取り違えない）
 const WIDTH_REQUEST: &str = "?";
+
+// 状態ダンプを教えてほしいという新入りからの問い合わせ。ダンプと同じ pipe に
+// 相乗りさせる（ダンプの各行は必ずペインID＋タブ区切りで始まるので取り違えない）
+const STATE_REQUEST: &str = "?";
 
 // 指定インスタンスへ pipe を1本送る。宛先は必ずプラグインIDで指定する —
 // URL指定（`with_plugin_url`）は配送ではなく**新しいプラグインの起動**になる
@@ -106,8 +116,6 @@ impl State {
         changed
     }
 
-    // fujin_sync_state の受け口。空のときだけ取り込む — 既に自前の状態を
-    // 持っているなら、古いダンプで上書きしてしまわないよう無視する
     // 既知の兄弟インスタンス全員へ同じ payload を配る（決定202608012141）。
     // 配信ループはここ1本に集約し、pipe ごとに再実装しない
     pub(crate) fn broadcast_to_siblings(&self, pipe: &str, payload: &str) {
@@ -116,15 +124,23 @@ impl State {
         }
     }
 
-    pub(crate) fn handle_sync_state_pipe(&mut self, payload: Option<&str>) -> bool {
-        if !self.agents.is_empty() {
-            return false;
-        }
+    // fujin_sync_state の受け口。payload が `?` のときは「状態を教えてほしい」と
+    // いう新入りからの問い合わせで、それ以外はダンプ本体
+    pub(crate) fn handle_sync_state_pipe(
+        &mut self,
+        payload: Option<&str>,
+        source: &PipeSource,
+    ) -> bool {
         let Some(raw) = payload else {
             return false;
         };
-        self.apply_state_dump(raw);
-        true
+        if raw.trim() == STATE_REQUEST {
+            if let PipeSource::Plugin(asker) = source {
+                self.push_state_to(*asker);
+            }
+            return false;
+        }
+        self.apply_state_dump(raw)
     }
 
     // 自分のwasm URLを知る（get_plugin_ids() には入っていない）
@@ -183,6 +199,15 @@ impl State {
         if self.width_target.is_none() {
             self.broadcast_to_siblings(WIDTH_PIPE, WIDTH_REQUEST);
         }
+        // エージェント状態も同じ理由で取りに行く（docs/issues/tab-switch-agent-status-desync.md）。
+        // 幅と違って「まだ知らない」を持ち物から判定できない — 自分が生まれた後に
+        // 飛んできたフック通知で `agents` が1件埋まっているだけでも、それ以前から
+        // 座っているペインの状態は欠けたままなので、空かどうかでは分岐できない。
+        // 兄弟を初めて見つけた1回だけ要求する（以降の変化はフックが全員に届く）
+        if !self.state_requested {
+            self.state_requested = true;
+            self.broadcast_to_siblings(SYNC_STATE_PIPE, STATE_REQUEST);
+        }
         let dump = (!self.agents.is_empty()).then(|| self.state_dump());
         // コマンド状態も一緒に配る（決定202608072218）。導出できるのは PaneUpdate が届く
         // このインスタンスだけなので、新入りは押し付けられない限り一生知らない
@@ -208,6 +233,15 @@ impl State {
                 send_to_plugin(id, COMMAND_STATE_PIPE, commands.clone());
             }
         }
+    }
+
+    // 状態ダンプを要求してきた兄弟へ送り返す。空のときは送らない — 受け手は
+    // 知らないペインを埋めるだけなので、空の payload は何も起こさない
+    fn push_state_to(&self, plugin_id: u32) {
+        if self.agents.is_empty() {
+            return;
+        }
+        send_to_plugin(plugin_id, SYNC_STATE_PIPE, self.state_dump());
     }
 
     // 新入りへ cwd表示の現在値を伝える（docs/issues/toggle-cwd-key.md）。
@@ -249,7 +283,15 @@ impl State {
         out
     }
 
-    pub(crate) fn apply_state_dump(&mut self, raw: &str) {
+    // 配られた状態ダンプを取り込む。戻り値は再描画するか。
+    //
+    // **自分が持っていないペインだけを埋める**（docs/issues/tab-switch-agent-status-desync.md）。
+    // 以前は「自分の `agents` が空のときだけ丸ごと取り込む」全か無かで、1件でも
+    // 自前の登録があると欠けたまま直らなかった。逆に既にある登録を上書きしないのは、
+    // フック通知は全インスタンスへ届く＝登録さえあれば中身は揃っているためで、
+    // 上書きは既読クリア（決定202607302302）を取り消す方向にしか効かない
+    pub(crate) fn apply_state_dump(&mut self, raw: &str) -> bool {
+        let mut filled = 0usize;
         for line in raw.lines() {
             let mut fields = line.split('\t');
             let (Some(pane_id), Some(state), Some(subagents), Some(open_tasks), Some(agent)) = (
@@ -270,6 +312,10 @@ impl State {
             // 自分のカウンタを配られた最大値まで進めておく。以降に自分が振る
             // 番号が取り込んだものより古くなると、順序が逆転する
             self.state_seq = self.state_seq.max(state_change_seq);
+            if self.agents.contains_key(&pane_id) {
+                continue;
+            }
+            filled += 1;
             self.agents.insert(
                 pane_id,
                 AgentInfo {
@@ -286,10 +332,19 @@ impl State {
                 self.pane_cwds.insert(pane_id, cwd.to_string());
             }
         }
-        // 既に閉じたペインの状態が混ざらないようにする
-        self.prune_stale_agents();
-        // 起動ごとに高々1回。食い違いを追うときの手がかりになるので残す
-        eprintln!("fujin: synced {} agents from peer", self.agents.len());
+        if filled == 0 {
+            return false;
+        }
+        // 既に閉じたペインの状態が混ざらないようにする。**自分が可視のときだけ**
+        // — 非可視インスタンスの `PaneManifest` は凍っている（`docs/dev/api-reference.md`
+        // の配送表）ので、そこで間引くと配られたばかりの状態を「知らないペイン」
+        // として捨ててしまう。取りこぼした掃除は次の `PaneUpdate` が済ませる
+        if self.visible {
+            self.prune_stale_agents();
+        }
+        // 食い違いを追うときの手がかりになるので残す
+        eprintln!("fujin: synced {} agents from peer", filled);
+        true
     }
 
     // --- サイドバー幅のタブ間追従（docs/issues/sidebar-width-persist-across-tabs.md） ---

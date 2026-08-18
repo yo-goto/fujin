@@ -180,6 +180,10 @@ struct State {
     selection_at_nav_exit: Option<u32>,
     // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
     known_siblings: BTreeSet<u32>,
+    // 兄弟へ状態ダンプを要求済みか（docs/issues/tab-switch-agent-status-desync.md）。
+    // 押し付けだけでは新しいタブが取りこぼすので、兄弟を初めて見つけた1回だけ
+    // こちらから取りに行く
+    state_requested: bool,
     // 召喚インスタンス（フローティング）か（決定202608011644）
     summoned: bool,
     // 準備が整い次第 navモードへ入る予約。召喚直後は権限も一覧も未取得で、
@@ -470,7 +474,7 @@ impl ZellijPlugin for State {
             WIDTH_PIPE => self.handle_width_pipe(payload, &pipe_message.source),
             READ_CLEAR_PIPE => self.handle_read_clear_pipe(payload),
             COMMAND_STATE_PIPE => self.handle_command_state_pipe(payload),
-            SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload),
+            SYNC_STATE_PIPE => self.handle_sync_state_pipe(payload, &pipe_message.source),
             _ => false,
         };
         // navモードへの入場は pipe 経由でも起きる（fujin_mode）ので、

@@ -493,9 +493,37 @@ fn state_dump_skips_malformed_lines() {
 fn state_dump_drops_panes_that_no_longer_exist() {
     // 送り手が閉じたばかりのペインを載せていても、受け手の一覧で間引く
     let mut state = state_with_panes(2);
+    // 一覧が凍っていない（可視の）インスタンスの一覧だけを間引きに使う
+    state.visible = true;
     state.apply_state_dump("1\tdone\t0\t0\tclaude\t\n99\tdone\t0\t0\tclaude\t\n");
     assert!(state.agents.contains_key(&1));
     assert!(!state.agents.contains_key(&99));
+}
+
+#[test]
+fn state_dump_is_not_pruned_by_a_frozen_manifest() {
+    // 非可視インスタンスの `PaneManifest` は凍っている。そこで間引くと、自分が
+    // 非可視になったあとに生まれたペインの状態を受け取った端から捨ててしまう
+    //（docs/issues/tab-switch-agent-status-desync.md）
+    let mut state = state_with_panes(1);
+    assert!(!state.visible);
+    state.apply_state_dump("1\tdone\t0\t0\tclaude\t\n99\tdone\t0\t0\tclaude\t\n");
+    assert!(state.agents.contains_key(&99));
+}
+
+#[test]
+fn state_dump_fills_only_the_panes_it_does_not_know() {
+    // 自前の登録は残し、欠けているペインだけを埋める。全か無かにすると、
+    // 1件でも自前の登録があるインスタンスは欠けたまま直らない
+    let mut state = state_with_panes(2);
+    state.apply_status(status(1, "UserPromptSubmit"));
+
+    assert!(state.apply_state_dump("1\tdone\t0\t0\tclaude\t\n2\tidle\t0\t0\tclaude\t\n"));
+    assert_eq!(state.agents[&1].state, AgentState::Working);
+    assert_eq!(state.agents[&2].state, AgentState::Idle);
+
+    // 埋めるものが無ければ再描画も要らない
+    assert!(!state.apply_state_dump("1\tdone\t0\t0\tclaude\t\n"));
 }
 
 // --- rebuild_selectable ---
@@ -4091,6 +4119,37 @@ fn siblings_are_the_same_plugin_in_other_tabs() {
     );
 }
 
+#[test]
+fn a_newcomer_asks_its_siblings_for_the_state_once() {
+    // 新しいタブができた瞬間は新入りが可視・既存が全員非可視なので、押し付けの
+    // 起点が既存側で発火しない。取りに行くのは新入り自身
+    //（docs/issues/tab-switch-agent-status-desync.md）
+    let url = "file:/x/fujin.wasm";
+    let mut state = State {
+        own_plugin_id: Some(5),
+        own_plugin_url: Some(url.to_string()),
+        panes: Some(manifest(vec![
+            (0, vec![plugin_pane(6, url)]),
+            (1, vec![plugin_pane(5, url), terminal_pane(1, "shell")]),
+        ])),
+        ..Default::default()
+    };
+    // 自分が生まれた後のフック通知で1件だけ埋まっていても要求する。空かどうかで
+    // 分岐すると、それ以前から座っているペインの状態が欠けたまま直らない
+    state.apply_status(status(1, "UserPromptSubmit"));
+
+    state.push_state_to_new_siblings();
+    assert!(state.state_requested);
+
+    // 兄弟が増えても要求は繰り返さない。以降の変化はフック通知が全員に届く
+    state.state_requested = false;
+    state.push_state_to_new_siblings();
+    assert!(
+        !state.state_requested,
+        "新しい兄弟が現れていないので要求もしない"
+    );
+}
+
 // --- 臨時召喚（決定202608011644） ---
 //
 // 召喚そのもの（summon_floating_if_absent）は get_focused_pane_info /
@@ -4301,18 +4360,35 @@ fn read_clear_pipe_clears_listed_panes() {
 }
 
 #[test]
-fn sync_pipe_only_fills_an_empty_state() {
-    let dump = "1\tdone\t0\t0\tclaude\t\n";
+fn sync_pipe_fills_unknown_panes_without_overwriting_known_ones() {
+    let dump = "1\tdone\t0\t0\tclaude\t\n2\tdone\t0\t0\tclaude\t\n";
 
-    let mut empty = state_with_panes(1);
+    let mut empty = state_with_panes(2);
     assert!(empty.pipe(pipe_message(SYNC_STATE_PIPE, dump)));
     assert_eq!(empty.agents[&1].state, AgentState::Done);
+    assert_eq!(empty.agents[&2].state, AgentState::Done);
 
-    // 既に自前の状態を持っているなら、古いダンプで上書きしない
-    let mut populated = state_with_panes(1);
+    // 自前の登録があるペインは上書きしない。フック通知は全インスタンスへ届くので、
+    // 登録さえあれば中身は自分のほうが確か
+    let mut populated = state_with_panes(2);
     populated.apply_status(status(1, "UserPromptSubmit"));
-    assert!(!populated.pipe(pipe_message(SYNC_STATE_PIPE, dump)));
+    assert!(populated.pipe(pipe_message(SYNC_STATE_PIPE, dump)));
     assert_eq!(populated.agents[&1].state, AgentState::Working);
+    // 知らなかったペインは埋まる（以前はダンプを丸ごと捨てていて埋まらなかった）
+    assert_eq!(populated.agents[&2].state, AgentState::Done);
+}
+
+#[test]
+fn sync_pipe_request_does_not_touch_the_local_state() {
+    // `?` は「状態を教えてほしい」という新入りからの問い合わせ。ダンプとして
+    // 解釈させない（送り返す先は pipe_message_to_plugin なので、ここでは
+    // 取り込まないことだけを見る）
+    let mut state = state_with_panes(1);
+    state.apply_status(status(1, "UserPromptSubmit"));
+
+    assert!(!state.pipe(pipe_message(SYNC_STATE_PIPE, "?")));
+    assert_eq!(state.agents.len(), 1);
+    assert_eq!(state.agents[&1].state, AgentState::Working);
 }
 
 #[test]
