@@ -26,6 +26,8 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 self_worktree=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
 # repos/<name>/extras/try-worktree.sh を想定。repos/ 直下を worktree の置き場所とみなす
 repos_dir=$(dirname "$self_worktree")
+# --open した窓の中からこのスクリプトを呼び戻すので、相対パスの $0 では届かない
+self_sh="$script_dir/$(basename -- "$0")"
 
 # ---------------------------------------------------------------- defaults
 
@@ -44,7 +46,9 @@ fresh=0
 clean=0
 nested=0
 open_window=0
+keep=0
 terminal=auto
+clean_all=0
 dry_run=0
 
 # extras/themes/*.kdl のファイル名（拡張子抜き）を --theme が受け付ける名前として列挙する
@@ -83,9 +87,11 @@ resident fujin session are never touched.
       --no-grant      do not pre-register the permissions (approve by hand instead)
       --fresh         kill an existing session of the same name first
       --open          open the session in a new terminal window and return
+      --keep          with --open, do NOT clean up when the window's zellij exits
       --terminal CMD  terminal emulator for --open (default: autodetect)
       --nested        allow starting from inside a zellij session (nested)
       --clean         kill the session, delete the config dir, and exit
+      --clean-all     do that for every fujin-try-* session, and exit
 
   -n, --dry-run       show what would happen, write nothing
   -h, --help          this message
@@ -107,9 +113,11 @@ while [ $# -gt 0 ]; do
     --no-grant) do_grant=0; shift ;;
     --fresh) fresh=1; shift ;;
     --open) open_window=1; shift ;;
+    --keep) keep=1; shift ;;
     --terminal) terminal=$2; open_window=1; shift 2 ;;
     --nested) nested=1; shift ;;
     --clean) clean=1; shift ;;
+    --clean-all) clean_all=1; shift ;;
     -n|--dry-run) dry_run=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) printf 'try-worktree.sh: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -166,11 +174,82 @@ command -v zellij >/dev/null 2>&1 || die "zellij is not on PATH"
 
 # ---------------------------------------------------------------- clean
 
-kill_session() {
-  # 存在しないセッションを消そうとしたときの終了コードは無視する
-  zellij kill-session "$session" >/dev/null 2>&1 || true
-  zellij delete-session "$session" >/dev/null 2>&1 || true
+# 一覧から1セッションぶんの行を取り出す。--no-formatting でも
+# "<名前> [Created ...] (EXITED - attach to resurrect)" の形をしている
+session_line() {
+  zellij list-sessions --no-formatting 2>/dev/null | awk -v s="$1" '$1 == s'
 }
+
+# EXITED ではなく実際に動いているか。行が無ければ当然 false
+session_is_running() {
+  # 判定は zellij が出す実際のマーカーで行う（セッション名に EXITED を含む
+  # ものを取り違えないため）
+  session_line "$1" | grep -qv '(EXITED'
+}
+
+# **kill-session はサーバが畳み終わるのを待たない。** レイアウトのシリアライズ中に
+# delete-session を撃つと、サーバ側が "Failed to dump layout" で panic する
+# （zellij-server/src/lib.rs:2030。2026-08-18 の調査でログに20件）。
+# 動いていない状態になるまで待ってから delete する
+kill_session() {
+  local target=${1:-$session} i
+  zellij kill-session "$target" >/dev/null 2>&1 || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    session_is_running "$target" || break
+    sleep 0.2
+  done
+  zellij delete-session "$target" >/dev/null 2>&1 || true
+}
+
+# 使い捨てセッションの EXITED は残しておく価値が無いので畳む。
+# 対象は fujin-try-* だけに絞る（常駐セッションや手で作ったものには触らない）
+purge_exited_try_sessions() {
+  local name removed=0 exited
+  exited=$(zellij list-sessions --no-formatting 2>/dev/null | grep '(EXITED' || true)
+  [ -n "$exited" ] || return 0
+  while read -r name _; do
+    case "$name" in fujin-try-*) ;; *) continue ;; esac
+    [ "$name" = "$session" ] && continue
+    zellij delete-session "$name" >/dev/null 2>&1 || continue
+    removed=$((removed + 1))
+  done <<EOS
+$exited
+EOS
+  if [ "$removed" -gt 0 ]; then
+    info "deleted $removed exited fujin-try-* session(s)"
+  fi
+  return 0
+}
+
+# config dir を消してよいのは、このスクリプトが作ったものだけ。名前ではなく実体で照合する
+assert_disposable_config_dir() {
+  if [ "$1" = "$base_config" ] || [ "$1" = "$HOME/.config/zellij" ]; then
+    die "refusing to remove $1 -- that is a real config dir"
+  fi
+}
+
+if [ "$clean_all" -eq 1 ]; then
+  step "Clean all  fujin-try-*"
+  names=$(zellij list-sessions --no-formatting 2>/dev/null | awk '$1 ~ /^fujin-try-/ {print $1}')
+  if [ "$dry_run" -eq 1 ]; then
+    info "would kill and delete: ${names:-（該当なし）}"
+    info "would remove $HOME/.config/zellij-fujin-*"
+    exit 0
+  fi
+  for one in $names; do
+    kill_session "$one"
+    ok "killed and deleted $one"
+  done
+  [ -n "$names" ] || info "no fujin-try-* session was running"
+  for one in "$HOME"/.config/zellij-fujin-*; do
+    [ -d "$one" ] || continue
+    assert_disposable_config_dir "$one"
+    rm -rf "$one"
+    ok "removed $one"
+  done
+  printf '\n'
+  exit 0
+fi
 
 if [ "$clean" -eq 1 ]; then
   step "Clean  $session"
@@ -181,11 +260,7 @@ if [ "$clean" -eq 1 ]; then
   fi
   kill_session
   ok "killed and deleted the session (if it existed)"
-  # 消すのはこのスクリプトが作ったディレクトリだけ。ベース config dir と
-  # 取り違えると普段の設定が消えるので、名前ではなく実体で照合する
-  if [ "$config_dir" = "$base_config" ] || [ "$config_dir" = "$HOME/.config/zellij" ]; then
-    die "refusing to remove $config_dir -- that is a real config dir"
-  fi
+  assert_disposable_config_dir "$config_dir"
   if [ -d "$config_dir" ]; then
     rm -rf "$config_dir"
     ok "removed $config_dir"
@@ -203,6 +278,26 @@ info "worktree    $worktree"
 info "wasm        $wasm_path"
 info "config dir  $config_dir"
 info "session     $session"
+
+# **生存確認は config dir を作り直す前に行う。** install_config は無条件に
+# rm -rf $config_dir をするので、動作中のセッションがあるとその足元を消したうえ、
+# 続く start_session が「セッションがある」と判断して attach してしまい、
+# **同じセッションに2つ目の窓**ができる。どちらを閉じてもクライアントが道連れになる
+session_running=0
+if session_is_running "$session"; then
+  session_running=1
+fi
+
+if [ "$session_running" -eq 1 ] && [ "$fresh" -eq 1 ]; then
+  step "Fresh  $session"
+  if [ "$dry_run" -eq 1 ]; then
+    info "would kill the running session first (--fresh)"
+  else
+    kill_session
+    ok "killed the previous session"
+  fi
+  session_running=0
+fi
 
 # ---------------------------------------------------------------- build
 
@@ -239,11 +334,23 @@ keybinds {
 }
 
 default_layout "$layout_name"
+
+// 使い捨てなので復活させる必要が無い。切っておくと delete-session との競合
+// （サーバ側の "Failed to dump layout" panic）も EXITED セッションの溜まりも起きない
+session_serialization false
 EOS
 }
 
 install_config() {
   step "Config dir  $config_dir"
+
+  if [ "$session_running" -eq 1 ]; then
+    warn "$session is still running -- leaving $config_dir untouched"
+    info "the running server reads this dir, and recreating it would also make"
+    info "the next step attach a *second* window to the same session."
+    info "run --clean (or --fresh) first if you want a rebuilt config dir"
+    return 0
+  fi
 
   if [ "$dry_run" -eq 1 ]; then
     info "would recreate $config_dir"
@@ -267,6 +374,17 @@ install_config() {
     # 手元のバックアップ（*.bak）も、使い捨ての config dir には要らない
     (cd "$base_config" && find . -mindepth 1 -maxdepth 1 \
       ! -name plugins ! -name '*.bak' -exec cp -R {} "$config_dir/" \;)
+
+    # 使い捨ての config dir では resurrection を切る。ベース側で有効になっていても
+    # ここで後から宣言したものが効く（重複を残さないよう既存の有効行は潰す）
+    if grep -qE '^[[:space:]]*session_serialization[[:space:]]' "$config_file"; then
+      local tmp_ss="$config_file.ss.$$"
+      sed -E 's/^([[:space:]]*)(session_serialization[[:space:]])/\1\/\/ \2/' \
+        "$config_file" >"$tmp_ss"
+      mv "$tmp_ss" "$config_file"
+    fi
+    printf '\n// try-worktree.sh: 使い捨てセッションなので復活させない\nsession_serialization false\n' \
+      >>"$config_file"
 
     # エイリアスの location だけを worktree のビルドへ向け直す。
     # 1行の置換で済むのは、config.kdl 側が決定17でエイリアスに寄せてあるため
@@ -415,7 +533,7 @@ resolve_terminal() {
     printf '%s' "$terminal"
     return 0
   fi
-  for t in ${FUJIN_TERMINAL:-} ${TERMINAL:-} alacritty wezterm kitty ghostty; do
+  for t in ${FUJIN_TERMINAL:-} ${TERMINAL:-} wezterm alacritty kitty ghostty; do
     if command -v "$t" >/dev/null 2>&1; then printf '%s' "$t"; return 0; fi
   done
   return 1
@@ -424,15 +542,21 @@ resolve_terminal() {
 start_session() {
   step "Session  $session"
 
+  if [ "$dry_run" -eq 0 ]; then
+    purge_exited_try_sessions
+  fi
+
   local exists=0
   zellij list-sessions --no-formatting 2>/dev/null | awk '{print $1}' | grep -qx "$session" && exists=1
 
+  # 動作中のセッションは既に上（session_running の判定）で畳んである。
+  # ここに残るのは EXITED のまま一覧に居座っているものだけ
   if [ "$exists" -eq 1 ] && [ "$fresh" -eq 1 ]; then
     if [ "$dry_run" -eq 1 ]; then
-      info "would kill the existing session first (--fresh)"
+      info "would delete the leftover session first (--fresh)"
     else
       kill_session
-      ok "killed the previous session (--fresh)"
+      ok "deleted the leftover session (--fresh)"
       exists=0
     fi
   fi
@@ -469,10 +593,41 @@ start_session() {
       wezterm) exec_args=(start --) ;;
       *) exec_args=(-e) ;;
     esac
-    nohup "$term" "${exec_args[@]}" "${env_prefix[@]}" "${cmd[@]}" >/dev/null 2>&1 &
+
+    # **窓の中身を zellij 単体にしない。** それだと窓の中に「終わらせ方」が無く、
+    # ×ボタンで閉じるしか道が残らない。zellij 0.44.3 はその閉じ方で
+    # クライアントが panic し、配下のシェルが孤児化して CPU を食う
+    # （docs/issues/window-close-panics-orphan-shell.md）。
+    # シェルで包んでおけば、正常終了・detach・窓を閉じたときの SIGHUP の
+    # どれでも後始末（セッションと config dir の破棄）を通せる
+    local -a launch
+    if [ "$keep" -eq 1 ]; then
+      launch=("${env_prefix[@]}" "${cmd[@]}")
+    else
+      launch=("${env_prefix[@]}"
+        FUJIN_TRY_SH="$self_sh" FUJIN_TRY_WT="${worktree_arg:-$name}"
+        sh -c 'cleanup() {
+  # trap 経由と最後の1行と、両方から呼ばれるので冪等にしておく
+  if [ -z "${FUJIN_TRY_CLEANED-}" ]; then
+    FUJIN_TRY_CLEANED=1
+    "$FUJIN_TRY_SH" --clean "$FUJIN_TRY_WT" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup HUP TERM INT
+"$@"
+cleanup' sh "${cmd[@]}")
+    fi
+
+    nohup "$term" "${exec_args[@]}" "${launch[@]}" >/dev/null 2>&1 &
     disown
     ok "opened a new $term window running \"$session\""
-    info "close it with: $0 --clean ${worktree_arg:-$name}"
+    if [ "$keep" -eq 1 ]; then
+      info "--keep: nothing is cleaned up automatically"
+      info "close it with: $self_sh --clean ${worktree_arg:-$name}"
+    else
+      info "the session and $config_dir are dropped when that window's zellij exits"
+      info "to tear it down from here: $self_sh --clean ${worktree_arg:-$name}"
+    fi
     return 0
   fi
 
