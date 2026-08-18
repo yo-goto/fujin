@@ -20,7 +20,7 @@ pub(crate) enum AgentState {
 }
 
 impl AgentState {
-    // 状態アイコン凡例（決定25）に並べる順。緊急度（`triage_rank`）ではなく
+    // 状態アイコン凡例（決定202608062201）に並べる順。緊急度（`triage_rank`）ではなく
     // 起動→実行→待ち→完了という素直な遷移の順にする。凡例は「どの記号が何か」を
     // 引くための表なので、優先度の主張はしない
     pub(crate) const ALL: [AgentState; 5] = [
@@ -55,7 +55,7 @@ impl AgentState {
         }
     }
 
-    // インスタンス間同期のワイヤ表現（決定13）
+    // インスタンス間同期のワイヤ表現（決定202608012141）
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             AgentState::Idle => "idle",
@@ -89,7 +89,7 @@ impl AgentState {
         }
     }
 
-    // 注意を引く状態か（要件: sidebar-header の待ち件数）。既読化（決定10）が
+    // 注意を引く状態か（要件: sidebar-header の待ち件数）。既読化（決定202607302302）が
     // `idle` に戻す対象と同じ集合で、`working` は数えない — 走っている最中の
     // ペインは人の対応を待っていない
     pub(crate) fn is_waiting(&self) -> bool {
@@ -100,7 +100,7 @@ impl AgentState {
     }
 
     // Textのcolor_rangeレベル（テーマの強調色 0-3 とレベル6の error_color）。
-    // 5状態が重複しない色を持ち、色だけで判別できるようにしてある（決定25）
+    // 5状態が重複しない色を持ち、色だけで判別できるようにしてある（決定202608062201）
     pub(crate) fn color(&self) -> usize {
         match self {
             AgentState::Idle => 0,
@@ -133,7 +133,7 @@ pub(crate) struct AgentInfo {
 }
 
 impl AgentInfo {
-    // 既読化（決定10）: 注意を引く状態（done/blocked/error）を idle に戻す。
+    // 既読化（決定202607302302）: 注意を引く状態（done/blocked/error）を idle に戻す。
     // 戻したら true
     pub(crate) fn mark_read(&mut self) -> bool {
         if !self.state.is_waiting() {
@@ -190,7 +190,7 @@ impl State {
     // 状態通知（STATUS_PIPE）の受け口。
     //
     // 新規エージェント検出なら配置演出を出す（要件: header-animation）。通知は
-    // 全インスタンスへ配送されるので、可視インスタンスだけに絞る（決定14の権威判定）。
+    // 全インスタンスへ配送されるので、可視インスタンスだけに絞る（決定202608012142の権威判定）。
     // サーバへの問い合わせが走るのは着任のときだけで、1エージェントにつき1回しか来ない
     pub(crate) fn handle_status_pipe(&mut self, payload: Option<&str>) -> bool {
         let Some(raw) = payload else {
@@ -301,7 +301,7 @@ impl State {
         }
     }
 
-    // 既読モデル（決定10）: フォーカスされたペインの done/blocked/error を idle に戻す
+    // 既読モデル（決定202607302302）: フォーカスされたペインの done/blocked/error を idle に戻す
     pub(crate) fn apply_read_model(&mut self, manifest: &PaneManifest) {
         let Some(active_tab) = self.tabs.iter().find(|t| t.active) else {
             return;
@@ -322,13 +322,13 @@ impl State {
             })
             .map(|pane| pane.id)
             .collect();
-        // 既読の猶予（決定32）を解くのはフォーカスから外れているコマンドペイン
+        // 既読の猶予（決定202608072218）を解くのはフォーカスから外れているコマンドペイン
         // だけなので、下の保留ループとは対象が重ならない（同じフレームで解いて
         // 既読にする、という取りこぼしは起きない）
         self.release_read_grace(&focused);
         // フォーカスを外れたペインの保留は捨てる。**通過しただけのペインは
         // 滞在猶予が満ちる前に必ずここへ来る**ので、注意を引く状態はそのまま残る
-        //（決定37。docs/issues/transit-focus-clears-read-state.md）
+        //（決定202608080109。docs/issues/transit-focus-clears-read-state.md）
         self.pending_reads
             .retain(|pane_id, _| focused.contains(pane_id));
         for pane_id in focused {
@@ -350,7 +350,7 @@ impl State {
     }
 
     // 既読にできる状態を持っているか（`mark_read` が何かを倒せるか）。
-    // コマンド状態の再フォーカス待ち（決定32の猶予）は、解けるまで倒せないので
+    // コマンド状態の再フォーカス待ち（決定202608072218の猶予）は、解けるまで倒せないので
     // 持っていない扱いにする
     fn has_unread(&self, pane_id: u32) -> bool {
         let agent = self
@@ -364,7 +364,7 @@ impl State {
         agent || command
     }
 
-    // 滞在猶予が満ちた保留を既読にする（決定10・決定37）。再描画が要るかを返す。
+    // 滞在猶予が満ちた保留を既読にする（決定202607302302・決定202608080109）。再描画が要るかを返す。
     //
     // ここまで来たペインは、滞在猶予のあいだフォーカスされ続けていた
     // ＝通過点ではなく目的地だったとみなす
@@ -381,7 +381,7 @@ impl State {
         let mut cleared = Vec::new();
         for pane_id in due {
             self.pending_reads.remove(&pane_id);
-            // コマンド状態も同じ既読モデルに乗る（決定32）。エージェント登録が
+            // コマンド状態も同じ既読モデルに乗る（決定202608072218）。エージェント登録が
             // あるペインはそちらが優先されて表示に出ないが、両方を既読にしても
             // 実害は無いので、ソースを気にせず倒す
             let mut was_cleared = false;
@@ -405,13 +405,13 @@ impl State {
     }
 
     // 対応を待っているペインの数。エージェント状態とコマンド状態の両方を数える
-    //（決定32）。
+    //（決定202608072218）。
     //
     // 一覧に出るペイン（`selectable`）だけを数える。状態の入れ物を直接数えないのは、
     // 閉じたペインの状態が prune されるまでの一瞬、画面に無いものを数えてしまうため。
     //
-    // **いまは表示の受け皿が無い。** 決定27でヘッダーの待ち件数表示を廃止したが、
-    // 概念としては残すと決めた（決定32でコマンド状態も含む形に広げた）
+    // **いまは表示の受け皿が無い。** 決定202608070119でヘッダーの待ち件数表示を廃止したが、
+    // 概念としては残すと決めた（決定202608072218でコマンド状態も含む形に広げた）
     #[allow(dead_code)] // 上記の理由で、呼び出し元が無くても残す
     pub(crate) fn waiting_count(&self) -> usize {
         self.selectable

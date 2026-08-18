@@ -13,20 +13,20 @@
 //
 // モジュール構成:
 // - agent  — フックイベントの解釈とエージェント状態の遷移
-// - config — configuration の取り込みと設定仕様の正本（決定40）
-// - command — コマンドペインのライフサイクルからのコマンド状態の導出（決定32）
-// - nav    — navモード（決定12）と検索サブモードのキー操作、行クリック
+// - config — configuration の取り込みと設定仕様の正本（決定202608080346）
+// - command — コマンドペインのライフサイクルからのコマンド状態の導出（決定202608072218）
+// - nav    — navモード（決定202607310311）と検索サブモードのキー操作、行クリック
 // - search — ファジーマッチの純粋ロジック
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
-// - mark   — 複数選択（マーク。決定39）の集合と、その配布
-// - preview — プレビュー（決定42。選択行のペインの内容を覗き見る）
+// - mark   — 複数選択（マーク。決定202608080250）の集合と、その配布
+// - preview — プレビュー（決定202608082045。選択行のペインの内容を覗き見る）
 // - termination — 終了操作サブモード（対象ペインの close / kill / kill→close）
 // - deploy — 配置演出（新規エージェント検出時のヘッダーアニメーション）
 // - render — サイドバーの描画
 // - width  — 表示セル幅の計算・切り詰めの純粋関数
-// - sync   — インスタンス間の状態同期（決定13）
-// - summon — フローティングでの臨時召喚（決定16）
-// - entry  — wasm のエクスポート関数（`register_plugin!` の自前版。決定47）
+// - sync   — インスタンス間の状態同期（決定202608012141）
+// - summon — フローティングでの臨時召喚（決定202608011644）
+// - entry  — wasm のエクスポート関数（`register_plugin!` の自前版。決定202608111836）
 
 mod agent;
 mod command;
@@ -64,47 +64,47 @@ use triage::TriageState;
 
 // フックからの状態通知
 const STATUS_PIPE: &str = "fujin_status";
-// キーバインドからのナビゲーション（直接キー方式・決定6）
+// キーバインドからのナビゲーション（直接キー方式・決定202607302258）
 const NAV_UP_PIPE: &str = "fujin_up";
 const NAV_DOWN_PIPE: &str = "fujin_down";
 const NAV_GO_PIPE: &str = "fujin_go";
-// navモードへの入場（決定12）
+// navモードへの入場（決定202607310311）
 const NAV_MODE_PIPE: &str = "fujin_mode";
 // cwd表示のトグル（docs/issues/toggle-cwd-key.md）。全インスタンスが独立に
-// 反転するので権威判定（決定14）は要らない。**反転した値を兄弟へbroadcastして
+// 反転するので権威判定（決定202608012142）は要らない。**反転した値を兄弟へbroadcastして
 // 補強してはいけない** — 未処理の兄弟へ先に届くと、そこからさらに反転して逆を向く
 const TOGGLE_CWD_PIPE: &str = "fujin_toggle_cwd";
-// インスタンス間の状態同期（決定13）
+// インスタンス間の状態同期（決定202608012141）
 const SYNC_STATE_PIPE: &str = "fujin_sync_state";
-// 既読クリアの兄弟インスタンスへの配布（決定13）
+// 既読クリアの兄弟インスタンスへの配布（決定202608012141）
 const READ_CLEAR_PIPE: &str = "fujin_read";
-// コマンド状態の配布（決定32）。導出できるのは PaneUpdate が届く可視インスタンス
+// コマンド状態の配布（決定202608072218）。導出できるのは PaneUpdate が届く可視インスタンス
 // だけなので、エージェント状態と違って自前では揃わない
 const COMMAND_STATE_PIPE: &str = "fujin_command";
-// 選択ペインIDの配布（決定13）
+// 選択ペインIDの配布（決定202608012141）
 const SELECTION_PIPE: &str = "fujin_selection";
-// マーク（決定39）の配布。集合をまるごと運ぶ — 差分で運ぶと、取りこぼした
+// マーク（決定202608080250）の配布。集合をまるごと運ぶ — 差分で運ぶと、取りこぼした
 // 1通ぶんだけ集合が食い違ったまま直らない
 const MARK_PIPE: &str = "fujin_mark";
-// プレビューのスナップショット送付（決定42）。1行目が対象ペイン名、2行目以降が内容
+// プレビューのスナップショット送付（決定202608082045）。1行目が対象ペイン名、2行目以降が内容
 const PREVIEW_PIPE: &str = "fujin_preview";
 // サイドバー幅のタブ間追従（docs/issues/sidebar-width-persist-across-tabs.md）。
 // zellij の `new_tab_template` はタブ生成時に複製されるだけの静的な雛形なので、
 // あるタブでリサイズしても他タブには伝播しない。観測した幅を配って各自に
 // 寄せさせる
 const WIDTH_PIPE: &str = "fujin_width";
-// 取り残された召喚インスタンスの強制掃除（決定16）。取り残された召喚はキーを
+// 取り残された召喚インスタンスの強制掃除（決定202608011644）。取り残された召喚はキーを
 // 横取りしておらず Esc が届かず、unselectable なので普段のペイン操作でも消せない。
 // pipe 経由の逃げ道を用意しておく
 const DISMISS_PIPE: &str = "fujin_dismiss";
 
-// 滞在猶予（決定37。docs/issues/transit-focus-clears-read-state.md）。フォーカス
+// 滞在猶予（決定202608080109。docs/issues/transit-focus-clears-read-state.md）。フォーカス
 // されてからこの秒数だけ留まって初めて既読にする。**通過と到着はフォーカスの
 // 有無だけでは原理的に区別できない**ので、滞在時間で分ける。
 // 実機での調整が残っている暫定値
 const READ_DELAY: f64 = 0.6;
 
-// 設定の警告をフッターへ優先表示する時間（秒）。決定40の「起動直後の一定時間
+// 設定の警告をフッターへ優先表示する時間（秒）。決定202608080346の「起動直後の一定時間
 // だけ優先表示」。過ぎればフッターは通常の表示へ戻る。警告は stderr にも残る
 const CONFIG_WARNING_SECS: f64 = 8.0;
 
@@ -114,13 +114,13 @@ struct Selectable {
     tab_position: usize,
     pane_id: u32,
     title: String,
-    // フォーカス時の should_float_if_hidden に使う（決定14）。
+    // フォーカス時の should_float_if_hidden に使う（決定202608012142）。
     // ペイン名を丸括弧で囲むかの判定も兼ねる
     //（要件: docs/requirements/floating-pane-indicator/）
     is_floating: bool,
 }
 
-// navモード中、サイドバーへ預けたフォーカスの戻し先（決定34）
+// navモード中、サイドバーへ預けたフォーカスの戻し先（決定202608072359）
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ParkedFocus {
     pane_id: u32,
@@ -138,13 +138,13 @@ struct State {
     panes: Option<PaneManifest>,
     // key: ターミナルペインID
     agents: BTreeMap<u32, AgentInfo>,
-    // コマンドペインの状態（決定32）。key は同じくターミナルペインID。
+    // コマンドペインの状態（決定202608072218）。key は同じくターミナルペインID。
     // エージェント状態が優先される（`State::pane_status`）ため別の入れ物に持つ
     commands: BTreeMap<u32, CommandInfo>,
     // フラット化した選択対象
     selectable: Vec<Selectable>,
     selected: usize,
-    // マーク（決定39）: 一括操作の対象として選んだペインIDの集合。タブを
+    // マーク（決定202608080250）: 一括操作の対象として選んだペインIDの集合。タブを
     // またいでよく、navモードを退場しても保持し、兄弟インスタンスへも配る
     marked: BTreeSet<u32>,
     visible: bool,
@@ -165,10 +165,10 @@ struct State {
     // 直近に観測した実フォーカス（要件: focus-sync）。問い合わせ系のホスト関数は
     // テストから呼べないため、結果をここへ畳んで判定ロジックを切り離しておく
     focused_pane: Option<u32>,
-    // 直近の実フォーカスがターミナルペインそのものだったか（決定34）。false なら
+    // 直近の実フォーカスがターミナルペインそのものだったか（決定202608072359）。false なら
     // 作業ペインにフォーカス枠が点いていない ＝ フォーカスを預かる理由が無い
     focus_on_terminal: bool,
-    // navモード中にフォーカスを預かっている作業ペイン（決定34）。退場でここへ
+    // navモード中にフォーカスを預かっている作業ペイン（決定202608072359）。退場でここへ
     // 戻す。預けている間の実フォーカスはサイドバー自身なので `focused_pane` とは別物
     focus_parked: Option<ParkedFocus>,
     // 前面に出たあと、まだ実フォーカスを取り直せていない（要件: focus-sync）。
@@ -180,12 +180,12 @@ struct State {
     selection_at_nav_exit: Option<u32>,
     // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
     known_siblings: BTreeSet<u32>,
-    // 召喚インスタンス（フローティング）か（決定16）
+    // 召喚インスタンス（フローティング）か（決定202608011644）
     summoned: bool,
     // 準備が整い次第 navモードへ入る予約。召喚直後は権限も一覧も未取得で、
     // 揃うまで待ってから入る
     pending_nav_entry: bool,
-    // 自分が召喚したフローティングの、タブindex -> プラグインID（決定16）。
+    // 自分が召喚したフローティングの、タブindex -> プラグインID（決定202608011644）。
     // 重ねて召喚しないための記録。一覧では代用できない（summon.rs 参照）
     summoned_panes: BTreeMap<usize, u32>,
     // 以下のサブモードは中か否かを is_some() で表す（フラグと中身が食い違う
@@ -193,20 +193,20 @@ struct State {
     search: Option<SearchState>,
     triage: Option<TriageState>,
     jump: Option<JumpState>,
-    // 中身は入場時に捕まえた対象ペイン（決定35）
+    // 中身は入場時に捕まえた対象ペイン（決定202608080140）
     termination: Option<TerminationState>,
-    // プレビュー（決定42）。モードではなく navモード内のトグル可能な横断的
+    // プレビュー（決定202608082045）。モードではなく navモード内のトグル可能な横断的
     // 表示状態なので、キー解釈は変わらない
     preview: Option<PreviewState>,
     // 自分がプレビュー用フローティングペインとして起動されたインスタンスか
-    //（決定42）。真なら配られたスナップショットを描くだけに徹する
+    //（決定202608082045）。真なら配られたスナップショットを描くだけに徹する
     is_preview: bool,
     // 描くスナップショット（プレビュー用フローティングペインでのみ埋まる）
     preview_content: PreviewContent,
     // 状態変化のたびに進む単調増加のカウンタ。トリアージ一覧の tie-break に使う
     state_seq: u64,
     // 縦スクロールで一覧が上に隠れている行数。毎フレーム導出されるローカルな
-    // 表示状態で、兄弟インスタンスへは配らない（決定13の範囲外）
+    // 表示状態で、兄弟インスタンスへは配らない（決定202608012141の範囲外）
     scroll: usize,
     // 直近に描画した画面高。行クリックの逆引き（pane_at_row）が描画と同じ
     // 表示範囲を再現するために要る。0 は「まだ一度も描いていない」
@@ -239,12 +239,12 @@ struct State {
     // 張ると Timer が二重に届くので、繋がっていないときだけ張る
     timer_armed: bool,
     // 既読を保留しているペイン -> 既読にしてよくなる時刻（`elapsed` 基準）。
-    // 滞在猶予（決定37）の入れ物
+    // 滞在猶予（決定202608080109）の入れ物
     pending_reads: BTreeMap<u32, f64>,
-    // direct-keys方式の configuration キー -> 画面に出すキー表記（決定27・28）。
+    // direct-keys方式の configuration キー -> 画面に出すキー表記（決定202608070119・28）。
     // 書かれていない項目は持たない＝ヒントからその項目だけが省かれる
     direct_keys: BTreeMap<String, String>,
-    // 解釈できなかった設定のキー（決定40）。黙って既定値へ倒さない
+    // 解釈できなかった設定のキー（決定202608080346）。黙って既定値へ倒さない
     config_warnings: Vec<&'static str>,
     // 設定の警告をフッターに出しておく期限（`elapsed` 基準）。None は
     // 「出していない・もう出さない」
@@ -255,7 +255,7 @@ struct State {
 }
 
 // `register_plugin!(State)` は使わない。エクスポート関数は entry.rs が持つ
-//（IME経由の非ASCII入力を拾うため。決定47 / docs/issues/ime-input-support.md）
+//（IME経由の非ASCII入力を拾うため。決定202608111836 / docs/issues/ime-input-support.md）
 fn main() {
     entry::install_panic_hook();
 }
@@ -263,11 +263,11 @@ fn main() {
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.apply_config(&configuration);
-        // プレビュー用フローティングペインとして開かれたか（決定42）。
+        // プレビュー用フローティングペインとして開かれたか（決定202608082045）。
         // 一覧も navモードも持たない描き手専用のインスタンスになる
         self.is_preview = config::is_preview(&configuration);
         // 別インスタンスに召喚されたフローティングなら、入場pipeを取り逃している。
-        // 押し直させずに済むよう、準備でき次第こちらから navモードへ入る（決定16）
+        // 押し直させずに済むよう、準備でき次第こちらから navモードへ入る（決定202608011644）
         self.summoned = config::summoned(&configuration);
         self.pending_nav_entry = self.summoned;
         self.own_plugin_id = Some(get_plugin_ids().plugin_id);
@@ -279,15 +279,15 @@ impl ZellijPlugin for State {
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::ReadCliPipes,
-            // navモードのキー横取り（決定12）
+            // navモードのキー横取り（決定202607310311）
             PermissionType::InterceptInput,
-            // 兄弟インスタンスとの状態同期（決定13）
+            // 兄弟インスタンスとの状態同期（決定202608012141）
             PermissionType::MessageAndLaunchOtherPlugins,
-            // 臨時召喚（決定16）。OpenPluginPaneFloating はこれを要求し
+            // 臨時召喚（決定202608011644）。OpenPluginPaneFloating はこれを要求し
             //（MessageAndLaunchOtherPlugins では足りない）、拒否されると
             // shim 側の unwrap でプラグインごと落ちる
             PermissionType::OpenTerminalsOrPlugins,
-            // プレビューのスナップショット取得（決定42）。拒否されてもパニック
+            // プレビューのスナップショット取得（決定202608082045）。拒否されてもパニック
             // せず「取れなかった」扱い（preview::UNAVAILABLE）に落ちる
             PermissionType::ReadPaneContents,
         ]);
@@ -316,7 +316,7 @@ impl ZellijPlugin for State {
 
     fn update(&mut self, event: Event) -> bool {
         // プレビュー用フローティングペインは配られたスナップショットを描くだけ
-        //（決定42）。一覧の再構築も権威判定も要らないうえ、走らせると兄弟
+        //（決定202608082045）。一覧の再構築も権威判定も要らないうえ、走らせると兄弟
         // インスタンスとして状態の配布に混ざってしまう
         if self.is_preview {
             return self.update_as_preview(event);
@@ -328,10 +328,10 @@ impl ZellijPlugin for State {
                 self.permissions_granted = matches!(status, PermissionStatus::Granted);
                 if self.permissions_granted {
                     // フローティングで起動されていたら召喚インスタンスとして自覚する
-                    //（決定16。下の set_selectable の分岐に効くので、ここより前に）
+                    //（決定202608011644。下の set_selectable の分岐に効くので、ここより前に）
                     self.adopt_floating_as_summoned();
-                    // フォーカス巡回にサイドバーを混ぜない（決定6）。**臨時召喚は
-                    // 例外**（決定16）— unselectable だとロジックが壊れたとき普段の
+                    // フォーカス巡回にサイドバーを混ぜない（決定202607302258）。**臨時召喚は
+                    // 例外**（決定202608011644）— unselectable だとロジックが壊れたとき普段の
                     // ペイン操作で消せなくなるので、「必ず自分で消せる」ほうを取る
                     if !self.summoned {
                         set_selectable(false);
@@ -344,7 +344,7 @@ impl ZellijPlugin for State {
                     // 承認を待たずに一覧が揃うと入場の機会がここしか無い
                     self.learn_own_plugin_url();
                     self.enter_nav_mode_if_pending();
-                    // 警告の時計はここから回す（決定40）。承認が済むまでフッターは
+                    // 警告の時計はここから回す（決定202608080346）。承認が済むまでフッターは
                     // 描かれないので、load() から数えると見られないまま期限が切れる
                     self.arm_config_warning();
                 }
@@ -369,7 +369,7 @@ impl ZellijPlugin for State {
                 true
             }
             Event::PaneUpdate(manifest) => {
-                // コマンド状態の導出は既読モデルより先（決定32）。導出した状態が
+                // コマンド状態の導出は既読モデルより先（決定202608072218）。導出した状態が
                 // その場で既読になってしまう問題は、既読の猶予
                 //（`CommandInfo::awaiting_refocus`）が防ぐ
                 self.apply_command_states(&manifest);
@@ -378,7 +378,7 @@ impl ZellijPlugin for State {
                 self.rebuild_selectable();
                 self.prune_stale_agents();
                 // 自分のURLは PaneManifest で初めて分かる。新しい兄弟
-                // インスタンスを見つけたら状態を配る（決定13）
+                // インスタンスを見つけたら状態を配る（決定202608012141）
                 self.learn_own_plugin_url();
                 self.push_state_to_new_siblings();
                 // ペインのフォーカス移動はここに届く（要件: focus-sync）
@@ -397,7 +397,7 @@ impl ZellijPlugin for State {
                 // プレビューと預かったフォーカスの後始末。どちらも対象は自分では
                 // なく別のペインなので、閉じられている最中でも投げてよい。
                 // フォーカスを返さないと、リロード時にユーザーは unselectable に
-                // 戻ったサイドバーにフォーカスを残して詰まる（決定34・決定42）
+                // 戻ったサイドバーにフォーカスを残して詰まる（決定202608072359・決定202608082045）
                 self.close_preview();
                 self.release_parked_focus(true);
                 false
@@ -414,7 +414,7 @@ impl ZellijPlugin for State {
                 // `return` で抜けない — 下のテキストカーソルの追従はここでも通す
                 self.nav_mode && self.handle_nav_key(key)
             }
-            // 貼り付け・IMEの変換確定。フォーカスを預かっている（決定34）間だけ
+            // 貼り付け・IMEの変換確定。フォーカスを預かっている（決定202608072359）間だけ
             // 自分に届く。入力欄の外なら中で捨てる
             Event::PastedText(text) => self.handle_pasted_text(&text),
             _ => false,
@@ -448,7 +448,7 @@ impl ZellijPlugin for State {
         if is_ours && matches!(pipe_message.source, PipeSource::Cli(_)) {
             unblock_cli_pipe_input(&pipe_message.name);
         }
-        // プレビュー用フローティングペイン（決定42）が扱うのはスナップショットだけ。
+        // プレビュー用フローティングペイン（決定202608082045）が扱うのはスナップショットだけ。
         // 状態通知や同期まで取り込むと、描くのに使わない状態を溜め込んだうえに
         // 兄弟インスタンスとして配布の輪に混ざる
         if self.is_preview && pipe_message.name != PREVIEW_PIPE {
@@ -494,7 +494,7 @@ impl ZellijPlugin for State {
 }
 
 impl State {
-    // プレビュー用フローティングペイン（決定42）のイベント処理。
+    // プレビュー用フローティングペイン（決定202608082045）のイベント処理。
     //
     // 描き手に徹するので、見るのは自分が描けるようになったか（権限）だけ。
     // 一覧・エージェント状態・navモードには一切関わらない
@@ -505,11 +505,11 @@ impl State {
         self.permissions_granted = matches!(status, PermissionStatus::Granted);
         if self.permissions_granted {
             // 常駐サイドバーと違い `set_selectable(false)` は呼ばない。
-            // 臨時召喚（決定16）と同じ理由で、一時的に出ているだけのペインは
+            // 臨時召喚（決定202608011644）と同じ理由で、一時的に出ているだけのペインは
             // 「必ず自分で消せる」ほうを取る
             if let Some(id) = self.own_plugin_id {
                 // 記号付きで通常ペインと見分けを付ける。枠色は zellij 側に
-                // API が無く（決定34）、内容領域の背景色は「色はテーマから
+                // API が無く（決定202608072359）、内容領域の背景色は「色はテーマから
                 // 借りる」原則（ui-design.md 原則1）と衝突するため、
                 // ネイティブのタイトルバー文字列で代替している
                 rename_plugin_pane(id, "▣ preview");
@@ -549,7 +549,7 @@ impl State {
         render
     }
 
-    // 設定の警告の表示期限を切る（決定40）。フッターを通常表示へ戻すために
+    // 設定の警告の表示期限を切る（決定202608080346）。フッターを通常表示へ戻すために
     // 1回だけ描き直しが要るので、切れた瞬間を返す
     fn expire_config_warning(&mut self) -> bool {
         match self.config_warning_until {
@@ -570,7 +570,7 @@ impl State {
         self.arm_timer();
     }
 
-    // いまフッターに設定の警告を出しているか（決定40）。
+    // いまフッターに設定の警告を出しているか（決定202608080346）。
     //
     // **ユーザーがいま操作している文脈は警告より優先する** — 入力欄
     //（検索クエリ・番号ジャンプ）と確認プロンプト（終了操作）、ヘルプの
@@ -585,7 +585,7 @@ impl State {
             && self.jump.is_none()
     }
 
-    // 自分が可視インスタンスか（決定14の権威判定のうち、**副作用のない部分だけ**）。
+    // 自分が可視インスタンスか（決定202608012142の権威判定のうち、**副作用のない部分だけ**）。
     //
     // `refresh_focus()` を流用しないのは、あちらが選択の追従・navモード退場という
     // 副作用を持つため — 状態通知が届いただけで探索位置を動かすわけにはいかない。
@@ -601,7 +601,7 @@ impl State {
     // フォーカス情報をサーバへ1回だけ問い合わせて、
     //  - 観測したフォーカスを取り込み、navモード外なら選択行を追従させる
     //    （要件: docs/requirements/focus-sync/）
-    //  - 自分が操作の権威を持つインスタンスか（決定14）を返す
+    //  - 自分が操作の権威を持つインスタンスか（決定202608012142）を返す
     //
     // イベントの配送は権威判定に当てにできない — PaneUpdate / TabUpdate は
     // 非可視インスタンスに届かず「自分のタブがアクティブ」が複数現れ（実測）、
@@ -614,18 +614,18 @@ impl State {
         };
         if !self.owns_tab(focused_tab) {
             // フォーカス中のタブに居ないインスタンスは選択を自分では動かさない。
-            // 動かすのは権威1つだけで、兄弟へは決定13の同期で配られる
+            // 動かすのは権威1つだけで、兄弟へは決定202608012141の同期で配られる
             return false;
         }
         self.focus_on_terminal = matches!(focused_pane, PaneId::Terminal(_));
-        // プレビュー用フローティングペインは自分の一部として数える（決定42）。
+        // プレビュー用フローティングペインは自分の一部として数える（決定202608082045）。
         // 別ペイン扱いにすると、開いた直後の移動を「持って行かれた」と誤読して
         // navモードを抜けてしまう
         let own_pane_focused = match (focused_pane, self.own_plugin_id) {
             (PaneId::Plugin(id), Some(own_id)) => id == own_id || self.is_preview_pane(id),
             _ => false,
         };
-        // 預かりが成立したのを観測しておく（決定34。`park_taken_over` が使う）
+        // 預かりが成立したのを観測しておく（決定202608072359。`park_taken_over` が使う）
         if own_pane_focused {
             if let Some(parked) = self.focus_parked.as_mut() {
                 parked.confirmed = true;
@@ -638,7 +638,7 @@ impl State {
         }
         let focused = match focused_pane {
             PaneId::Terminal(id) => Some(id),
-            // フォーカスを預かっている間（決定34）は預かった当のペインを指す。
+            // フォーカスを預かっている間（決定202608072359）は預かった当のペインを指す。
             // 一覧から拾い直すと「タイル層でフォーカス中のターミナル」が居らず
             // None になり、探索位置も戻し先も失う
             PaneId::Plugin(_) if own_pane_focused && self.focus_parked.is_some() => self
@@ -693,7 +693,7 @@ impl State {
     // 指定タブでフォーカス中のターミナルペイン（要件: focus-sync）。
     //
     // `get_focused_pane_info()` がプラグインペインを返したときの受け皿。
-    // 召喚インスタンス（臨時召喚・コールドスタートの両経路。決定16）は**自分が
+    // 召喚インスタンス（臨時召喚・コールドスタートの両経路。決定202608011644）は**自分が
     // フローティング層のフォーカスを持つ**ため、問い合わせでは作業ペインが
     // 分からず、追従も入場時の初期選択も効かなくなる（実測）。
     //
@@ -716,7 +716,7 @@ impl State {
         floating
     }
 
-    // 預けたフォーカスをユーザーの操作で持って行かれたか（決定34）。
+    // 預けたフォーカスをユーザーの操作で持って行かれたか（決定202608072359）。
     // `own_pane_focused` は「いま実フォーカスが自分のペインにあるか」の観測結果。
     //
     // **`confirmed` を待つのが要点。** フォーカスの移動は非同期なので、
@@ -726,7 +726,7 @@ impl State {
         self.focus_parked.is_some_and(|parked| parked.confirmed) && !own_pane_focused
     }
 
-    // 指定ターミナルペインがフローティングか（決定34）。フォーカスを預かるとき、
+    // 指定ターミナルペインがフローティングか（決定202608072359）。フォーカスを預かるとき、
     // 戻すための `should_float_if_hidden` を控えておくのに使う。
     // 一覧に無ければ false ＝ タイル扱い（`focus_selected` の既定と同じ）
     pub(crate) fn pane_is_floating(&self, pane_id: u32) -> bool {
@@ -737,11 +737,11 @@ impl State {
             .unwrap_or(false)
     }
 
-    // configuration を取り込む（決定40）。**設定の入口はここ1本だけ**にして、
+    // configuration を取り込む（決定202608080346）。**設定の入口はここ1本だけ**にして、
     // 値の正規化と解釈できない値の扱いを項目ごとにばらけさせない。
     // 解釈と仕様の正本は config.rs 側にある。
     //
-    // direct-keys のヒント（決定28）が「キーの表記だけを設定で受け取る」形なのは、
+    // direct-keys のヒント（決定202608070226）が「キーの表記だけを設定で受け取る」形なのは、
     // zellij 0.44.3 のプラグインAPIが `Action::KeybindPipe` の `name`/`payload` を
     // 捨てて渡すため、実際の割り当てを `Event::InitialKeybinds` から解決できないから
     //（`zellij-utils/src/plugin_api/action.rs`）

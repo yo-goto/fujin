@@ -1,4 +1,4 @@
-// インスタンス間の状態同期（決定13）。
+// インスタンス間の状態同期（決定202608012141）。
 //
 // pipe は起動中の全インスタンスに届くが、**後から起動したインスタンスは
 // それ以前のイベントを見ていない**。タブを後から作ると、そのサイドバーだけ
@@ -52,7 +52,7 @@ pub(crate) fn send_to_plugin(plugin_id: u32, pipe: &str, payload: String) {
 impl State {
     // fujin_toggle_cwd の受け口（docs/issues/toggle-cwd-key.md）。
     // payload無し＝ユーザーのキー操作（各自反転）、"true"/"false"＝新入り
-    // インスタンスへの現在値push（決定13。そのままセット）
+    // インスタンスへの現在値push（決定202608012141。そのままセット）
     pub(crate) fn handle_toggle_cwd_pipe(&mut self, payload: Option<&str>) -> bool {
         let requested = match payload.map(str::trim) {
             // 全インスタンスが同じ値から出発している前提で、各自が独立に反転
@@ -62,7 +62,7 @@ impl State {
             // 明示セット — 反転にすると押し付けのたびに向きがずれる
             Some("true") => true,
             Some("false") => false,
-            // 真偽値の受け口は広げない（決定40。config.rs と同じ方針）。
+            // 真偽値の受け口は広げない（決定202608080346。config.rs と同じ方針）。
             // 黙って false へ倒すと「cwd が消えた」結果だけが残る
             Some(raw) => {
                 eprintln!("fujin: unparsable toggle_cwd payload: {}", raw);
@@ -77,7 +77,7 @@ impl State {
     }
 
     // fujin_selection の受け口。選択はインデックスではなく**ペインIDで**運ぶ
-    //（決定13）。インデックスは各インスタンスの selectable に依存し、一覧が
+    //（決定202608012141）。インデックスは各インスタンスの selectable に依存し、一覧が
     // 古いインスタンスでは別の行を指してしまう
     pub(crate) fn handle_selection_pipe(&mut self, payload: Option<&str>) -> bool {
         payload
@@ -96,7 +96,7 @@ impl State {
             if let Some(agent) = self.agents.get_mut(&pane_id) {
                 changed |= agent.mark_read();
             }
-            // コマンド状態も同じ既読モデルに乗る（決定32）。既読の猶予
+            // コマンド状態も同じ既読モデルに乗る（決定202608072218）。既読の猶予
             //（`awaiting_refocus`）は見ない — 送り手の可視インスタンスが
             // 猶予込みで判断した結果がここへ来る
             if let Some(info) = self.commands.get_mut(&pane_id) {
@@ -108,7 +108,7 @@ impl State {
 
     // fujin_sync_state の受け口。空のときだけ取り込む — 既に自前の状態を
     // 持っているなら、古いダンプで上書きしてしまわないよう無視する
-    // 既知の兄弟インスタンス全員へ同じ payload を配る（決定13）。
+    // 既知の兄弟インスタンス全員へ同じ payload を配る（決定202608012141）。
     // 配信ループはここ1本に集約し、pipe ごとに再実装しない
     pub(crate) fn broadcast_to_siblings(&self, pipe: &str, payload: &str) {
         for sibling in &self.known_siblings {
@@ -137,7 +137,7 @@ impl State {
         };
         // 一覧から引ければそれでよいが、非可視インスタンスには PaneUpdate が
         // 届かないので、それだけでは永久に埋まらない。埋まらないまま入場pipeを
-        // 受けると召喚（決定16）が「own id/url unknown」で不発になる（実測）。
+        // 受けると召喚（決定202608011644）が「own id/url unknown」で不発になる（実測）。
         // `get_pane_info()` はサーバへの問い合わせなので可視性に依らない
         self.own_plugin_url = self
             .panes
@@ -184,10 +184,10 @@ impl State {
             self.broadcast_to_siblings(WIDTH_PIPE, WIDTH_REQUEST);
         }
         let dump = (!self.agents.is_empty()).then(|| self.state_dump());
-        // コマンド状態も一緒に配る（決定32）。導出できるのは PaneUpdate が届く
+        // コマンド状態も一緒に配る（決定202608072218）。導出できるのは PaneUpdate が届く
         // このインスタンスだけなので、新入りは押し付けられない限り一生知らない
         let commands = (!self.commands.is_empty()).then(|| self.command_dump());
-        // マークも配る（決定39）。タブをまたぐマークを許した以上、後からできた
+        // マークも配る（決定202608080250）。タブをまたぐマークを許した以上、後からできた
         // タブのサイドバーにだけ印が出ないと「どれを選んだか」が食い違う
         let marked = !self.marked.is_empty();
         for id in newcomers {
@@ -418,7 +418,7 @@ impl State {
         } else {
             Resize::Decrease
         };
-        // サイドバーは左端に置かれる（決定5）ので、自分の幅を動かす境界は右側
+        // サイドバーは左端に置かれる（決定202607302257）ので、自分の幅を動かす境界は右側
         resize_pane_with_id(
             ResizeStrategy::new(resize, Some(Direction::Right)),
             PaneId::Plugin(own_id),

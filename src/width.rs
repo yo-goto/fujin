@@ -32,7 +32,7 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-// 表示セル幅ベースの先頭省略。先頭を落として `…` に畳み、末尾を残す（決定22）。
+// 表示セル幅ベースの先頭省略。先頭を落として `…` に畳み、末尾を残す（決定202608060053）。
 // `/` の位置で丸め、`…` の直後が必ず `/` になるようにする（`…/development/…`
 // の形。詳細は docs/issues/sidebar-cwd-path-boundary.md）。どのセグメント境界でも
 // 収まらないほど狭いときだけ、文字幅で機械的に末尾を残す。
@@ -91,7 +91,7 @@ fn looks_like_path(s: &str) -> bool {
     s.starts_with('/') || s.starts_with("~/")
 }
 
-// 表示幅 max に畳む（決定22）。パスは先頭省略、それ以外は切り詰め。
+// 表示幅 max に畳む（決定202608060053）。パスは先頭省略、それ以外は切り詰め。
 // 返り値は (畳んだ文字列, 先頭で落とした文字数)
 pub(crate) fn fold_to_width(s: &str, max: usize) -> (String, usize) {
     if looks_like_path(s) {

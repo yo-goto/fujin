@@ -67,7 +67,7 @@ fn settle_read(state: &mut State) {
     state.apply_pending_reads();
 }
 
-// 召喚インスタンス（決定16）。常駐との違いはフローティングかどうか
+// 召喚インスタンス（決定202608011644）。常駐との違いはフローティングかどうか
 fn floating_plugin_pane(id: u32, url: &str) -> PaneInfo {
     PaneInfo {
         is_floating: true,
@@ -577,7 +577,7 @@ fn selection_is_zero_when_nothing_is_selectable() {
     assert!(state.selectable.is_empty());
 }
 
-// --- 既読モデル（決定10） ---
+// --- 既読モデル（決定202607302302） ---
 
 #[test]
 fn focusing_a_pane_marks_it_read() {
@@ -643,7 +643,7 @@ fn passing_through_a_pane_keeps_its_state() {
 
 #[test]
 fn passing_through_a_finished_command_pane_keeps_its_state() {
-    // コマンド状態も同じ既読モデルに乗る（決定32）ので、猶予も同じく効く
+    // コマンド状態も同じ既読モデルに乗る（決定202608072218）ので、猶予も同じく効く
     let mut state = state_with_command_panes(vec![exited_command_pane(1, "make", Some(0))]);
 
     state.apply_read_model(&manifest(vec![(
@@ -761,7 +761,7 @@ fn closed_panes_lose_their_state() {
     assert!(!state.pane_cwds.contains_key(&2));
 }
 
-// --- navモードのキー操作（決定12） ---
+// --- navモードのキー操作（決定202607310311） ---
 
 #[test]
 fn nav_keys_move_the_selection() {
@@ -801,7 +801,7 @@ fn nav_g_jumps_to_the_edges() {
 
 #[test]
 fn nav_digits_no_longer_jump_directly() {
-    // かつての 1-9 直行ジャンプは番号ジャンプサブモードへ一本化した（決定29）。
+    // かつての 1-9 直行ジャンプは番号ジャンプサブモードへ一本化した（決定202608070342）。
     // navモード最上位の数字は未定義キー＝安全弁で退場する
     let mut state = state_with_panes(3);
     state.nav_mode = true;
@@ -836,7 +836,7 @@ fn nav_leaves_on_undefined_keys() {
     }
 }
 
-// --- 番号ジャンプサブモード（決定29、要件: docs/requirements/pane-number-jump/） ---
+// --- 番号ジャンプサブモード（決定202608070342、要件: docs/requirements/pane-number-jump/） ---
 
 fn jump_state(count: u32) -> State {
     let mut state = state_with_panes(count);
@@ -868,7 +868,7 @@ fn a_unique_number_jumps_and_leaves_nav_mode() {
 #[test]
 fn numbers_are_zero_padded_to_the_digit_count_of_the_total() {
     // 桁数を総数に固定すると番号どうしが互いの前方一致にならず（prefix-free）、
-    // 「1 を打ったが 10 があるので確定できない」という行き止まりが起きない（決定29）
+    // 「1 を打ったが 10 があるので確定できない」という行き止まりが起きない（決定202608070342）
     let state = state_with_panes(12);
     assert_eq!(state.pane_number_width(), 2);
     assert_eq!(state.pane_number(0), "01");
@@ -984,7 +984,7 @@ fn the_number_column_appears_only_in_the_jump_submode() {
 #[test]
 fn numbers_off_the_candidate_list_are_dimmed() {
     // vimiumのリンクヒントと同じ提示: バッファに前方一致しなくなった番号は
-    // 落とし、残っている候補だけがキーの色（レベル2）で目に入る（決定29）
+    // 落とし、残っている候補だけがキーの色（レベル2）で目に入る（決定202608070342）
     let mut state = jump_state(12);
     state.handle_nav_key(key(BareKey::Char('1')));
 
@@ -1023,7 +1023,7 @@ fn the_footer_shows_the_number_buffer_while_jumping() {
     assert!(content.ends_with("?:help"), "{}", content);
 }
 
-// --- 終了操作サブモード（決定35、要件: docs/requirements/pane-close-kill/） ---
+// --- 終了操作サブモード（決定202608080140、要件: docs/requirements/pane-close-kill/） ---
 //
 // 実行そのもの（send_sigkill_to_pane_id / close_pane_with_id）は副作用だけの
 // ホスト関数で結果を観測できないので、その手前で畳んだ `termination_plan()`
@@ -1156,7 +1156,7 @@ fn the_safety_valve_reaches_the_termination_submode() {
 
 #[test]
 fn every_kind_of_pane_offers_all_three_terminations() {
-    // 対象種別で出し分けはしない（決定35）。対象プロセスが実質存在しない
+    // 対象種別で出し分けはしない（決定202608080140）。対象プロセスが実質存在しない
     // 場合（終了済みコマンドペインへのkill）も no-op になるだけ
     let mut with_agent = state_with_panes(1);
     set_agent_state(&mut with_agent, 1, AgentState::Working);
@@ -1179,7 +1179,7 @@ fn every_kind_of_pane_offers_all_three_terminations() {
 
 #[test]
 fn the_confirmation_prompt_wears_the_warning_color() {
-    // 新しい色は増やさず、状態アイコン `error` と同じ error_color を借りる（決定35）
+    // 新しい色は増やさず、状態アイコン `error` と同じ error_color を借りる（決定202608080140）
     let state = termination_state(3);
     let footer = state.footer_line(SIDEBAR);
     let indent = 2;
@@ -1190,7 +1190,7 @@ fn the_confirmation_prompt_wears_the_warning_color() {
         "{}",
         footer.content()
     );
-    // ヘッダーの三角も同じ状態色（決定27）。モードラベルは navモードのまま
+    // ヘッダーの三角も同じ状態色（決定202608070119）。モードラベルは navモードのまま
     let header = state.header_line(SIDEBAR);
     assert!(ink_at(&header, ERROR_LEVEL).contains(&0), "{:?}", header);
     assert!(header.content().contains("[nav]"), "{}", header.content());
@@ -1203,7 +1203,7 @@ fn the_prompt_falls_back_to_bare_keys_when_it_does_not_fit() {
     assert_eq!(state.footer_line(16).content(), "  c k x");
 }
 
-// --- 複数選択（マーク。決定39、要件:
+// --- 複数選択（マーク。決定202608080250、要件:
 // docs/requirements/pane-termination-multi-select/） ---
 //
 // 一括操作の対象として選んだペインの集合。単一のナビゲーションカーソルである
@@ -1237,7 +1237,7 @@ fn the_mark_key_toggles_the_pane_under_the_selection() {
 
 #[test]
 fn marks_pile_up_row_by_row_across_tabs() {
-    // マークはタブをまたいでよい（決定39。selectable が元々タブ横断のため）
+    // マークはタブをまたいでよい（決定202608080250。selectable が元々タブ横断のため）
     let mut state = searchable_state(); // タブ0に1・2、タブ1に3
     state.handle_nav_key(mark_key());
     state.handle_nav_key(key(BareKey::Char('G'))); // 別タブの末尾へ
@@ -1413,7 +1413,7 @@ fn a_marked_row_still_leaves_the_right_margin() {
 
 #[test]
 fn the_mark_column_sits_between_the_number_and_the_icon() {
-    // 列順序は 選択バー → 番号列 → マーク列 → アイコン → ペイン名（決定39）。
+    // 列順序は 選択バー → 番号列 → マーク列 → アイコン → ペイン名（決定202608080250）。
     // マーク自体は番号ジャンプサブモードへ入る前に立てたもの
     let mut state = jump_state(12);
     state.marked.insert(1);
@@ -1459,7 +1459,7 @@ fn marked_triage_rows_wear_the_mark_too() {
     assert!(row.content().starts_with("  ✓ ×"), "{}", row.content());
 }
 
-// --- マークと終了操作の連携（決定39） ---
+// --- マークと終了操作の連携（決定202608080250） ---
 
 #[test]
 fn the_termination_takes_the_marks_when_there_are_any() {
@@ -1478,7 +1478,7 @@ fn the_termination_takes_the_marks_when_there_are_any() {
 
 #[test]
 fn without_marks_the_termination_falls_back_to_the_selection() {
-    // 単一版のフローはマーク0件の特殊ケースとして包含する（決定39）
+    // 単一版のフローはマーク0件の特殊ケースとして包含する（決定202608080250）
     let state = termination_state(3);
     assert_eq!(
         state.termination_plan(Termination::Close),
@@ -1522,7 +1522,7 @@ fn a_marked_pane_closed_during_the_prompt_is_left_alone() {
 
 #[test]
 fn running_a_termination_clears_every_mark() {
-    // 成功・no-op を問わずクリアする（決定39）
+    // 成功・no-op を問わずクリアする（決定202608080250）
     for pressed in ['c', 'k', 'x'] {
         let mut state = state_with_panes(3);
         state.nav_mode = true;
@@ -1550,7 +1550,7 @@ fn cancelling_a_termination_keeps_the_marks() {
 #[test]
 fn the_prompt_counts_the_marked_panes() {
     // マーク1件以上のときだけ件数を前置する。幅28セルに3項目とも入らないので
-    // キーだけの2段目に落ちるが、件数は残す（決定39）
+    // キーだけの2段目に落ちるが、件数は残す（決定202608080250）
     let mut state = state_with_panes(3);
     state.nav_mode = true;
     state.marked.extend([1, 2]);
@@ -1564,7 +1564,7 @@ fn the_prompt_counts_the_marked_panes() {
     assert_eq!(single.footer_line(SIDEBAR).content(), "  1 pane  c k x");
 }
 
-// --- マークの同期（決定39・決定13） ---
+// --- マークの同期（決定202608080250・決定202608012141） ---
 
 #[test]
 fn marks_travel_to_siblings_as_pane_ids() {
@@ -1609,7 +1609,7 @@ fn the_nav_help_advertises_the_mark_keys() {
     assert!(lines.contains("mark / clear all"), "{}", lines);
 }
 
-// --- プレビュー（決定42、要件: docs/requirements/preview/） ---
+// --- プレビュー（決定202608082045、要件: docs/requirements/preview/） ---
 //
 // navモード中、いま光っている行のペインの内容をフローティングペインへ
 // スナップショット表示するトグル可能な横断的機能。
@@ -1717,7 +1717,7 @@ fn the_preview_stops_updating_in_the_number_jump_submode() {
     // オンのまま番号ジャンプサブモードへ入ることはできる。候補を絞っている
     // あいだは対象ペインが定まらないので、表示は直前のまま動かさない
     // 通し番号が2桁になる件数にしておく。1桁だと最初の数字で候補が1件に
-    // 確定して即ジャンプしてしまい、「入力中」の状態を作れない（決定29）
+    // 確定して即ジャンプしてしまい、「入力中」の状態を作れない（決定202608070342）
     let mut state = state_with_panes(12);
     state.nav_mode = true;
     state.handle_nav_key(preview_key());
@@ -1740,7 +1740,7 @@ fn leaving_nav_mode_closes_the_preview() {
     assert!(!state.nav_mode);
     assert!(
         state.preview.is_none(),
-        "navモードの外にプレビューだけ残さない（決定34と整合させる）"
+        "navモードの外にプレビューだけ残さない（決定202608072359と整合させる）"
     );
 }
 
@@ -1758,7 +1758,7 @@ fn jumping_closes_the_preview() {
 #[test]
 fn previewing_does_not_change_the_notification_state() {
     // プレビューはフォーカスもキー横取りも対象ペインに及ぼさないので、
-    // 見て回るだけでは既読にならない（決定10・決定37はそのまま無関係に動く）
+    // 見て回るだけでは既読にならない（決定202607302302・決定202608080109はそのまま無関係に動く）
     let mut state = state_with_panes(3);
     set_agent_state(&mut state, 2, AgentState::Done);
     state.nav_mode = true;
@@ -1899,7 +1899,7 @@ fn the_snapshot_drops_the_blank_tail() {
 
 // --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/nav-mode/） ---
 //
-// サイドバー幅は32文字（決定3）。ヘッダもヘルプもこの幅を前提に文言を決めてある
+// サイドバー幅は32文字（決定202607302256）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 
 // Text の装飾を「レベル → 文字位置」に戻す。serialize() は
 // 「`selected`/`opaque` のプレフィックス → レベルごとの位置列を `$` 区切りで
@@ -1938,10 +1938,10 @@ fn ink_at(text: &Text, level: usize) -> Vec<usize> {
 const DIM_LEVEL: usize = 4;
 // unbold。zellij 側の基底スタイルが bold なので、落とさない＝太いまま残る
 const UNBOLD_LEVEL: usize = 5;
-// error_color。状態アイコン `error` と終了操作サブモードの警告色（決定35）
+// error_color。状態アイコン `error` と終了操作サブモードの警告色（決定202608080140）
 const ERROR_LEVEL: usize = 6;
 
-// プラグインの configuration（決定40。取り込みは State::apply_config 1本）
+// プラグインの configuration（決定202608080346。取り込みは State::apply_config 1本）
 fn plugin_config(settings: &[(&str, &str)]) -> BTreeMap<String, String> {
     settings
         .iter()
@@ -1990,8 +1990,8 @@ fn the_header_labels_the_triage_mode() {
 
 #[test]
 fn the_header_never_shows_the_waiting_count() {
-    // 待ち件数のヘッダ表示は決定27で廃止した。集計そのものは残っている
-    //（決定32でコマンド状態も含む形に広げた）
+    // 待ち件数のヘッダ表示は決定202608070119で廃止した。集計そのものは残っている
+    //（決定202608072218でコマンド状態も含む形に広げた）
     let mut state = state_with_panes(4);
     set_agent_state(&mut state, 1, AgentState::Done);
     set_agent_state(&mut state, 2, AgentState::Blocked);
@@ -2035,7 +2035,7 @@ fn the_header_triangle_carries_the_mode_color() {
 
 #[test]
 fn the_mode_label_shares_the_triangle_color() {
-    // ラベルは三角の裏取りなので同じ状態色で出す（決定27）。ブランド名だけは
+    // ラベルは三角の裏取りなので同じ状態色で出す（決定202608070119）。ブランド名だけは
     // dim のまま — 名前まで色を付けるとツリーの状態アイコンの色分けと喧嘩する
     let mut state = state_with_panes(2);
     state.nav_mode = true;
@@ -2121,7 +2121,7 @@ fn assert_frame(rows: &[Row<'_>], label: &str) {
 
 #[test]
 fn the_divider_leaves_the_right_margin() {
-    // 境界線も他の行と同じく右端2セルを空ける（決定3の右マージン）
+    // 境界線も他の行と同じく右端2セルを空ける（決定202607302256の右マージン）
     let divider = divider_line(32);
     let line = divider.content();
     assert_eq!(line.chars().count(), 30);
@@ -2129,12 +2129,12 @@ fn the_divider_leaves_the_right_margin() {
     assert_eq!(ink_at(&divider, DIM_LEVEL).len(), 30, "dim で引く");
 }
 
-// --- フッター（決定27。要件: sidebar-footer.feature） ---
+// --- フッター（決定202608070119。要件: sidebar-footer.feature） ---
 
 #[test]
 fn the_footer_shows_the_configured_direct_keys() {
     // 決め打ちのキー表記はユーザーの設定と食い違いうるので、実際に割り当てた
-    // キーの表記を configuration から受け取って出す（決定28）
+    // キーの表記を configuration から受け取って出す（決定202608070226）
     let mut state = state_with_panes(2);
     state.apply_config(&plugin_config(&[
         ("up_key", "f1"),
@@ -2235,7 +2235,7 @@ fn long_direct_keys_fall_back_to_arrows() {
     assert_eq!(footer, "  pgup:↑  pgdn:↓  alt+g:jump");
 }
 
-// --- 設定の取り込みと警告（決定40。要件: configuration） ---
+// --- 設定の取り込みと警告（決定202608080346。要件: configuration） ---
 
 #[test]
 fn the_property_form_of_kdl_is_normalised() {
@@ -2257,7 +2257,7 @@ fn the_property_form_of_kdl_is_normalised() {
 
 #[test]
 fn a_flag_setting_takes_only_true_and_false() {
-    // 真偽値の受け口は広げない（決定40）。`1` や `yes` を真と見なすと、
+    // 真偽値の受け口は広げない（決定202608080346）。`1` や `yes` を真と見なすと、
     // 「効かない書き方」の一覧がユーザーからは推測できなくなる
     let mut state = state_with_panes(2);
     for (value, expected) in [("true", true), ("false", false)] {
@@ -2298,7 +2298,7 @@ fn every_flag_setting_reaches_the_config() {
 
 #[test]
 fn an_unusable_value_warns_in_the_footer() {
-    // 既定値へ黙って倒すと、書いた設定が効かない理由が分からない（決定40）
+    // 既定値へ黙って倒すと、書いた設定が効かない理由が分からない（決定202608080346）
     let mut state = state_with_panes(2);
     with_direct_keys(&mut state);
     state.apply_config(&plugin_config(&[("show_cwd", "1"), ("up_key", "alt+u")]));
@@ -2310,7 +2310,7 @@ fn an_unusable_value_warns_in_the_footer() {
         !ink_at(&footer, ERROR_LEVEL).is_empty(),
         "警告色（error_color）で出す"
     );
-    // ヘッダーの三角も同じ状態色に揃う（決定27）
+    // ヘッダーの三角も同じ状態色に揃う（決定202608070119）
     assert!(!ink_at(&state.header_line(SIDEBAR), ERROR_LEVEL).is_empty());
 }
 
@@ -2356,7 +2356,7 @@ fn the_config_warning_gives_way_to_an_input_footer() {
 
 #[test]
 fn the_config_warning_stops_after_its_deadline() {
-    // 起動直後の一定時間だけ（決定40）。期限が切れたら通常の表示へ戻る
+    // 起動直後の一定時間だけ（決定202608080346）。期限が切れたら通常の表示へ戻る
     let mut state = state_with_panes(2);
     with_direct_keys(&mut state);
     state.apply_config(&plugin_config(&[
@@ -2382,7 +2382,7 @@ fn the_config_warning_stops_after_its_deadline() {
 
 #[test]
 fn the_readme_settings_section_is_generated_from_the_table() {
-    // 設定一覧の正本はコード（決定40）。README へ手で転記した表は必ずいつか
+    // 設定一覧の正本はコード（決定202608080346）。README へ手で転記した表は必ずいつか
     // ずれるので、生成物との一致をテストで縛る。差分が出たら `make readme`
     use crate::config::doc::{settings_doc, splice, Lang};
 
@@ -2437,7 +2437,7 @@ fn the_footer_becomes_the_query_field_while_searching() {
 
     let footer = state.footer_line(32);
     let footer = footer.content();
-    // 地の文の疑似カーソルは描かない（位置はテキストカーソルに任せる。決定50、
+    // 地の文の疑似カーソルは描かない（位置はテキストカーソルに任せる。決定202608131200、
     // 2026-08-13 に廃止）。`?` はクエリの文字なのでヘルプの案内は出さない
     //（要件: nav-mode-hints.feature）
     assert!(footer.starts_with("  /alp"), "{}", footer);
@@ -2449,7 +2449,7 @@ fn the_footer_becomes_the_query_field_while_searching() {
 
 #[test]
 fn the_footer_hints_change_with_the_search_phase() {
-    // 状態インジケータは入力文字列の明暗とヒント文言の2つ（決定50、2026-08-13に
+    // 状態インジケータは入力文字列の明暗とヒント文言の2つ（決定202608131200、2026-08-13に
     // 地の文の疑似カーソルを廃止。経緯: docs/issues/search-input-cursor-shape.md）
     let mut state = navigating_search("");
     let footer = state.footer_line(32);
@@ -2476,7 +2476,7 @@ fn the_footer_hints_change_with_the_search_phase() {
 
 #[test]
 fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
-    // 地の文の疑似カーソルは無くテキストカーソルへ位置表示を一本化した（決定50、
+    // 地の文の疑似カーソルは無くテキストカーソルへ位置表示を一本化した（決定202608131200、
     // 2026-08-13。経緯: docs/issues/search-input-cursor-shape.md）ので、状態を
     // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。打てない状態でも
     // 位置を見失わせないよう、沈めるのはクエリだけでテキストカーソルは点いたまま残す
@@ -2583,7 +2583,7 @@ fn the_footer_takes_over_the_help_overlays_closing_hint() {
 
 #[test]
 fn the_footer_wears_the_state_color_including_its_keys() {
-    // 「キーは常にレベル2固定」の色役割はフッターに限り例外（決定27）。
+    // 「キーは常にレベル2固定」の色役割はフッターに限り例外（決定202608070119）。
     // ヘッダーの三角とトーンを揃えるほうを取る
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
@@ -2620,7 +2620,7 @@ fn the_footer_never_runs_off_the_right_margin() {
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "日本語のクエリで幅を埋める");
     widths.push(state.footer_line(SIDEBAR));
-    // 操作状態（ヒントが長い）でも同じ（決定50）
+    // 操作状態（ヒントが長い）でも同じ（決定202608131200）
     state.handle_nav_key(key(BareKey::Esc));
     widths.push(state.footer_line(SIDEBAR));
 
@@ -2652,7 +2652,7 @@ fn question_mark_opens_the_help_overlay() {
 
 #[test]
 fn the_help_overlay_covers_the_tree_but_keeps_the_frame() {
-    // 覆うのは content だけ。ヘッダー・フッターと境界線は出したままにする（決定27）
+    // 覆うのは content だけ。ヘッダー・フッターと境界線は出したままにする（決定202608070119）
     let mut state = state_with_panes(3);
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));
@@ -2684,7 +2684,7 @@ fn overlay_lines(state: &State, cols: usize) -> Vec<String> {
 
 #[test]
 fn the_help_lines_fit_the_sidebar_width() {
-    // 幅32（決定3）に収まらないと、キー列か説明のどちらかが … で消える
+    // 幅32（決定202607302256）に収まらないと、キー列か説明のどちらかが … で消える
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('?')));
     for line in overlay_lines(&state, 32) {
@@ -2692,7 +2692,7 @@ fn the_help_lines_fit_the_sidebar_width() {
     }
     state.handle_nav_key(key(BareKey::Char('?'))); // いったん閉じる
     state.handle_nav_key(key(BareKey::Char('/')));
-    state.handle_nav_key(key(BareKey::Esc)); // ヘルプを開けるのは操作状態から（決定50）
+    state.handle_nav_key(key(BareKey::Esc)); // ヘルプを開けるのは操作状態から（決定202608131200）
     state.handle_nav_key(key(BareKey::Char('?')));
     for line in overlay_lines(&state, 32) {
         assert!(!line.contains('…'), "検索サブモード: {}", line);
@@ -2816,7 +2816,7 @@ fn the_sidebar_never_shows_japanese_text() {
 #[test]
 fn the_help_overlay_ends_with_the_status_icon_legend() {
     // 要件: nav-mode-hints.feature「ヘルプオーバーレイに状態アイコン凡例が
-    // 表示される」。README を見に行かなくても記号の意味を引けるようにする（決定25）
+    // 表示される」。README を見に行かなくても記号の意味を引けるようにする（決定202608062201）
     let mut state = state_with_panes(2);
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));
@@ -2831,7 +2831,7 @@ fn the_help_overlay_ends_with_the_status_icon_legend() {
         .filter(|line| !line.trim().is_empty())
         .collect();
 
-    // 並び・アイコン・説明はすべて AgentState のテーブル由来（決定25）。
+    // 並び・アイコン・説明はすべて AgentState のテーブル由来（決定202608062201）。
     // 末尾の1行だけは AgentState に無い「エージェントが乗っていないペイン」の印
     assert_eq!(legend.len(), AgentState::ALL.len() + 1, "{:?}", legend);
     for (line, agent_state) in legend.iter().zip(AgentState::ALL.iter()) {
@@ -2887,9 +2887,9 @@ fn the_status_legend_lines_up_with_the_key_column() {
 #[test]
 fn the_help_headings_leave_the_mode_name_to_the_header() {
     // ヘッダーの `▲ fujin [tri]` と重複するので、オーバーレイの見出しは
-    // 節名だけにする（決定30）
+    // 節名だけにする（決定202608071906）
     let mut nav = searchable_state();
-    // 検索サブモードのヘルプは操作状態から開く（決定50）
+    // 検索サブモードのヘルプは操作状態から開く（決定202608131200）
     let mut search = navigating_search("");
     let mut jump = searchable_state();
     jump.handle_nav_key(key(BareKey::Char('n')));
@@ -2924,7 +2924,7 @@ fn the_help_headings_leave_the_mode_name_to_the_header() {
 
 #[test]
 fn the_key_column_fits_the_widest_key_of_the_mode() {
-    // 17セル固定をやめ、モードごとの実測最大＋空白2にした（決定30）。
+    // 17セル固定をやめ、モードごとの実測最大＋空白2にした（決定202608071906）。
     // いちばん長いキーのためだけに全行が空白を払う状態を解消する
     let mut nav = state_with_panes(2);
     nav.nav_mode = true;
@@ -2985,7 +2985,7 @@ fn the_no_agent_legend_carries_no_decoration() {
 #[test]
 fn the_status_legend_carries_the_state_colors() {
     // 凡例の目的は意味と色を結びつけることなので、アイコンにだけは状態色を乗せる
-    //（キーは常にレベル2固定、というヘルプの色役割の例外・決定25）
+    //（キーは常にレベル2固定、というヘルプの色役割の例外・決定202608062201）
     let mut state = state_with_panes(2);
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));
@@ -3016,7 +3016,7 @@ fn the_status_legend_carries_the_state_colors() {
 #[test]
 fn every_agent_state_gets_a_color_of_its_own() {
     // 要件: agent-status-icon.feature「状態ごとに異なる色で判別できる」。
-    // `error` が `blocked` とレベル3で重複していたのを解消した（決定25）
+    // `error` が `blocked` とレベル3で重複していたのを解消した（決定202608062201）
     let levels: Vec<usize> = AgentState::ALL.iter().map(|s| s.color()).collect();
     let mut unique = levels.clone();
     unique.sort_unstable();
@@ -3122,7 +3122,7 @@ fn any_key_closes_the_help_overlay_without_acting_on_it() {
 
 #[test]
 fn modified_keys_only_close_the_help_overlay() {
-    // 安全弁（決定12）より手前で閉じる。閲覧をやめただけで退場させるのは筋が通らない
+    // 安全弁（決定202607310311）より手前で閉じる。閲覧をやめただけで退場させるのは筋が通らない
     let mut state = state_with_panes(3);
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));
@@ -3134,7 +3134,7 @@ fn modified_keys_only_close_the_help_overlay() {
 
 #[test]
 fn the_help_overlay_opens_from_the_search_submode_too() {
-    // 開けるのは操作状態から（編集状態の `?` はクエリの文字。決定50）
+    // 開けるのは操作状態から（編集状態の `?` はクエリの文字。決定202608131200）
     let mut state = navigating_search("alp");
     state.handle_nav_key(key(BareKey::Char('?')));
 
@@ -3291,7 +3291,7 @@ fn focus_follows_only_when_it_moved() {
 #[test]
 fn a_newly_visible_instance_re_reads_the_focus() {
     // 非可視の間は PaneUpdate が届かずキャッシュが凍る。タブを切り替えて
-    // 戻ると「フォーカスは動いていない」と誤判定し、その間に決定13の同期で
+    // 戻ると「フォーカスは動いていない」と誤判定し、その間に決定202608012141の同期で
     // 受け取った別タブの選択が残ったままになる（実測での症状）
     let mut state = state_with_panes(3);
     state.focused_pane = Some(1);
@@ -3375,7 +3375,7 @@ fn a_focused_floating_terminal_is_used_when_no_tile_is_focused() {
 
 #[test]
 fn owns_tab_only_matches_the_tab_holding_this_instance() {
-    // 権威判定（決定14）の材料。フォーカス中のタブに自分が居るかだけを見る
+    // 権威判定（決定202608012142）の材料。フォーカス中のタブに自分が居るかだけを見る
     let state = State {
         own_plugin_id: Some(9),
         panes: Some(manifest(vec![
@@ -3393,7 +3393,7 @@ fn owns_tab_only_matches_the_tab_holding_this_instance() {
     assert!(!state.owns_tab(2), "存在しないタブ");
 }
 
-// --- フォーカスの預かり（決定34） ---
+// --- フォーカスの預かり（決定202608072359） ---
 //
 // `set_selectable()` / `focus_plugin_pane()` / `focus_pane_with_id()` は副作用
 // だけのホストコマンドなのでテストから呼んでも安全だが、効き目は観測できない。
@@ -3474,7 +3474,7 @@ fn a_floating_work_pane_is_remembered_as_floating() {
 
 #[test]
 fn a_summoned_instance_does_not_park_anything() {
-    // 召喚インスタンスは最初から自分がフォーカスを持っている（決定16）
+    // 召喚インスタンスは最初から自分がフォーカスを持っている（決定202608011644）
     let mut state = state_ready_to_park(3);
     state.summoned = true;
 
@@ -3705,7 +3705,7 @@ fn cursor_moves_in_tree_order_and_stops_at_the_edges() {
 
 #[test]
 fn esc_is_three_staged_and_does_not_close_a_summoned_instance() {
-    // 決定50で編集状態→操作状態の1段が挟まった（要件:
+    // 決定202608131200で編集状態→操作状態の1段が挟まった（要件:
     // search-mode-entry-exit.feature / summoned-instance-search.feature）
     let mut state = searchable_state();
     state.summoned = true;
@@ -3735,7 +3735,7 @@ fn esc_is_three_staged_and_does_not_close_a_summoned_instance() {
     assert!(!state.nav_mode);
 }
 
-// いまの検索サブモードの状態（決定50）
+// いまの検索サブモードの状態（決定202608131200）
 fn search_phase(state: &State) -> Option<SearchPhase> {
     state.search.as_ref().map(|s| s.phase)
 }
@@ -3762,7 +3762,7 @@ fn slash_starts_in_the_editing_phase() {
 
 #[test]
 fn a_question_mark_feeds_the_query_while_editing() {
-    // 決定18の「クエリに `?` は打てない」という制約を決定50で解消した
+    // 決定202608031908の「クエリに `?` は打てない」という制約を決定202608131200で解消した
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "a?");
@@ -3802,7 +3802,7 @@ fn the_navigating_phase_moves_the_cursor_with_j_and_k() {
 #[test]
 fn the_navigating_phase_ignores_everything_but_its_command_keys() {
     // vimのnormalモードに近い予測可能性を優先し、押し間違いで状態が黙って
-    // 変わる事故を避ける（決定50。要件: search-mode-key-handling.feature）
+    // 変わる事故を避ける（決定202608131200。要件: search-mode-key-handling.feature）
     let mut state = navigating_search("cha");
     state.handle_nav_key(key(BareKey::Char('j'))); // 端で止まるので動かない
     let cursor = state.search.as_ref().unwrap().cursor;
@@ -3873,7 +3873,7 @@ fn enter_jumps_from_the_navigating_phase_too() {
 
 #[test]
 fn modified_keys_leave_nav_mode_from_the_navigating_phase_too() {
-    // 安全弁（決定12）は操作状態でも効く（無反応にするのはコマンドキー以外の
+    // 安全弁（決定202607310311）は操作状態でも効く（無反応にするのはコマンドキー以外の
     // 素のキーだけ。要件: search-mode-key-handling.feature）
     let mut state = navigating_search("cha");
     state.handle_nav_key(KeyWithModifier::new(BareKey::Char('x')).with_alt_modifier());
@@ -3884,7 +3884,7 @@ fn modified_keys_leave_nav_mode_from_the_navigating_phase_too() {
 
 #[test]
 fn pasted_text_is_ignored_in_the_navigating_phase() {
-    // キーと同じ扱い（決定50）。IMEの確定・貼り付けもテキスト入力なので、
+    // キーと同じ扱い（決定202608131200）。IMEの確定・貼り付けもテキスト入力なので、
     // 打てない状態では受け取らない
     let mut state = navigating_search("cha");
     assert!(!state.handle_pasted_text("日本語"));
@@ -3922,7 +3922,7 @@ fn esc_restores_the_selection_saved_on_entry() {
     ]));
     state.rebuild_selectable();
 
-    // 1段目のEscは操作状態へ移るだけ。選択が戻るのは2段目（決定50）
+    // 1段目のEscは操作状態へ移るだけ。選択が戻るのは2段目（決定202608131200）
     state.handle_nav_key(key(BareKey::Esc));
     state.handle_nav_key(key(BareKey::Esc));
     assert_eq!(state.selectable[state.selected].pane_id, 2);
@@ -3955,7 +3955,7 @@ fn enter_with_no_hits_does_nothing() {
 
 #[test]
 fn modified_keys_leave_nav_mode_from_search_too() {
-    // 安全弁は最上位まで効かせる（決定12と同様）
+    // 安全弁は最上位まで効かせる（決定202607310311と同様）
     for key in [
         KeyWithModifier::new(BareKey::Char('n')).with_ctrl_modifier(),
         KeyWithModifier::new(BareKey::Char('x')).with_alt_modifier(),
@@ -4056,7 +4056,7 @@ fn highlight_indices_beyond_the_truncation_are_dropped() {
     );
 }
 
-// --- 兄弟インスタンスの検出（決定13） ---
+// --- 兄弟インスタンスの検出（決定202608012141） ---
 
 #[test]
 fn own_plugin_url_is_learned_from_the_manifest() {
@@ -4091,7 +4091,7 @@ fn siblings_are_the_same_plugin_in_other_tabs() {
     );
 }
 
-// --- 臨時召喚（決定16） ---
+// --- 臨時召喚（決定202608011644） ---
 //
 // 召喚そのもの（summon_floating_if_absent）は get_focused_pane_info /
 // get_pane_info を経由するのでここでは検証できない。召喚された側の
@@ -4317,7 +4317,7 @@ fn sync_pipe_only_fills_an_empty_state() {
 
 #[test]
 fn toggle_cwd_pipe_flips_the_local_value_when_unprompted() {
-    // ユーザーのキー操作からはpayloadが付かない（決定6）。全インスタンスが
+    // ユーザーのキー操作からはpayloadが付かない（決定202607302258）。全インスタンスが
     // 同じ値から出発している前提で、権威を立てず各自が独立に反転する
     // （docs/issues/toggle-cwd-key.md）
     let mut state = State::default();
@@ -4332,7 +4332,7 @@ fn toggle_cwd_pipe_flips_the_local_value_when_unprompted() {
 
 #[test]
 fn toggle_cwd_pipe_applies_an_explicit_sync_value() {
-    // 新入りインスタンスへの現在値push（決定13）は明示セット。反転にすると
+    // 新入りインスタンスへの現在値push（決定202608012141）は明示セット。反転にすると
     // 押し付けるたびに向きがずれる
     let mut state = State::default();
     assert!(state.pipe(pipe_message(TOGGLE_CWD_PIPE, "true")));
@@ -4362,7 +4362,7 @@ fn toggle_cwd_pipe_treats_an_empty_payload_as_a_key_press() {
 
 #[test]
 fn toggle_cwd_pipe_ignores_an_unparsable_payload() {
-    // 真偽値の受け口は広げない（決定40）。黙って false へ倒すと、cwd が消えた
+    // 真偽値の受け口は広げない（決定202608080346）。黙って false へ倒すと、cwd が消えた
     // 結果だけが残って原因を追えない
     let mut state = State {
         show_cwd: true,
@@ -4384,13 +4384,13 @@ fn unknown_pipes_are_ignored() {
     assert!(!state.pipe(pipe_message("some_other_plugin", "payload")));
 }
 
-// --- ペイン行のレイアウト（決定21・決定22） ---
+// --- ペイン行のレイアウト（決定202608060052・決定202608060053） ---
 //
 // カウンタ列は右端に揃え、幅はフレーム全体で共有する。ペイン名はその残り幅に
 // 収めるので、名前が長くてもサブエージェント数 `+N`・未完了タスク数 `[M]` は
 // 消えない。cwd はペイン行に混ぜず、続く cwd行に出す
 
-const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定3）
+const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定202607302256）
                            // ツリーの上に常時居る枠（境界線・ヘッダー・境界線）。ツリーの行番号は
                            // すべてこの下から数える（要件: sidebar-header.feature）
 const HEADER_ROWS: usize = 3;
@@ -4490,7 +4490,7 @@ fn a_status_replaces_the_no_agent_marker() {
 #[test]
 fn the_status_icon_keeps_its_color_on_the_highlighted_row() {
     // カーソルが乗っても状態色は変えない。行が変わるたびにアイコンの色が
-    // 動くと、色だけで状態を判別できるという前提（決定25）が崩れる。
+    // 動くと、色だけで状態を判別できるという前提（決定202608062201）が崩れる。
     //
     // `selected()` と `opaque()` を併用していたころは、レベル0（idle）の位置指定
     // だけが zellij 本体のパースで壊れ、選択行の idle アイコンがテーマの base 色
@@ -4780,7 +4780,7 @@ fn a_pane_name_that_is_a_path_keeps_its_tail() {
     assert_eq!(unicode_width::UnicodeWidthStr::width(content), CONTENT);
 }
 
-// --- cwd行（決定22） ---
+// --- cwd行（決定202608060053） ---
 
 #[test]
 fn the_cwd_is_rendered_as_its_own_row() {
@@ -4832,7 +4832,7 @@ fn a_pane_without_a_cwd_gets_no_extra_row() {
 
 #[test]
 fn the_cwd_row_appears_for_a_search_hit_even_when_show_cwd_is_off() {
-    // 画面に無い文字列でヒットしたように見せない（決定18）
+    // 画面に無い文字列でヒットしたように見せない（決定202608031908）
     let mut state = searchable_state();
     assert!(!state.show_cwd);
     state.handle_nav_key(key(BareKey::Char('/')));
@@ -4894,14 +4894,14 @@ fn the_cwd_row_disappears_when_the_agent_exits() {
             .any(|r| matches!(r, Row::Cwd { .. })),
         "終了後は出ない"
     );
-    // cwd 自体は捨てない。ペイン名フォールバック（決定26）が使う
+    // cwd 自体は捨てない。ペイン名フォールバック（決定202608070102）が使う
     assert!(state.pane_cwds.contains_key(&1));
 }
 
 #[test]
 fn an_exited_agent_still_gets_a_cwd_row_for_a_search_hit() {
     // 表示条件を絞っても、絞り込み結果の提示は変えない — 一覧に残っている以上、
-    // 何に一致したかは示す（決定18）
+    // 何に一致したかは示す（決定202608031908）
     let mut state = searchable_state();
     state.show_cwd = true;
     // pane2 は cwd を持つがエージェントは居ない（＝終了後と同じ状態）
@@ -4940,7 +4940,7 @@ fn the_cwd_row_keeps_the_tail_of_the_path() {
     assert!(unicode_width::UnicodeWidthStr::width(content) <= CONTENT);
 }
 
-// --- ペイン名フォールバック（決定26） ---
+// --- ペイン名フォールバック（決定202608070102） ---
 //
 // claude は終了時に空のタイトルを OSC で送るため、エージェントを落とした瞬間に
 // ペイン名が空のまま残る（docs/issues/pane-title-blank-on-exit.md）
@@ -4983,7 +4983,7 @@ fn a_pane_name_that_is_only_spaces_falls_back_too() {
 
 #[test]
 fn a_non_empty_pane_name_is_left_alone() {
-    // 決定19（生のペイン名をそのまま出す）は空でないときは変わらない
+    // 決定202608050055（生のペイン名をそのまま出す）は空でないときは変わらない
     let mut state = state_with_one_pane("claude-worker");
     state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
 
@@ -5091,7 +5091,7 @@ fn the_cwd_row_survives_a_sidebar_narrower_than_its_indent() {
 // --- フローティングペインの区別表示（要件: docs/requirements/floating-pane-indicator/） ---
 //
 // フローティングペインはフローティング層ごと隠れうるので、一覧の上で見分けられる
-// ようにペイン名を丸括弧で囲む。色・dim は使わない（決定36）
+// ようにペイン名を丸括弧で囲む。色・dim は使わない（決定202608080027）
 
 // フローティングなターミナルペイン1つだけを持つ状態
 fn state_with_one_floating_pane(title: &str) -> State {
@@ -5163,7 +5163,7 @@ fn a_long_floating_name_is_folded_inside_the_parentheses() {
 
 #[test]
 fn a_long_floating_path_keeps_the_parentheses_around_the_leading_ellipsis() {
-    // パス形式は先頭省略（決定22）。省略記号は括弧の内側に入る
+    // パス形式は先頭省略（決定202608060053）。省略記号は括弧の内側に入る
     let state = state_with_one_floating_pane("/Users/example/development/oss/zellij-plugins/fujin");
     let content = pane_row_content(&state);
     assert!(
@@ -5180,7 +5180,7 @@ fn a_long_floating_path_keeps_the_parentheses_around_the_leading_ellipsis() {
 
 #[test]
 fn the_parentheses_are_reserved_ahead_of_the_pane_name() {
-    // 括弧はカウンタ列と同じく先に確保する（決定21の考え方）。名前が長くても
+    // 括弧はカウンタ列と同じく先に確保する（決定202608060052の考え方）。名前が長くても
     // 括弧・カウンタ列のどちらも消えず、畳まれるのはペイン名の側
     let mut state = state_with_one_floating_pane("要件定義とドキュメント整理タスクの続き");
     repeat_status(&mut state, 1, "SubagentStart", 2);
@@ -5207,7 +5207,7 @@ fn the_parentheses_are_reserved_ahead_of_the_pane_name() {
 
 #[test]
 fn a_floating_pane_falling_back_to_its_cwd_wraps_the_cwd() {
-    // ペイン名の位置に出ているのが cwd でも、囲むものには変わりない（決定26）
+    // ペイン名の位置に出ているのが cwd でも、囲むものには変わりない（決定202608070102）
     let mut state = state_with_one_floating_pane("");
     state.pane_cwds.insert(1, "/work/oss/fujin".to_string());
 
@@ -5366,7 +5366,7 @@ fn render_survives_search_mode() {
 
 #[test]
 fn render_survives_the_preview_pane() {
-    // プレビュー用フローティングペイン（決定42）は枠を持たない別の描画パス
+    // プレビュー用フローティングペイン（決定202608082045）は枠を持たない別の描画パス
     let mut state = State {
         is_preview: true,
         permissions_granted: true,
@@ -5734,7 +5734,7 @@ fn clicking_is_ignored_before_permissions_are_granted() {
 // --- トリアージモード（要件: docs/requirements/triage-mode/） ---
 //
 // navモードの内側で `p` から入る、エージェント状態の緊急度順のフラット一覧。
-// ツリー表示の並び順（決定3）には手を触れず、切り替えて使う
+// ツリー表示の並び順（決定202607302256）には手を触れず、切り替えて使う
 
 // タブ0に3ペイン、タブ1に1ペインを持つ navモード中の状態
 fn triage_state() -> State {
@@ -5930,7 +5930,7 @@ fn enter_jumps_from_the_triage_list_and_leaves_nav_mode() {
 #[test]
 fn a_triage_jump_clears_the_read_state_through_the_usual_path() {
     // 既読クリアは「PaneUpdate でのフォーカス変化を見る」汎用の仕組みに乗せる。
-    // トリアージモード専用のクリア処理を別に書くと、決定13が踏んだ配り漏れの
+    // トリアージモード専用のクリア処理を別に書くと、決定202608012141が踏んだ配り漏れの
     // 罠を再発明することになる（要件: triage-mode-entry-exit.feature）
     let mut state = triage_state();
     set_agent_state(&mut state, 2, AgentState::Blocked);
@@ -6045,7 +6045,7 @@ fn the_triage_cursor_falls_back_when_its_pane_leaves_the_list() {
 
 #[test]
 fn triage_leaves_nav_mode_on_undefined_keys() {
-    // 安全弁（決定12）はサブモードでも最上位まで効かせる
+    // 安全弁（決定202607310311）はサブモードでも最上位まで効かせる
     for k in [
         key(BareKey::Char('z')),
         key(BareKey::Char('q')),
@@ -6247,7 +6247,7 @@ fn render_survives_triage_mode() {
     state.render(1, 1);
 }
 
-// --- コマンド状態（決定32。要件: docs/requirements/command-status/） ---
+// --- コマンド状態（決定202608072218。要件: docs/requirements/command-status/） ---
 //
 // コマンドペインの走行・終了を PaneManifest から導出する。エージェント状態とは
 // 別概念だが、記号・既読モデル・待ち件数・トリアージ一覧は共用する
@@ -6300,7 +6300,7 @@ fn a_command_pane_that_exits_cleanly_is_done() {
 
 #[test]
 fn any_other_exit_is_an_error() {
-    // 非0コードもシグナル終了（exit_status なし）も区別せず error（決定32）
+    // 非0コードもシグナル終了（exit_status なし）も区別せず error（決定202608072218）
     let failed = state_with_command_panes(vec![exited_command_pane(1, "make", Some(1))]);
     assert_eq!(
         failed.pane_status(1),
@@ -6324,7 +6324,7 @@ fn a_shell_pane_has_no_command_state() {
 
 #[test]
 fn trivial_commands_are_tracked_too() {
-    // 絞り込みは行わない（決定32）。実行時間の閾値のようなヒューリスティックは持たない
+    // 絞り込みは行わない（決定202608072218）。実行時間の閾値のようなヒューリスティックは持たない
     let state = state_with_command_panes(vec![exited_command_pane(1, "ls", Some(0))]);
     assert_eq!(
         state.pane_status(1),
@@ -6402,7 +6402,7 @@ fn a_running_command_is_not_marked_read() {
 #[test]
 fn the_agent_state_wins_over_the_command_state() {
     // `zellij run -- claude` のようにコマンドペイン経由でエージェントを起動した
-    // ケース。フック由来の状態が常に優先で、コマンド状態は無視する（決定32）
+    // ケース。フック由来の状態が常に優先で、コマンド状態は無視する（決定202608072218）
     let mut state = state_with_command_panes(vec![exited_command_pane(1, "claude", Some(1))]);
     state.apply_status(status(1, "UserPromptSubmit"));
 
@@ -6440,7 +6440,7 @@ fn command_states_join_the_triage_list() {
 
 #[test]
 fn a_command_pane_without_a_name_shows_its_command() {
-    // 決定32: ペイン名が空ならコマンド文字列を代わりに出す
+    // 決定202608072218: ペイン名が空ならコマンド文字列を代わりに出す
     let state = state_with_command_panes(vec![command_pane(1, "docker build .")]);
     let text = state.pane_row(
         &state.selectable[0],
@@ -6491,7 +6491,7 @@ fn closed_command_panes_lose_their_state() {
     assert!(state.commands.contains_key(&2));
 }
 
-// --- コマンド状態のインスタンス間同期（決定13・決定32） ---
+// --- コマンド状態のインスタンス間同期（決定202608012141・決定202608072218） ---
 
 #[test]
 fn the_command_dump_round_trips() {
@@ -6530,7 +6530,7 @@ fn a_broken_command_dump_line_is_skipped() {
 
 #[test]
 fn the_read_clear_pipe_also_clears_command_states() {
-    // 既読クリアの配布（決定13）はソースを区別しない
+    // 既読クリアの配布（決定202608012141）はソースを区別しない
     let mut state = state_with_command_panes(vec![exited_command_pane(1, "make", Some(0))]);
     assert!(state.pipe(pipe_message(READ_CLEAR_PIPE, "1")));
     assert_eq!(state.pane_status(1), None);
@@ -6684,7 +6684,7 @@ fn another_tab_counts_as_having_left_the_pane() {
 
 #[test]
 fn the_read_clear_pipe_ignores_the_grace() {
-    // 既読クリアの配布（決定13）は、送り手が猶予込みで判断した結果。
+    // 既読クリアの配布（決定202608012141）は、送り手が猶予込みで判断した結果。
     // 受け手が猶予で握り潰すと、タブごとにアイコンの有無が食い違う
     let mut state = run_and_fail_while_focused();
     assert!(state.pipe(pipe_message(READ_CLEAR_PIPE, "1")));
@@ -6890,7 +6890,7 @@ fn every_detected_agent_gets_a_troop() {
 
 #[test]
 fn show_deploy_animation_can_switch_the_animation_off() {
-    // 演出は情報を運ばないので、切っても見える情報は変わらない（決定40）
+    // 演出は情報を運ばないので、切っても見える情報は変わらない（決定202608080346）
     let mut state = sidebar_state();
     state.apply_config(&plugin_config(&[("show_deploy_animation", "false")]));
     observe_panes(&mut state, &[1, 2]);
@@ -7023,7 +7023,7 @@ fn render_survives_the_deployment() {
     state.advance_deployment();
 }
 
-// --- IME経由の非ASCII入力（決定47 / docs/issues/ime-input-support.md） ---
+// --- IME経由の非ASCII入力（決定202608111836 / docs/issues/ime-input-support.md） ---
 //
 // プラグインAPIのデコードが `Char` をコードポイントの下位1バイトへ畳むため、
 // 素通しでは日本語がASCIIに化ける（navモードでは別のキーとして誤発火する）。
@@ -7137,7 +7137,7 @@ fn the_input_cursor_follows_the_query_end() {
     assert_eq!(state.input_cursor_position().map(|(x, _)| x), Some(7));
 
     // 操作状態もテキストは受け付けないが、位置表示はテキストカーソルに一本化した
-    // ので出したままにする（決定50、2026-08-13。経緯:
+    // ので出したままにする（決定202608131200、2026-08-13。経緯:
     // docs/issues/search-input-cursor-shape.md）
     state.handle_nav_key(key(BareKey::Esc));
     assert!(state.input_cursor_position().is_some());
@@ -7262,7 +7262,7 @@ fn typing_defers_renders_that_come_from_outside() {
     // 変換候補ウィンドウが打っている途中で飛ぶ）
     state.handle_nav_key(key(BareKey::Char('/')));
     assert!(state.defers_render_while_typing());
-    // 操作状態は打っていないので見送らない（決定50）。ここで止め続けると
+    // 操作状態は打っていないので見送らない（決定202608131200）。ここで止め続けると
     // 結果を見ながら動かしているあいだ一覧が古いまま固まる。
     // **テキストカーソルは操作状態でも出ている**ので、カーソルの有無で判定していた
     // 頃の実装（input_cursor_column への委譲）ではここが固まる
@@ -7454,7 +7454,7 @@ fn a_width_within_tolerance_counts_as_reached() {
 
 #[test]
 fn preview_and_summoned_instances_stay_out_of_the_width_sync() {
-    // どちらも常駐サイドバーではなく自前の幅で開かれる（決定16・決定42）
+    // どちらも常駐サイドバーではなく自前の幅で開かれる（決定202608011644・決定202608082045）
     for state in [
         State {
             viewport_cols: 32,

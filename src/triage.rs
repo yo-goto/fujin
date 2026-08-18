@@ -1,9 +1,9 @@
 // トリアージモード（要件: docs/requirements/triage-mode/）。
 //
-// navモードの内側に、検索サブモード（決定18）と同じ位置づけで乗るサブモード。
+// navモードの内側に、検索サブモード（決定202608031908）と同じ位置づけで乗るサブモード。
 // タブの壁を無視して、エージェント状態を持つペインだけを緊急度順にフラットに並べる。
 //
-// ツリー表示の並び順には手を触れない（決定3）。通常表示を上書きするのではなく、
+// ツリー表示の並び順には手を触れない（決定202607302256）。通常表示を上書きするのではなく、
 // `p` で切り替えて使う。
 
 use zellij_tile::prelude::*;
@@ -13,7 +13,7 @@ use crate::render::HelpRow;
 use crate::{Selectable, State};
 
 // トリアージモードのローカルUI状態。検索サブモードと同じく権威インスタンス
-// （決定14）にしか発生しないため、兄弟インスタンスへは配らない（決定13の範囲外）
+// （決定202608012142）にしか発生しないため、兄弟インスタンスへは配らない（決定202608012141の範囲外）
 #[derive(Debug, Default)]
 pub(crate) struct TriageState {
     // トリアージ一覧の中のカーソル（ペインID）。インデックスで持つと
@@ -32,8 +32,8 @@ impl State {
     pub(crate) fn triage_entries(&self) -> Vec<&Selectable> {
         // 状態を持たないペイン（フック通知を一度も受けていないシェル・コマンド
         // ペインでないペイン）と `idle`（既読）は載せない。載せると「もう何も
-        // 待っていないペイン」が一覧に常駐し、既読モデル（決定10）が消したはずの
-        // 濁りが戻る。コマンド状態（決定32）も同じ優先度階層に混ぜて並べる
+        // 待っていないペイン」が一覧に常駐し、既読モデル（決定202607302302）が消したはずの
+        // 濁りが戻る。コマンド状態（決定202608072218）も同じ優先度階層に混ぜて並べる
         let mut entries: Vec<(&Selectable, u8, u64)> = self
             .selectable
             .iter()
@@ -82,7 +82,7 @@ impl State {
     }
 
     // Esc: トリアージモードだけを抜けて navモードへ戻る。
-    // `exit_nav_mode()` を呼んではいけない — 召喚インスタンス（決定16）だと
+    // `exit_nav_mode()` を呼んではいけない — 召喚インスタンス（決定202608011644）だと
     // サイドバーごと閉じてしまう（検索サブモードの二段階 Esc と同じ理由）
     fn leave_triage(&mut self) {
         let Some(triage) = self.triage.take() else {
@@ -97,8 +97,8 @@ impl State {
     //
     // **専用の既読クリア処理は書かない。** 通常のジャンプと同じ
     // 「横取り解除 → focus_pane_with_id()」の手順だけを踏めば、既読クリアの検知
-    // （PaneUpdate でのフォーカス変化）も兄弟インスタンスへの配布（決定13）も
-    // そのまま働く。別経路を作ると決定13が踏んだ罠を再発明することになる
+    // （PaneUpdate でのフォーカス変化）も兄弟インスタンスへの配布（決定202608012141）も
+    // そのまま働く。別経路を作ると決定202608012141が踏んだ罠を再発明することになる
     fn confirm_triage(&mut self) {
         // 一覧が空のときの Enter は何もしない（トリアージモードに留まる）
         let Some(cursor) = self.triage_cursor() else {
@@ -120,7 +120,7 @@ impl State {
     // 一覧の中を動いてジャンプするだけなので、移動キーは navモードと同じものを
     // 揃える。クエリ入力が無いぶん1文字ショートカットを潰す必要がない
     pub(crate) fn handle_triage_key(&mut self, key: KeyWithModifier) -> bool {
-        // Shift 以外の修飾キーは安全弁（決定12）。トリアージモードだけでなく
+        // Shift 以外の修飾キーは安全弁（決定202607310311）。トリアージモードだけでなく
         // navモードごと抜ける — 抜けられなくなるより退場に倒す
         if has_hard_modifier(&key) {
             self.leave_nav_mode();
@@ -135,11 +135,11 @@ impl State {
             BareKey::Tab => self.move_triage_cursor(!shifted),
             BareKey::Char('g') => self.jump_triage_cursor(false),
             BareKey::Char('G') => self.jump_triage_cursor(true),
-            // マークはトリアージ一覧の上でも同じキーで積み上げる（決定39）。
+            // マークはトリアージ一覧の上でも同じキーで積み上げる（決定202608080250）。
             // 対象はカーソル位置のペイン
             BareKey::Char('m') => self.toggle_mark(),
             BareKey::Char('M') => self.clear_marks(),
-            // プレビューもトリアージ一覧の上で同じキーで効く（決定42）。
+            // プレビューもトリアージ一覧の上で同じキーで効く（決定202608082045）。
             // 対象はマークと同じくカーソル位置のペイン
             BareKey::Char('p') => self.toggle_preview(),
             BareKey::Char('r') => self.mark_preview_read(),
@@ -148,7 +148,7 @@ impl State {
         }
         // 検索サブモードと同じく、カーソルの移動は兄弟インスタンスへ配らない。
         // 選択が動くのは Enter で確定したときだけ。
-        // プレビューは自分の表示なのでカーソルに追従させる（決定42）
+        // プレビューは自分の表示なのでカーソルに追従させる（決定202608082045）
         self.refresh_preview();
         true
     }
@@ -188,7 +188,7 @@ impl State {
     // ヘルプオーバーレイに出すキー一覧（要件: nav-mode-hints）
     pub(crate) fn triage_help_lines(&self) -> &'static [HelpRow] {
         use HelpRow::{Blank, Entry, Section};
-        // navモード本体と同じく、既読化キーはプレビュー中だけ出す（決定42）
+        // navモード本体と同じく、既読化キーはプレビュー中だけ出す（決定202608082045）
         if self.preview.is_some() {
             return &[
                 Section("keys"),

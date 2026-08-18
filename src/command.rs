@@ -1,4 +1,4 @@
-// コマンド状態の管理（決定32。要件: docs/requirements/command-status/）。
+// コマンド状態の管理（決定202608072218。要件: docs/requirements/command-status/）。
 //
 // コマンドペインの走行・終了を、エージェント状態と同じ記号でサイドバーに出す。
 // 別概念で、持つ値は `working` / `done` / `error` の3値だけ。
@@ -17,7 +17,7 @@ use crate::agent::AgentState;
 use crate::{State, COMMAND_STATE_PIPE};
 
 // コマンド状態の3値。`idle` / `blocked` は持たない — コマンドペインに
-// 「許可待ち」の概念は無く、既読は状態を持たない側へ戻すことで表す（決定32）
+// 「許可待ち」の概念は無く、既読は状態を持たない側へ戻すことで表す（決定202608072218）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandState {
     Working,
@@ -26,7 +26,7 @@ pub(crate) enum CommandState {
 }
 
 impl CommandState {
-    // 記号・色・優先度階層はエージェント状態と共用する（決定32）。概念は別だが、
+    // 記号・色・優先度階層はエージェント状態と共用する（決定202608072218）。概念は別だが、
     // 待ち件数・トリアージ一覧へ統合する以上、記号を分けると凡例が倍増する。
     // 対応表を二重に持たないよう、同じ意味のエージェント状態へ委譲する
     fn as_agent_state(self) -> AgentState {
@@ -37,7 +37,7 @@ impl CommandState {
         }
     }
 
-    // インスタンス間同期のワイヤ表現（決定13）
+    // インスタンス間同期のワイヤ表現（決定202608012141）
     pub(crate) fn as_str(self) -> &'static str {
         self.as_agent_state().as_str()
     }
@@ -52,7 +52,7 @@ impl CommandState {
         }
     }
 
-    // 終了コードの解釈（決定32）。`Some(0)` だけが `done` で、非0・シグナル
+    // 終了コードの解釈（決定202608072218）。`Some(0)` だけが `done` で、非0・シグナル
     // 終了・ユーザーによる中断は区別せず一律 `error`。中断で `error` が出ても
     // 既読モデルでフォーカスすれば消えるだけなので、賢い自動判定はしない
     fn from_exit(exited: bool, exit_status: Option<i32>) -> Self {
@@ -73,7 +73,7 @@ pub(crate) struct CommandInfo {
     // 直近に状態が変わったときのシーケンス番号（エージェント状態と同じ用途。
     // トリアージ一覧の同一階層内の tie-break に使う）
     pub(crate) state_change_seq: u64,
-    // 既読か（決定32）。コマンド状態には戻り先の `idle` が無いので、既読は
+    // 既読か（決定202608072218）。コマンド状態には戻り先の `idle` が無いので、既読は
     // 「状態を持たない」＝アイコンを出さないことで表す。
     //
     // **旗で持つ必要がある。** 状態そのものを捨てると、終了したコマンドペインは
@@ -129,7 +129,7 @@ impl PaneStatus {
 }
 
 impl State {
-    // ペインに出す状態（決定32）。
+    // ペインに出す状態（決定202608072218）。
     //
     // **エージェント登録があるペインは常にそちらが優先**で、コマンド状態は
     // 無視する（`zellij run -- claude` のようにコマンドペイン経由でエージェントを
@@ -160,9 +160,9 @@ impl State {
 
     // コマンドペインの状態を PaneManifest から導出する。
     //
-    // 絞り込みは行わない（決定32）。`ls` のような些末なコマンドでも、
+    // 絞り込みは行わない（決定202608072218）。`ls` のような些末なコマンドでも、
     // コマンドペインとして開かれた以上は無条件で追跡する — 実行時間の閾値等の
-    // ヒューリスティックは決定4で放棄した「賢い自動判定」の二の舞になりやすく、
+    // ヒューリスティックは決定202607310310で放棄した「賢い自動判定」の二の舞になりやすく、
     // 既読モデルがある以上、実害は一瞬アイコンが増える程度に留まる
     pub(crate) fn apply_command_states(&mut self, manifest: &PaneManifest) {
         let mut changed = Vec::new();
@@ -206,7 +206,7 @@ impl State {
         self.commands.retain(|id, _| live_commands.contains(id));
     }
 
-    // 観測した変化を兄弟インスタンスへ配る（決定13）。
+    // 観測した変化を兄弟インスタンスへ配る（決定202608012141）。
     //
     // 導出できるのは PaneUpdate が届く可視インスタンスだけなので、配らないと
     // 他のタブのサイドバーは何も知らないままになる。**既読も配る必要がある** —
@@ -226,7 +226,7 @@ impl State {
         self.broadcast_to_siblings(COMMAND_STATE_PIPE, &payload);
     }
 
-    // 新入りインスタンスへ押し付けるコマンド状態のダンプ（決定13）。
+    // 新入りインスタンスへ押し付けるコマンド状態のダンプ（決定202608012141）。
     // エージェント状態のダンプ（`state_dump`）と同じく1ペイン1行のTSV
     pub(crate) fn command_dump(&self) -> String {
         let mut out = String::new();
@@ -292,7 +292,7 @@ fn command_line(pane_id: u32, info: &CommandInfo) -> String {
 }
 
 impl CommandInfo {
-    // 既読化（決定32）。`working` は既読にならない — 走っている最中の
+    // 既読化（決定202608072218）。`working` は既読にならない — 走っている最中の
     // コマンドは人の対応を待っていない。
     //
     // 猶予（`awaiting_refocus`）が立っている間も既読にしない。解くのは
@@ -341,7 +341,7 @@ impl State {
     }
 }
 
-// コマンドペインの表示名（決定32）。ペイン名が空のときだけコマンド文字列を
+// コマンドペインの表示名（決定202608072218）。ペイン名が空のときだけコマンド文字列を
 // 代わりに出す（ペイン名フォールバック）。`zellij run --name` やリネームで
 // 名前が付いているペインはそちらを優先する
 pub(crate) fn fallback_title(pane: &PaneInfo) -> String {

@@ -5,7 +5,7 @@
 // ため、非ASCII のコードポイントが下位1バイトへ潰れる（zellij-utils 0.44.3
 // `plugin_api/key.rs:143`。0.44.3 時点で上流 main も未修正）。マクロの中では
 // protobuf の生の値に手が届かないので、`update()` だけ自前にして復元する。
-// 調査と実測は docs/issues/ime-input-support.md、判断は決定47。
+// 調査と実測は docs/issues/ime-input-support.md、判断は決定202608111836。
 //
 // ここ以外はマクロの写しで、挙動を変えているのは
 //   - char の復元（`decoded_char`）

@@ -1,4 +1,4 @@
-// 設定（configuration）の取り込み口（決定40）。
+// 設定（configuration）の取り込み口（決定202608080346）。
 //
 // **ここが設定仕様の正本。** ユーザーが書く設定はこの `SETTINGS` テーブルが
 // すべてで、README の設定節はここから生成する（`settings_doc()` と
@@ -13,7 +13,7 @@
 // 違う値になる。値の正規化をここでまとめてかけて差を吸収する。
 //
 // 正規化しても解釈できない値は、黙って既定値へ倒さずに警告として持ち帰る
-//（表示はサイドバーのフッター。決定40）。真偽値の受け口は広げない —
+//（表示はサイドバーのフッター。決定202608080346）。真偽値の受け口は広げない —
 // `"true"` だけが真で、`1` や `yes` は解釈できない値として扱う。
 
 use std::collections::BTreeMap;
@@ -21,14 +21,14 @@ use std::str::FromStr;
 
 use zellij_tile::prelude::{BareKey, KeyWithModifier};
 
-// 召喚インスタンスに渡す**内部用**の configuration キー（決定16）。
+// 召喚インスタンスに渡す**内部用**の configuration キー（決定202608011644）。
 // 臨時召喚が自分で渡すもので、ユーザーが config.kdl に書くものではない。
 // したがって `SETTINGS` には載せず、README の設定表にも出さない
-//（決定40「内部用キーは公開仕様に含めない」）。
+//（決定202608080346「内部用キーは公開仕様に含めない」）。
 // "true" で起動したインスタンスは、準備でき次第 navモードへ入る
 pub(crate) const SUMMONED_KEY: &str = "summoned";
 
-// プレビュー用フローティングペインに渡す**内部用**の configuration キー（決定42）。
+// プレビュー用フローティングペインに渡す**内部用**の configuration キー（決定202608082045）。
 // `SUMMONED_KEY` と同じくユーザーが書くものではないので `SETTINGS` には載せない。
 // "true" で起動したインスタンスは、配られたスナップショットを描くだけに徹する
 pub(crate) const PREVIEW_KEY: &str = "preview";
@@ -36,13 +36,13 @@ pub(crate) const PREVIEW_KEY: &str = "preview";
 // 設定値の種類。受け口の広さと、README の「値」列の書き方がこれで決まる
 #[derive(Clone, Copy)]
 pub(crate) enum Kind {
-    // 真偽値。`"true"` のときだけ真（決定40）。
+    // 真偽値。`"true"` のときだけ真（決定202608080346）。
     // `default` は書かれなかったときの値で、README の「既定」列にも出る
     Flag {
         #[allow(dead_code)] // 読むのは README 生成と配線テスト（どちらもテスト時のみ）
         default: bool,
     },
-    // フッターに出す direct-keys のキー表記（決定28）。
+    // フッターに出す direct-keys のキー表記（決定202608070226）。
     // `label` はヒントの動作名、`arrow` は幅が足りないときの代替表記
     DirectKey {
         label: &'static str,
@@ -64,7 +64,7 @@ pub(crate) struct Setting {
 }
 
 // 公開する設定の全部。**並び順がそのまま README の表と、フッターの
-// direct-keys ヒントの表示順になる**（決定27・28）
+// direct-keys ヒントの表示順になる**（決定202608070119・28）
 pub(crate) const SETTINGS: [Setting; 6] = [
     Setting {
         key: "show_cwd",
@@ -198,7 +198,7 @@ impl Config {
     }
 }
 
-// 召喚インスタンスとして起動されたか（決定16）。内部用キーなので
+// 召喚インスタンスとして起動されたか（決定202608011644）。内部用キーなので
 // `SETTINGS` は通さないが、値の正規化だけは同じ入口に揃える
 pub(crate) fn summoned(configuration: &BTreeMap<String, String>) -> bool {
     configuration
@@ -207,7 +207,7 @@ pub(crate) fn summoned(configuration: &BTreeMap<String, String>) -> bool {
         .unwrap_or(false)
 }
 
-// プレビュー用フローティングペインとして起動されたか（決定42）。
+// プレビュー用フローティングペインとして起動されたか（決定202608082045）。
 // 内部用キーなので `SETTINGS` は通さない（`summoned` と同じ扱い）
 pub(crate) fn is_preview(configuration: &BTreeMap<String, String>) -> bool {
     configuration
@@ -216,7 +216,7 @@ pub(crate) fn is_preview(configuration: &BTreeMap<String, String>) -> bool {
         .unwrap_or(false)
 }
 
-// KDL の書式差を吸収する（決定40）。前後の空白を落とし、プロパティ書式で
+// KDL の書式差を吸収する（決定202608080346）。前後の空白を落とし、プロパティ書式で
 // 付いてくる引用符を剥がす。**受け口を広げるのはここまで** — `1` を真と
 // 見なすような解釈は増やさない
 pub(crate) fn normalize_value(raw: &str) -> &str {
@@ -228,7 +228,7 @@ pub(crate) fn normalize_value(raw: &str) -> &str {
         .unwrap_or(trimmed)
 }
 
-// 設定で受け取ったキー表記を画面用に整える（決定28）。
+// 設定で受け取ったキー表記を画面用に整える（決定202608070226）。
 // 解釈できなければ `None`（呼び出し側が生の値をそのまま出す）。
 //
 // 受けるのは zellij のキーバインド表記（`Alt u`）でも fujin の画面表記
@@ -272,7 +272,7 @@ fn format_bare_key(key: &BareKey) -> String {
     }
 }
 
-// --- README の設定節の生成（決定40「設定一覧の正本はコードにする」） ---
+// --- README の設定節の生成（決定202608080346「設定一覧の正本はコードにする」） ---
 //
 // 生成物を使うのは README 同期テストだけなので、本体（wasm）には積まない。
 // 実行の入口は `make readme`（内部で `UPDATE_README=1` を立ててテストを回す）

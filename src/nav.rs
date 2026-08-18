@@ -1,4 +1,4 @@
-// navモード（決定12）と検索サブモード（要件: docs/requirements/search-explorer/）。
+// navモード（決定202607310311）と検索サブモード（要件: docs/requirements/search-explorer/）。
 //
 // zellij のモード（Ctrl+p の paneモード等）と同じ操作感を、ビルトインモードを
 // 潰さずに実現する。config.kdl には入場キー1つだけを書き、モード内のキーは
@@ -12,17 +12,17 @@ use crate::render::HelpRow;
 use crate::search::{match_pane, Hit};
 use crate::{ParkedFocus, Selectable, State};
 
-// 番号ジャンプサブモード（navモード内の `n`、決定29）のローカルUI状態。
+// 番号ジャンプサブモード（navモード内の `n`、決定202608070342）のローカルUI状態。
 // 検索サブモードと同じく権威インスタンスにしか発生しないため、
-// 兄弟インスタンスへは配らない（決定13の範囲外）
+// 兄弟インスタンスへは配らない（決定202608012141の範囲外）
 #[derive(Debug, Default)]
 pub(crate) struct JumpState {
     // 番号入力バッファ。数字が入るたびに通し番号へ前方一致で照合し、
-    // 候補が1件になった時点でジャンプ、0件になったら空へ戻す（決定29）
+    // 候補が1件になった時点でジャンプ、0件になったら空へ戻す（決定202608070342）
     pub(crate) buffer: String,
 }
 
-// 検索サブモードの2状態（決定50。要件:
+// 検索サブモードの2状態（決定202608131200。要件:
 // docs/requirements/search-explorer/search-mode-key-handling.feature）。
 // vim の挿入/ノーマルに相当する分割で、`?` のクエリ入力と `j`/`k` 移動を両立させる
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -36,24 +36,24 @@ pub(crate) enum SearchPhase {
 }
 
 // 検索サブモード（navモード内の `/`）のローカルUI状態。
-// 権威インスタンスにしか発生しないため、兄弟への同期は不要（決定13の範囲外）
+// 権威インスタンスにしか発生しないため、兄弟への同期は不要（決定202608012141の範囲外）
 #[derive(Debug, Default)]
 pub(crate) struct SearchState {
-    // 編集状態/操作状態（決定50）。キー処理・フッターの出し分けの軸
+    // 編集状態/操作状態（決定202608131200）。キー処理・フッターの出し分けの軸
     pub(crate) phase: SearchPhase,
     pub(crate) query: String,
     // ペインID -> ヒット情報。ツリー順は selectable 側が持つので順序は持たない
     pub(crate) hits: BTreeMap<u32, Hit>,
     // 絞り込み結果内のカーソル（ペインID）。インデックスで持つと
-    // rebuild_selectable() をまたいだときに別の行を指す（決定13が禁じた罠のローカル版）
+    // rebuild_selectable() をまたいだときに別の行を指す（決定202608012141が禁じた罠のローカル版）
     pub(crate) cursor: Option<u32>,
     // 検索サブモードに入る前の選択（Esc で戻すため）
     pub(crate) saved: Option<u32>,
 }
 
 impl State {
-    // fujin_up / fujin_down（直接キー方式・決定6）の受け口。
-    // 選択を動かすのは可視インスタンスだけ（決定14）。全員が自前で動かすと、
+    // fujin_up / fujin_down（直接キー方式・決定202607302258）の受け口。
+    // 選択を動かすのは可視インスタンスだけ（決定202608012142）。全員が自前で動かすと、
     // 一覧が古いインスタンスでは境界判定とクランプの結果が違って選択がずれる
     pub(crate) fn handle_nav_step_pipe(&mut self, forward: bool) -> bool {
         if !self.refresh_focus() {
@@ -68,7 +68,7 @@ impl State {
         true
     }
 
-    // fujin_go の受け口。副作用は可視インスタンスのみ実行（多重発行の防止・決定14）
+    // fujin_go の受け口。副作用は可視インスタンスのみ実行（多重発行の防止・決定202608012142）
     pub(crate) fn handle_nav_go_pipe(&mut self) -> bool {
         if self.refresh_focus() {
             self.focus_selected();
@@ -84,7 +84,7 @@ impl State {
     //
     // なお召喚インスタンスにはこの pipe が届かない。キーバインドの `MessagePlugin` は
     // URL一致で配送されるが、召喚インスタンスは configuration に `summoned=true` を
-    // 持つため一致しない（実測: 受信ログが一切出ない）。トグルは召喚役が担う（決定16）
+    // 持つため一致しない（実測: 受信ログが一切出ない）。トグルは召喚役が担う（決定202608011644）
     pub(crate) fn handle_nav_mode_pipe(&mut self) -> bool {
         if self.refresh_focus() {
             if !self.nav_mode {
@@ -95,7 +95,7 @@ impl State {
         }
         // ここへ来たインスタンスはフォーカス中のタブに居ない。そのタブに
         // fujin が1つも無ければ権威がどこにも立たず、pipe が届いても
-        // 無反応になる。代表1つがフローティングで召喚して穴を埋める（決定16）
+        // 無反応になる。代表1つがフローティングで召喚して穴を埋める（決定202608011644）
         self.summon_floating_if_absent();
         false
     }
@@ -111,12 +111,12 @@ impl State {
         intercept_key_presses();
     }
 
-    // navモード中だけ、実フォーカスをサイドバー自身へ預かる（決定34）。
+    // navモード中だけ、実フォーカスをサイドバー自身へ預かる（決定202608072359）。
     //
     // フォーカス枠の色だけを消すAPIは無いが、**枠はセッション内で1枚しか点かない**
     //（実測）ので、フォーカスをサイドバーへ移せば作業ペインの枠は非フォーカス色に
     // 戻り、サイドバーのハイライトと二重に「ここが操作対象」を主張しなくなる。
-    // 召喚インスタンス（決定16）は最初から自分がフォーカスを持っているので、
+    // 召喚インスタンス（決定202608011644）は最初から自分がフォーカスを持っているので、
     // これは常駐サイドバーを召喚と同じ状態に揃える操作でもある
     fn park_focus(&mut self) {
         // 既に預かっている（入場のやり直し）なら二重に動かさない
@@ -134,7 +134,7 @@ impl State {
         let is_floating = self.pane_is_floating(pane_id);
         // unselectable なペインはフォーカスできない（実測。api-reference.md）ので、
         // 預かる間だけ selectable に戻す。navモード中は全キーを横取りしているため
-        // 巡回でサイドバーへ入り込む余地は無く、決定6の意図は保たれる
+        // 巡回でサイドバーへ入り込む余地は無く、決定202607302258の意図は保たれる
         set_selectable(true);
         focus_plugin_pane(own_id, false, false);
         self.focus_parked = Some(ParkedFocus {
@@ -144,7 +144,7 @@ impl State {
         });
     }
 
-    // 預かったフォーカスを手放す（決定34）。`refocus` が真なら作業ペインへ返す。
+    // 預かったフォーカスを手放す（決定202608072359）。`refocus` が真なら作業ペインへ返す。
     //
     // 退場の2系統（exit_nav_mode / leave_nav_mode）と `Event::BeforeClose` の
     // どこを通っても必ず手放すため、「預かった相手」を覚えておいて冪等に戻す。
@@ -160,13 +160,13 @@ impl State {
                 focus_pane_with_id(PaneId::Terminal(pane_id), is_floating, false);
             }
         }
-        // 決定6へ戻す。**フォーカスを返したあとに** unselectable にすること —
+        // 決定202607302258へ戻す。**フォーカスを返したあとに** unselectable にすること —
         // 逆順だと自分にフォーカスが残ったまま巡回対象から外れる
         set_selectable(false);
     }
 
     // フォーカスの返し先。原則は預かった当のペインだが、**navモード中に
-    // 閉じられていたら選択行のペインへ返す**（決定34）。unselectable な自分に
+    // 閉じられていたら選択行のペインへ返す**（決定202608072359）。unselectable な自分に
     // フォーカスが残ると、横取りも解いた後なのでキーの行き先が無くなる
     pub(crate) fn refocus_target(&self, parked: ParkedFocus) -> Option<(u32, bool)> {
         if self.selectable.iter().any(|e| e.pane_id == parked.pane_id) {
@@ -210,14 +210,14 @@ impl State {
         self.triage = None;
         self.jump = None;
         self.termination = None;
-        // プレビューを畳むのは**預かったフォーカスを返すより前**（決定42）。
+        // プレビューを畳むのは**預かったフォーカスを返すより前**（決定202608082045）。
         // 順が逆だと、返した先のフォーカスがプレビューの後始末で持って行かれかねない
         self.close_preview();
-        // フォーカスの返却（決定34）は召喚インスタンスの自死（下）より前に置く —
+        // フォーカスの返却（決定202608072359）は召喚インスタンスの自死（下）より前に置く —
         // 自分を閉じたあとではホストコマンドが届くか分からない
         self.release_parked_focus(true);
         clear_key_presses_intercepts();
-        // 召喚インスタンスは用が済んだら自分で退場する（決定16）。残すと作業
+        // 召喚インスタンスは用が済んだら自分で退場する（決定202608011644）。残すと作業
         // ペインに重なり続ける。次の入場でまた呼べばよい（召喚から入場まで実測16ms）
         if self.summoned {
             if let Some(own_id) = self.own_plugin_id {
@@ -240,7 +240,7 @@ impl State {
     }
 
     // ペインIDで選択を移す。戻り値は選択が動いたか。
-    // インデックスではなくペインIDを入口にするのは決定13と同じ理由で、
+    // インデックスではなくペインIDを入口にするのは決定202608012141と同じ理由で、
     // 一覧が古いインスタンスでも同じ行を指せるようにするため
     pub(crate) fn select_pane_id(&mut self, pane_id: u32) -> bool {
         let Some(index) = self.selectable.iter().position(|e| e.pane_id == pane_id) else {
@@ -266,7 +266,7 @@ impl State {
     // モード中のキー解釈。戻り値は再描画するか
     pub(crate) fn handle_nav_key(&mut self, key: KeyWithModifier) -> bool {
         // ヘルプオーバーレイ表示中はどのキーでも閉じるだけで、キーそのものは
-        // 操作として解釈しない（要件: nav-mode-hints）。安全弁（決定12）より
+        // 操作として解釈しない（要件: nav-mode-hints）。安全弁（決定202607310311）より
         // 手前に置くのは、修飾キー付きでも「閉じる」で済ませてnavモードを
         // 継続させるため — 閲覧を終わらせただけで退場するのは筋が通らない
         if self.help_overlay {
@@ -276,7 +276,7 @@ impl State {
         // `?` はヘルプオーバーレイを開く。検索サブモードへの振り分けより手前に
         // 置く — 検索中の印字可能文字はクエリになるので、後ろに置くと `?` が
         // クエリへ入ってヘルプを呼べなくなる。
-        // **例外は検索サブモードの編集状態だけ**（決定50）。そこでは `?` を
+        // **例外は検索サブモードの編集状態だけ**（決定202608131200）。そこでは `?` を
         // クエリに打てることを優先し、ヘルプは操作状態（Esc で移る）から開く
         if key.bare_key == BareKey::Char('?')
             && !has_hard_modifier(&key)
@@ -317,18 +317,18 @@ impl State {
             // トリアージモードへ（要件: docs/requirements/triage-mode/）
             BareKey::Char('t') => self.enter_triage(),
             // 番号ジャンプサブモードへ（要件: docs/requirements/pane-number-jump/）。
-            // かつての 1-9 直行ジャンプはここへ一本化して削除した（決定29）。
+            // かつての 1-9 直行ジャンプはここへ一本化して削除した（決定202608070342）。
             // navモード最上位の数字は未定義キー＝安全弁の扱い
             BareKey::Char('n') => self.enter_jump(),
-            // 終了操作サブモードへ（決定35。要件: docs/requirements/pane-close-kill/）。
+            // 終了操作サブモードへ（決定202608080140。要件: docs/requirements/pane-close-kill/）。
             // close/kill/kill→close を独立キーにすると押し間違いのリスクが高いので、
             // 入場キー1つ＋確認プロンプトのミニフローに畳んである
             BareKey::Char('d') => self.enter_termination(),
-            // マークのトグルと全解除（決定39）。専用サブモードは作らない —
+            // マークのトグルと全解除（決定202608080250）。専用サブモードは作らない —
             // トグルだけの軽い操作なので、一覧の上で直接積み上げる
             BareKey::Char('m') => self.toggle_mark(),
             BareKey::Char('M') => self.clear_marks(),
-            // プレビューのトグルと、プレビュー中の既読化（決定42。マークと同じく
+            // プレビューのトグルと、プレビュー中の既読化（決定202608082045。マークと同じく
             // サブモード無しの横断的操作）。`r` はプレビューがオフの間、未定義キー
             // として安全弁に倒れる（判定は mark_preview_read の中）
             BareKey::Char('p') => self.toggle_preview(),
@@ -350,16 +350,16 @@ impl State {
         }
         // 横取り中の移動は自分にしか起きないので、都度配る
         self.broadcast_selection();
-        // プレビューがオンなら表示を光っている行へ追従させる（決定42）。
+        // プレビューがオンなら表示を光っている行へ追従させる（決定202608082045）。
         // 退場した後は preview を畳んであるので何も起きない
         self.refresh_preview();
         true
     }
 
-    // 検索サブモード中のキー解釈。navモードの安全弁（決定12）を検索サブモード用に
+    // 検索サブモード中のキー解釈。navモードの安全弁（決定202607310311）を検索サブモード用に
     // 引き直したもの。印字可能文字はクエリに使うため、1文字ショートカットは全て無効になる
     fn handle_search_key(&mut self, key: KeyWithModifier) -> bool {
-        // マーク（決定39）とプレビュー（決定42）は絞り込み結果の上でも使えるよう、
+        // マーク（決定202608080250）とプレビュー（決定202608082045）は絞り込み結果の上でも使えるよう、
         // 安全弁（下の has_hard_modifier）の例外として Alt付きで通す。
         // マーク全解除（Esc で戻ってから押せばよい）と既読化（取り消せない操作）は
         // この例外を広げない
@@ -378,13 +378,13 @@ impl State {
             return true;
         }
         let shifted = key.key_modifiers.contains(&KeyModifier::Shift);
-        // 状態で使えるキーが変わる（決定50）。`?` はここへ来る前に
+        // 状態で使えるキーが変わる（決定202608131200）。`?` はここへ来る前に
         // handle_nav_key が拾う（操作状態ならヘルプ、編集状態なら下の Char へ）
         match self.search_phase() {
             SearchPhase::Editing => self.handle_search_editing_key(&key, shifted),
             SearchPhase::Navigating => {
                 if !self.handle_search_navigating_key(&key, shifted) {
-                    // コマンドキー以外は無反応（決定50）。自動で編集状態へ戻して
+                    // コマンドキー以外は無反応（決定202608131200）。自動で編集状態へ戻して
                     // クエリへ積む案は、押し間違いでクエリが汚れるので採らない。
                     // 描き直しも起こさない — 画面はどこも変わっていない
                     return false;
@@ -393,20 +393,20 @@ impl State {
         }
         // 検索中の移動・入力では broadcast_selection() を呼ばない。
         // Esc で「検索前の位置に戻す」以上、途中経過を配ると兄弟だけが
-        // 取り消せない位置に取り残される（決定13）。配るのは確定時
+        // 取り消せない位置に取り残される（決定202608012141）。配るのは確定時
         //（confirm_search）だけ
         //
         // プレビューは配布ではなく自分の表示なので、絞り込みのカーソルにも
-        // そのまま追従させる（決定42）
+        // そのまま追従させる（決定202608082045）
         self.refresh_preview();
         true
     }
 
-    // 編集状態のキー解釈（決定50）。決定18 の挙動から `?` の特別扱いだけを外した形で、
+    // 編集状態のキー解釈（決定202608131200）。決定202608031908 の挙動から `?` の特別扱いだけを外した形で、
     // 印字可能文字は `?` を含めすべてクエリへ積む
     fn handle_search_editing_key(&mut self, key: &KeyWithModifier, shifted: bool) {
         match key.bare_key {
-            // Esc はクエリを持ったまま操作状態へ移るだけ（決定50でここが変わった。
+            // Esc はクエリを持ったまま操作状態へ移るだけ（決定202608131200でここが変わった。
             // 以前はこの段でクエリを破棄していた）
             BareKey::Esc => self.set_search_phase(SearchPhase::Navigating),
             BareKey::Enter => self.confirm_search(),
@@ -430,15 +430,15 @@ impl State {
         }
     }
 
-    // 操作状態のキー解釈（決定50）。戻り値は**コマンドキーとして解釈したか**で、
+    // 操作状態のキー解釈（決定202608131200）。戻り値は**コマンドキーとして解釈したか**で、
     // false ならそのキーは無反応（安全弁にも倒さない。vimのnormalモードに近い
     // 予測可能性を優先し、押し間違いで状態が黙って変わる事故を避ける）
     fn handle_search_navigating_key(&mut self, key: &KeyWithModifier, shifted: bool) -> bool {
         match key.bare_key {
             // ここで初めてクエリを破棄して navモードのツリー表示へ戻る
-            //（決定18の1段目Escに相当。Esc は決定50で三段階になった）。
+            //（決定202608031908の1段目Escに相当。Esc は決定202608131200で三段階になった）。
             // exit_nav_mode() を呼んではいけない — 召喚インスタンスなら
-            // 検索の取り消しでサイドバーごと閉じてしまう（決定16）
+            // 検索の取り消しでサイドバーごと閉じてしまう（決定202608011644）
             BareKey::Esc => self.exit_search(),
             BareKey::Enter => self.confirm_search(),
             BareKey::Up | BareKey::Char('k') => self.move_search_cursor(false),
@@ -457,7 +457,7 @@ impl State {
         self.search.as_ref().map(|s| s.phase).unwrap_or_default()
     }
 
-    // 検索サブモードの編集状態にいるか。`?` の最優先チェックの例外条件（決定50）
+    // 検索サブモードの編集状態にいるか。`?` の最優先チェックの例外条件（決定202608131200）
     fn search_is_editing(&self) -> bool {
         self.search
             .as_ref()
@@ -474,13 +474,13 @@ impl State {
     //
     // 選択対象の全ペインに全タブ貫通の通し番号を振り、番号の入力でジャンプする。
     // 曖昧性解消方式（vimiumのリンクヒントに近い）: 数字を1つ入力するたびに
-    // 前方一致で候補を絞り込み、1件に確定した時点で即ジャンプする（決定29）
+    // 前方一致で候補を絞り込み、1件に確定した時点で即ジャンプする（決定202608070342）
     fn enter_jump(&mut self) {
         self.jump = Some(JumpState::default());
     }
 
     // 通し番号の桁数（番号列の幅）。総数の桁数に固定し、全番号をゼロ埋めで
-    // 揃える（決定29）。桁数を固定すると番号どうしが互いの前方一致にならず
+    // 揃える（決定202608070342）。桁数を固定すると番号どうしが互いの前方一致にならず
     //（prefix-free）、「1 を打ったが 10 があるので確定できない」という
     // 行き止まりが構造的に起きない
     pub(crate) fn pane_number_width(&self) -> usize {
@@ -498,7 +498,7 @@ impl State {
 
     // 番号ジャンプサブモード中、この行の番号列に出すセル。
     // 返り値は (通し番号の表示, 番号入力バッファに前方一致して候補に残っているか)。
-    // サブモード外は None ＝ 番号列そのものを出さない（決定29: 平常時の幅配分を崩さない）
+    // サブモード外は None ＝ 番号列そのものを出さない（決定202608070342: 平常時の幅配分を崩さない）
     pub(crate) fn jump_number(&self, flat_index: usize) -> Option<(String, bool)> {
         let jump = self.jump.as_ref()?;
         let number = self.pane_number(flat_index);
@@ -507,7 +507,7 @@ impl State {
     }
 
     // 番号ジャンプサブモード中のキー解釈。数字だけを受け、それ以外は
-    // navモード本体と同じ安全弁（決定12）に倒す
+    // navモード本体と同じ安全弁（決定202607310311）に倒す
     fn handle_jump_key(&mut self, key: KeyWithModifier) -> bool {
         // Shift 以外の修飾キーは安全弁 — サブモードだけでなく navモードごと抜ける
         if has_hard_modifier(&key) {
@@ -517,7 +517,7 @@ impl State {
         match key.bare_key {
             // Esc はサブモードだけ抜けて navモードに留まる（検索・トリアージと
             // 同じパターン）。exit_nav_mode() を呼んではいけない — 召喚
-            // インスタンスなら番号入力の取り消しでサイドバーごと閉じてしまう（決定16）
+            // インスタンスなら番号入力の取り消しでサイドバーごと閉じてしまう（決定202608011644）
             BareKey::Esc => self.jump = None,
             BareKey::Backspace => {
                 if let Some(jump) = &mut self.jump {
@@ -528,17 +528,17 @@ impl State {
             // 未定義キーは navモードごと退場（安全弁は最上位まで効かせる）
             _ => self.leave_nav_mode(),
         }
-        // 番号入力の途中経過は兄弟インスタンスへ配らない（決定29。検索サブモードと
+        // 番号入力の途中経過は兄弟インスタンスへ配らない（決定202608070342。検索サブモードと
         // 同じ扱い）。確定時のジャンプは push_jump_digit 側で配る
         //
-        // プレビューも更新しない（決定42）。候補を絞っているあいだは対象ペインが
+        // プレビューも更新しない（決定202608082045）。候補を絞っているあいだは対象ペインが
         // 定まらないので、オンのまま入ってきた場合は直前の表示を保つ
         //（`refresh_preview` が番号ジャンプサブモード中は何もしない）
         true
     }
 
     // 数字を1つ足して候補を引き直す。前方一致の候補が1件になったら即ジャンプ、
-    // 0件になったらバッファを空に戻して次の数字からやり直す（決定29。
+    // 0件になったらバッファを空に戻して次の数字からやり直す（決定202608070342。
     // Backspace での訂正を強制しないための救済）
     fn push_jump_digit(&mut self, digit: char) {
         let Some(jump) = &mut self.jump else {
@@ -564,7 +564,7 @@ impl State {
             Some(index) if !ambiguous => {
                 self.selected = index;
                 self.exit_nav_mode();
-                self.broadcast_selection(); // 確定時だけ配る（決定13）
+                self.broadcast_selection(); // 確定時だけ配る（決定202608012141）
                 self.focus_selected();
             }
             // 2件以上: まだ曖昧。次の数字を待つ
@@ -582,7 +582,7 @@ impl State {
         self.refilter();
     }
 
-    // 操作状態の Esc（決定50で三段階になったうちの2段目）。クエリを破棄し、
+    // 操作状態の Esc（決定202608131200で三段階になったうちの2段目）。クエリを破棄し、
     // 検索サブモードに入る前の選択へ戻して navモードに留まる
     fn exit_search(&mut self) {
         let Some(search) = self.search.take() else {
@@ -605,7 +605,7 @@ impl State {
         // フォーカス移動でタブが変わりうるので、先に横取りを解除する
         //（navモードの Enter と同じ順序。search も一緒に破棄される）
         self.exit_nav_mode();
-        self.broadcast_selection(); // 確定時だけ配る（決定13）
+        self.broadcast_selection(); // 確定時だけ配る（決定202608012141）
         self.focus_selected();
     }
 
@@ -616,7 +616,7 @@ impl State {
     // `InputEvent::Paste` として解釈するため）。購読していないと、変換で確定した
     // 文字列が丸ごと消えたように見える（docs/issues/ime-input-support.md）。
     //
-    // navモードの安全弁（決定12）はここには効かせない — 未定義の**キー**で抜ける
+    // navモードの安全弁（決定202607310311）はここには効かせない — 未定義の**キー**で抜ける
     // 仕組みであって、入力欄の外に落ちたテキストは操作ではないので黙って捨てる
     pub(crate) fn handle_pasted_text(&mut self, text: &str) -> bool {
         // ヘルプオーバーレイ中は入力欄が画面に無い（キーも「閉じる」にしか
@@ -627,7 +627,7 @@ impl State {
         let Some(search) = &mut self.search else {
             return false;
         };
-        // 操作状態はテキストを受け付けない（決定50。キーと同じく無反応）。
+        // 操作状態はテキストを受け付けない（決定202608131200。キーと同じく無反応）。
         // 画面ではクエリを dim にして「いま打てない」と示している
         if search.phase != SearchPhase::Editing {
             return false;
@@ -710,7 +710,7 @@ impl State {
     // 引数の `line` は描画時のy座標そのもの（zellij は isize で渡してくる）。
     // 行→ペインの対応は render 側のレイアウトから引く。
     // サイドバーは set_selectable(false) のままだが、マウスイベントの配送は
-    // selectable にもフォーカスにも縛られない（実測。決定6・16と衝突しない）
+    // selectable にもフォーカスにも縛られない（実測。決定202607302258・16と衝突しない）
     pub(crate) fn handle_click(&mut self, line: isize) -> bool {
         // 負の行はサイドバーの外
         let Ok(row) = usize::try_from(line) else {
@@ -765,7 +765,7 @@ impl State {
                 Entry("?", "this help"),
             ]
         } else if self.search.is_some() {
-            // 開けるのは操作状態からだけ（編集状態の `?` はクエリの文字。決定50）
+            // 開けるのは操作状態からだけ（編集状態の `?` はクエリの文字。決定202608131200）
             // なので操作状態のキーを先に置き、`i` で戻る先の編集状態のキーを続ける
             &[
                 Section("keys"),
@@ -776,7 +776,7 @@ impl State {
                 Entry("type", "filter panes"),
                 Entry("backspace", "delete char"),
                 // クエリ入力と両立しないので、マークとプレビューは Alt付き
-                //（決定39・決定42）
+                //（決定202608080250・決定202608082045）
                 Entry("alt+m", "mark"),
                 Entry("alt+p", "preview"),
                 Entry("enter", "jump & exit"),
@@ -784,7 +784,7 @@ impl State {
                 Entry("?", "this help"),
             ]
         } else if self.preview.is_some() {
-            // プレビュー中だけ既読化キーが増える（決定42）。オフの間は
+            // プレビュー中だけ既読化キーが増える（決定202608082045）。オフの間は
             // 未定義キー扱いなので、押せないキーをヘルプに残さない
             &[
                 Section("keys"),
@@ -839,7 +839,7 @@ impl State {
                         tab_position: position,
                         pane_id: pane.id,
                         // ペイン名が空のコマンドペインはコマンド文字列を名前に
-                        // 使う（決定32）。ここで畳んでおくと、検索・切り詰め・
+                        // 使う（決定202608072218）。ここで畳んでおくと、検索・切り詰め・
                         // ハイライトの経路が普通のペイン名と同じままで済む
                         title: crate::command::fallback_title(pane),
                         is_floating: pane.is_floating,
@@ -850,7 +850,7 @@ impl State {
         if self.selected >= self.selectable.len() {
             self.selected = self.selectable.len().saturating_sub(1);
         }
-        // 閉じられたペインのマークもここで落とす（決定39。選択のクランプと同じ
+        // 閉じられたペインのマークもここで落とす（決定202608080250。選択のクランプと同じ
         // 場所で済ませる）。一覧を組めなかった場合は上で return しているので、
         // 一覧が空＝本当にペインが無いときにしか消えない
         self.prune_marks();
@@ -865,7 +865,7 @@ impl State {
 }
 
 // Shift 以外の修飾キー（Ctrl / Alt / Super）が付いているか。
-// 安全弁（決定12）の判定条件で、Shift だけは印字可能文字の一部として素通しする
+// 安全弁（決定202607310311）の判定条件で、Shift だけは印字可能文字の一部として素通しする
 pub(crate) fn has_hard_modifier(key: &KeyWithModifier) -> bool {
     key.key_modifiers.iter().any(|m| *m != KeyModifier::Shift)
 }
