@@ -1,17 +1,9 @@
 // 単体テスト。
 //
 // 実行はホストターゲットで行う（`make test`）。既定ターゲットの wasm32-wasip1 では
-// テストバイナリを走らせるランタイムがないため。
-//
-// テストできる範囲について:
-// - 副作用だけのホストコマンド（focus_pane_with_id, pipe_message_to_plugin,
-//   intercept_key_presses 等）は下のスタブで何もしなくなるので、呼ばれても安全
-// - **戻り値を stdin から読み返す問い合わせ系は呼べない**（get_plugin_ids,
-//   get_focused_pane_info 等）。テスト中に呼ぶと stdin の読み取りに失敗して panic する。
-//   したがって refresh_focus() とそれを経由する pipe ハンドラ（NAV_*）は
-//   ここでは検証しない。フォーカス同期（要件: focus-sync）のうち、
-//   問い合わせ結果を畳んだ先（State::focused_pane）から先のロジックは
-//   フィールドを直接立てて検証する
+// テストバイナリを走らせるランタイムがないため。テストできる範囲（ホスト関数の
+// スタブと、呼べない問い合わせ系）の説明と、複数のセクションから使うヘルパ・定数は
+// `src/test_support.rs` に集約してある。
 
 use super::*;
 use crate::agent::{AgentState, StatusPayload};
@@ -25,112 +17,11 @@ use crate::render::{
     NO_AGENT_ICON, NO_AGENT_LABEL,
 };
 use crate::termination::Termination;
+use crate::test_support::*;
 use crate::width::{
     fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate, truncate_start,
 };
-use std::collections::HashMap;
 use zellij_tile::shim::plugin_api::event::ProtobufEvent;
-
-// zellij-tile の shim は wasm ホストが提供する `host_run_plugin_command` を参照する。
-// ホスト向けにリンクするにはこのシンボルを埋めてやる必要がある。
-#[allow(unsafe_code)]
-#[no_mangle]
-extern "C" fn host_run_plugin_command() {}
-
-// --- ヘルパ ---
-
-fn terminal_pane(id: u32, title: &str) -> PaneInfo {
-    PaneInfo {
-        id,
-        title: title.to_string(),
-        ..Default::default()
-    }
-}
-
-fn plugin_pane(id: u32, url: &str) -> PaneInfo {
-    PaneInfo {
-        id,
-        is_plugin: true,
-        plugin_url: Some(url.to_string()),
-        ..Default::default()
-    }
-}
-
-// フォーカスしたまま滞在猶予（READ_DELAY）が満ちるまで居座る
-//（docs/issues/transit-focus-clears-read-state.md）。
-//
-// 実機では 0.15 秒刻みで Timer が届くが、期限は経過時間で見るので
-// 1回にまとめてよい。**目的地としてフォーカスした**ことの表明として、
-// 既読を期待するテストはこれを挟む
-fn settle_read(state: &mut State) {
-    state.elapsed += READ_DELAY;
-    state.apply_pending_reads();
-}
-
-// 召喚インスタンス（決定202608011644）。常駐との違いはフローティングかどうか
-fn floating_plugin_pane(id: u32, url: &str) -> PaneInfo {
-    PaneInfo {
-        is_floating: true,
-        ..plugin_pane(id, url)
-    }
-}
-
-fn manifest(tabs: Vec<(usize, Vec<PaneInfo>)>) -> PaneManifest {
-    PaneManifest {
-        panes: tabs.into_iter().collect::<HashMap<_, _>>(),
-    }
-}
-
-fn tab(position: usize, active: bool) -> TabInfo {
-    TabInfo {
-        position,
-        name: format!("tab{}", position + 1),
-        active,
-        ..Default::default()
-    }
-}
-
-fn status(pane_id: u32, event: &str) -> StatusPayload {
-    StatusPayload {
-        pane_id,
-        event: event.to_string(),
-        agent: "claude".to_string(),
-        source: None,
-        cwd: None,
-        detail: None,
-    }
-}
-
-// `SessionStart` に起動理由を添えたもの（配置演出のトリガー判定用）
-fn session_start(pane_id: u32, source: &str) -> StatusPayload {
-    StatusPayload {
-        source: Some(source.to_string()),
-        ..status(pane_id, "SessionStart")
-    }
-}
-
-// 番号列だけを持つ先頭列（マーク列は出さないフレーム）
-fn number_cells(number: Option<(&str, bool)>) -> HeadCells<'_> {
-    HeadCells {
-        number,
-        ..HeadCells::default()
-    }
-}
-
-// タブ0に count 個のターミナルペイン（ID 1..=count）を持つ状態
-fn state_with_panes(count: u32) -> State {
-    let panes: Vec<PaneInfo> = (1..=count)
-        .map(|i| terminal_pane(i, &format!("pane{}", i)))
-        .collect();
-    let mut state = State {
-        tabs: vec![tab(0, true)],
-        panes: Some(manifest(vec![(0, panes)])),
-        permissions_granted: true,
-        ..Default::default()
-    };
-    state.rebuild_selectable();
-    state
-}
 
 // --- truncate ---
 
@@ -866,13 +757,6 @@ fn nav_leaves_on_undefined_keys() {
 
 // --- 番号ジャンプサブモード（決定202608070342、要件: docs/requirements/pane-number-jump/） ---
 
-fn jump_state(count: u32) -> State {
-    let mut state = state_with_panes(count);
-    state.nav_mode = true;
-    state.handle_nav_key(key(BareKey::Char('n')));
-    state
-}
-
 fn jump_buffer(state: &State) -> Option<&str> {
     state.jump.as_ref().map(|j| j.buffer.as_str())
 }
@@ -1056,13 +940,6 @@ fn the_footer_shows_the_number_buffer_while_jumping() {
 // 実行そのもの（send_sigkill_to_pane_id / close_pane_with_id）は副作用だけの
 // ホスト関数で結果を観測できないので、その手前で畳んだ `termination_plan()`
 //（対象ペインと効果の内訳）を検証対象にする
-
-fn termination_state(count: u32) -> State {
-    let mut state = state_with_panes(count);
-    state.nav_mode = true;
-    state.handle_nav_key(key(BareKey::Char('d')));
-    state
-}
 
 #[test]
 fn the_entry_key_opens_the_confirmation_prompt() {
@@ -1929,65 +1806,6 @@ fn the_snapshot_drops_the_blank_tail() {
 //
 // サイドバー幅は32文字（決定202607302256）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 
-// Text の装飾を「レベル → 文字位置」に戻す。serialize() は
-// 「`selected`/`opaque` のプレフィックス → レベルごとの位置列を `$` 区切りで
-// 並べたもの → 本文」の形。色は 0-3、dim は 4（zellij-tile の Text の取り決め）。
-//
-// **プレフィックスは zellij 本体と同じ順（x → z）で剥がす。** 本体は
-// `parse_selected` → `parse_opaque` の順に先頭1文字ずつ見るので、剥がし残しは
-// そのままレベル0の先頭の数値にくっついて位置指定を壊す。ここで同じ順を踏むことで、
-// 実機と同じ見え方を検査できる（docs/issues/idle-icon-color-on-selection.md）
-fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
-    let mut serialized = text.serialize();
-    for marker in ['x', 'z'] {
-        if serialized.starts_with(marker) {
-            serialized.remove(0);
-        }
-    }
-    let Some((indices, _body)) = serialized.rsplit_once('$') else {
-        return Vec::new();
-    };
-    indices
-        .split('$')
-        .map(|level| {
-            level
-                .split(',')
-                .filter_map(|position| position.parse().ok())
-                .collect()
-        })
-        .collect()
-}
-
-// そのレベルの装飾が乗っている文字位置（乗っていなければ空）
-fn ink_at(text: &Text, level: usize) -> Vec<usize> {
-    ink_levels(text).get(level).cloned().unwrap_or_default()
-}
-
-const DIM_LEVEL: usize = 4;
-// unbold。zellij 側の基底スタイルが bold なので、落とさない＝太いまま残る
-const UNBOLD_LEVEL: usize = 5;
-// error_color。状態アイコン `error` と終了操作サブモードの警告色（決定202608080140）
-const ERROR_LEVEL: usize = 6;
-
-// プラグインの configuration（決定202608080346。取り込みは State::apply_config 1本）
-fn plugin_config(settings: &[(&str, &str)]) -> BTreeMap<String, String> {
-    settings
-        .iter()
-        .map(|(setting, value)| (setting.to_string(), value.to_string()))
-        .collect()
-}
-
-// READMEが例示している direct-keys の移動キー（Alt Up / Alt Down / Alt g）。
-// `toggle_cwd_key` は入れない — 幅の詰め方（矢印への退避・末尾の省略）を見る
-// テストが多く、移動キー3つで既に幅32を超えるため
-fn with_direct_keys(state: &mut State) {
-    state.apply_config(&plugin_config(&[
-        ("up_key", "alt+up"),
-        ("down_key", "alt+down"),
-        ("go_key", "alt+g"),
-    ]));
-}
-
 #[test]
 fn the_header_keeps_the_brand_in_every_mode() {
     // `▲ fujin` はモードによらず常に出る。変わるのは後ろに付くモードラベル
@@ -2121,30 +1939,6 @@ fn the_frame_keeps_its_rows_across_every_mode_boundary() {
         state.jump = None;
         state.help_overlay = false;
     }
-}
-
-// 枠（境界線→ヘッダー→境界線→…→境界線→フッター）が崩れていないこと
-fn assert_frame(rows: &[Row<'_>], label: &str) {
-    assert!(
-        matches!(
-            (&rows[0], &rows[1], &rows[2]),
-            (Row::Divider, Row::Header, Row::Divider)
-        ),
-        "{} で上の枠が崩れた",
-        label
-    );
-    assert!(
-        matches!(
-            (
-                &rows[rows.len() - 3],
-                &rows[rows.len() - 2],
-                &rows[rows.len() - 1]
-            ),
-            (Row::Divider, Row::Footer, Row::Blank)
-        ),
-        "{} で下の枠が崩れた",
-        label
-    );
 }
 
 #[test]
@@ -2695,19 +2489,6 @@ fn the_help_overlay_covers_the_tree_but_keeps_the_frame() {
     );
     // 行クリックの逆引きも当たらない（要件: click-to-focus と食い違わせない）
     assert!((0..rows.len()).all(|y| state.pane_at_row(y).is_none()));
-}
-
-// ヘルプオーバーレイに実際に載る行（モードごとのキー一覧＋共通の状態アイコン凡例）。
-// 高さは全部載るだけ渡す — あふれ方の検証は別のテストで見る
-fn overlay_lines(state: &State, cols: usize) -> Vec<String> {
-    state
-        .screen_rows(40)
-        .iter()
-        .filter_map(|row| match row {
-            Row::Help(help) => Some(state.help_line(help, cols).content().to_string()),
-            _ => None,
-        })
-        .collect()
 }
 
 #[test]
@@ -3604,36 +3385,6 @@ fn an_interrupted_nav_mode_does_not_take_the_focus_back() {
 // match_one / match_pane の単体テストは src/search.rs 側にある。
 // ここでは State を通したキー処理と絞り込みの追従を見る。
 
-// タブ2枚（tab1: alpha, bravo / tab2: charlie）。bravo だけ cwd を持つ
-fn searchable_state() -> State {
-    let mut state = State {
-        tabs: vec![tab(0, true), tab(1, false)],
-        panes: Some(manifest(vec![
-            (
-                0,
-                vec![terminal_pane(1, "alpha"), terminal_pane(2, "bravo")],
-            ),
-            (1, vec![terminal_pane(3, "charlie")]),
-        ])),
-        permissions_granted: true,
-        nav_mode: true,
-        ..Default::default()
-    };
-    state.pane_cwds.insert(2, "/work/fujin".to_string());
-    state.rebuild_selectable();
-    state
-}
-
-fn key(bare: BareKey) -> KeyWithModifier {
-    KeyWithModifier::new(bare)
-}
-
-fn type_query(state: &mut State, query: &str) {
-    for c in query.chars() {
-        state.handle_nav_key(key(BareKey::Char(c)));
-    }
-}
-
 #[test]
 fn slash_enters_search_with_an_empty_query_matching_everything() {
     let mut state = searchable_state();
@@ -3761,20 +3512,6 @@ fn esc_is_three_staged_and_does_not_close_a_summoned_instance() {
     // 3段目: navモードから退場（召喚インスタンスならここで自分を閉じる）
     state.handle_nav_key(key(BareKey::Esc));
     assert!(!state.nav_mode);
-}
-
-// いまの検索サブモードの状態（決定202608131200）
-fn search_phase(state: &State) -> Option<SearchPhase> {
-    state.search.as_ref().map(|s| s.phase)
-}
-
-// 検索サブモードの操作状態まで進める（`/` で入って Esc）
-fn navigating_search(query: &str) -> State {
-    let mut state = searchable_state();
-    state.handle_nav_key(key(BareKey::Char('/')));
-    type_query(&mut state, query);
-    state.handle_nav_key(key(BareKey::Esc));
-    state
 }
 
 #[test]
@@ -4295,16 +4032,6 @@ fn summon_candidates_are_ordered_and_deduped() {
 
 // --- pipe（ワイヤプロトコル） ---
 
-fn pipe_message(name: &str, payload: &str) -> PipeMessage {
-    PipeMessage {
-        source: PipeSource::Plugin(0),
-        name: name.to_string(),
-        payload: Some(payload.to_string()),
-        args: BTreeMap::new(),
-        is_private: true,
-    }
-}
-
 // キーバインドからの `fujin_toggle_cwd` はユーザー操作なので payload を持たない
 //（NAV_UP_PIPE等と同じ）。同期用の明示セットとの分岐を試すのに必要
 fn pipe_message_no_payload(name: &str) -> PipeMessage {
@@ -4465,41 +4192,6 @@ fn unknown_pipes_are_ignored() {
 // カウンタ列は右端に揃え、幅はフレーム全体で共有する。ペイン名はその残り幅に
 // 収めるので、名前が長くてもサブエージェント数 `+N`・未完了タスク数 `[M]` は
 // 消えない。cwd はペイン行に混ぜず、続く cwd行に出す
-
-const SIDEBAR: usize = 32; // 既定のサイドバー幅（決定202607302256）
-                           // ツリーの上に常時居る枠（境界線・ヘッダー・境界線）。ツリーの行番号は
-                           // すべてこの下から数える（要件: sidebar-header.feature）
-const HEADER_ROWS: usize = 3;
-// ツリーの下に常時居る枠（境界線・フッター・status-bar と離すための余白）
-const FOOTER_ROWS: usize = 3;
-const CONTENT: usize = SIDEBAR - 2; // 右マージン2セルを除いた、文字を置ける幅
-
-// 1ペインだけを持つ状態。ペイン名を指定して作る
-fn state_with_one_pane(title: &str) -> State {
-    let mut state = state_with_panes(0);
-    state.panes = Some(manifest(vec![(0, vec![terminal_pane(1, title)])]));
-    state.rebuild_selectable();
-    state
-}
-
-// そのフレームのカウンタ列（描画と同じ手順で測る）
-fn column_of(state: &State) -> CounterColumn {
-    state.counter_column(&state.visible_rows())
-}
-
-// content 内で needle が始まる列（表示セル基準）
-fn column_at(content: &str, needle: &str) -> usize {
-    let byte = content
-        .find(needle)
-        .unwrap_or_else(|| panic!("{:?} が {:?} に無い", needle, content));
-    unicode_width::UnicodeWidthStr::width(&content[..byte])
-}
-
-fn repeat_status(state: &mut State, pane_id: u32, event: &str, times: usize) {
-    for _ in 0..times {
-        state.apply_status(status(pane_id, event));
-    }
-}
 
 #[test]
 fn a_pane_without_a_status_gets_the_no_agent_marker() {
@@ -5477,17 +5169,6 @@ fn on_screen(state: &State, rows: usize, pane_id: u32) -> bool {
     (0..rows).any(|y| state.pane_at_row(y) == Some(pane_id))
 }
 
-fn overflow_markers(state: &State, rows: usize) -> Vec<(usize, bool)> {
-    state
-        .screen_rows(rows)
-        .iter()
-        .filter_map(|row| match row {
-            Row::Overflow { hidden, above } => Some((*hidden, *above)),
-            _ => None,
-        })
-        .collect()
-}
-
 #[test]
 fn scrolling_keeps_everything_in_place_when_it_all_fits() {
     let mut state = overflowing_state();
@@ -5811,52 +5492,6 @@ fn clicking_is_ignored_before_permissions_are_granted() {
 //
 // navモードの内側で `p` から入る、エージェント状態の緊急度順のフラット一覧。
 // ツリー表示の並び順（決定202607302256）には手を触れず、切り替えて使う
-
-// タブ0に3ペイン、タブ1に1ペインを持つ navモード中の状態
-fn triage_state() -> State {
-    let mut state = State {
-        tabs: vec![tab(0, true), tab(1, false)],
-        panes: Some(manifest(vec![
-            (
-                0,
-                vec![
-                    terminal_pane(1, "alpha"),
-                    terminal_pane(2, "bravo"),
-                    terminal_pane(3, "charlie"),
-                ],
-            ),
-            (1, vec![terminal_pane(4, "delta")]),
-        ])),
-        permissions_granted: true,
-        nav_mode: true,
-        ..Default::default()
-    };
-    state.rebuild_selectable();
-    state
-}
-
-// フックのイベント列を通してエージェント状態を作る（直接代入せず、
-// シーケンス番号も本番と同じ経路で振らせる）
-fn set_agent_state(state: &mut State, pane_id: u32, target: AgentState) {
-    match target {
-        AgentState::Idle => {
-            state.apply_status(status(pane_id, "SessionStart"));
-        }
-        AgentState::Working => {
-            state.apply_status(status(pane_id, "UserPromptSubmit"));
-        }
-        AgentState::Blocked => {
-            state.apply_status(status(pane_id, "Notification"));
-        }
-        AgentState::Done => {
-            state.apply_status(status(pane_id, "UserPromptSubmit"));
-            state.apply_status(status(pane_id, "Stop"));
-        }
-        AgentState::Error => {
-            state.apply_status(status(pane_id, "StopFailure"));
-        }
-    }
-}
 
 fn triage_ids(state: &State) -> Vec<u32> {
     state.triage_entries().iter().map(|e| e.pane_id).collect()
@@ -6328,34 +5963,6 @@ fn render_survives_triage_mode() {
 // コマンドペインの走行・終了を PaneManifest から導出する。エージェント状態とは
 // 別概念だが、記号・既読モデル・待ち件数・トリアージ一覧は共用する
 
-fn command_pane(id: u32, command: &str) -> PaneInfo {
-    PaneInfo {
-        id,
-        terminal_command: Some(command.to_string()),
-        ..Default::default()
-    }
-}
-
-// 終了して残っているコマンドペイン（`close_on_exit` は既定 false なので、
-// プロセスが終わってもペインは `exited` のまま残り続ける）
-fn exited_command_pane(id: u32, command: &str, exit_status: Option<i32>) -> PaneInfo {
-    PaneInfo {
-        exited: true,
-        exit_status,
-        ..command_pane(id, command)
-    }
-}
-
-// 与えたペインを持つタブ0だけの状態。導出（apply_command_states）まで済ませる
-fn state_with_command_panes(panes: Vec<PaneInfo>) -> State {
-    let mut state = state_with_panes(0);
-    let manifest = manifest(vec![(0, panes)]);
-    state.apply_command_states(&manifest);
-    state.panes = Some(manifest);
-    state.rebuild_selectable();
-    state
-}
-
 #[test]
 fn a_running_command_pane_is_working() {
     let state = state_with_command_panes(vec![command_pane(1, "docker build .")]);
@@ -6628,13 +6235,6 @@ fn the_command_state_pipe_takes_a_dump() {
 // 必ず「フォーカス中に終了」する。素直に既読モデルを当てると、状態が付いた
 // 同じ PaneUpdate の中で既読になり、アイコンが一度も描かれないまま消える
 
-fn focused(pane: PaneInfo) -> PaneInfo {
-    PaneInfo {
-        is_focused: true,
-        ..pane
-    }
-}
-
 // 実セッションの再現手順（`zellij run -- sh -c 'exit 1'`）をそのままなぞる。
 // 新しいコマンドペインがフォーカスを持ったまま走り、そのまま失敗して終わる
 fn run_and_fail_while_focused() -> State {
@@ -6774,18 +6374,6 @@ fn the_read_clear_pipe_ignores_the_grace() {
 const LAUNCH: usize = 8;
 const DEEPEST: usize = CONTENT - 1;
 
-// ペイン一覧を差し替えて1回ぶん観測させる。`Event::PaneUpdate` の扱いと同じ順序。
-// **配置演出のトリガーはもう一覧を見ない**（フック通知だけで判定する）ので、ここでは
-// ヘッダー描画に要る状態を作るだけ
-fn observe_panes(state: &mut State, ids: &[u32]) {
-    let panes: Vec<PaneInfo> = ids
-        .iter()
-        .map(|id| terminal_pane(*id, &format!("pane{}", id)))
-        .collect();
-    state.panes = Some(manifest(vec![(0, panes)]));
-    state.rebuild_selectable();
-}
-
 // 新規エージェント検出から配置演出の発火までを通す。
 //
 // 本番では検出（`apply_status` の戻り値）と発火（`begin_deployment`）の間に
@@ -6795,16 +6383,6 @@ fn observe_panes(state: &mut State, ids: &[u32]) {
 // 後の発火だけを見る
 fn deploy_agents(state: &mut State, troops: usize) {
     state.begin_deployment(troops);
-}
-
-// まだ何も観測していない、既定幅で描画済みのサイドバー
-fn sidebar_state() -> State {
-    State {
-        tabs: vec![tab(0, true)],
-        permissions_granted: true,
-        viewport_cols: SIDEBAR,
-        ..Default::default()
-    }
 }
 
 // いま画面に出ている兵の列

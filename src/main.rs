@@ -45,6 +45,8 @@ mod triage;
 mod width;
 
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
