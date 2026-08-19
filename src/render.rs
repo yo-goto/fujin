@@ -3,7 +3,7 @@
 // レイアウト（決定202608070119）: 境界線 → ヘッダー(1行) → 境界線 → ツリー(可変) →
 // 境界線 → フッター(1行) の5要素からなる固定枠（最下部にもう1行、zellij 本体の
 // status-bar と離すための余白が付く）。要件は
-// docs/requirements/sidebar-tree/sidebar-header.feature（ヘッダー・枠構造）と
+// features/sidebar-tree/sidebar-header.feature（ヘッダー・枠構造）と
 // sidebar-footer.feature（フッター）。ツリーの中身はタブ見出し行 > 配下の
 // ペイン行 をタブ順で縦に並べたもの。
 //
@@ -13,7 +13,7 @@
 // 出しており、重複が視認性を下げる。
 //
 // 行が画面高に収まらないときは表示範囲を選択行へ寄せる（縦スクロール。
-// 要件: docs/requirements/sidebar-tree/sidebar-scroll.feature）。枠は固定で、
+// 要件: features/sidebar-tree/sidebar-scroll.feature）。枠は固定で、
 // あいだのツリーだけが動く。
 
 use unicode_width::UnicodeWidthStr;
