@@ -167,3 +167,146 @@ pub(crate) fn shift_highlight_indices(
         .filter(|i| *i < limit)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- truncate ---
+
+    #[test]
+    fn truncate_leaves_short_strings_alone() {
+        assert_eq!(truncate("abc", 5), "abc");
+        // 境界: ちょうど収まるときは省略記号を付けない
+        assert_eq!(truncate("abcde", 5), "abcde");
+    }
+
+    #[test]
+    fn truncate_appends_ellipsis_within_budget() {
+        assert_eq!(truncate("abcdef", 5), "abcd…");
+        assert_eq!(truncate("abcdef", 5).chars().count(), 5);
+    }
+
+    #[test]
+    fn truncate_counts_display_width_not_chars() {
+        // 全角文字（CJK）は2セル分として数える。6文字でも表示幅は12あるので、
+        // 文字数ベースだった旧実装ではここが誤って「そのまま返す」になっていた
+        // （docs/issues/sidebar-bottom-highlight-glitch.md）
+        assert_eq!(truncate("日本語テスト", 12), "日本語テスト");
+        assert_eq!(truncate("日本語テスト", 6), "日本…");
+    }
+
+    #[test]
+    fn truncate_with_zero_width_is_empty() {
+        // 省略記号1文字だけがはみ出すとサイドバー幅を壊す
+        assert_eq!(truncate("abc", 0), "");
+    }
+
+    // --- pad_to_width ---
+
+    #[test]
+    fn pad_to_width_fills_with_spaces_up_to_the_column_count() {
+        assert_eq!(pad_to_width("abc".to_string(), 5), "abc  ");
+    }
+
+    #[test]
+    fn pad_to_width_counts_cjk_chars_as_two_cells() {
+        // 全角文字混じりのラベルを文字数でパディングすると表示幅が cols を
+        // 超えてしまい、選択背景が端末側で折り返されて次の行にはみ出す
+        // （docs/issues/sidebar-bottom-highlight-glitch.md）。
+        // 「日本語」は3文字・表示幅6なので、cols=10 なら空白4個で埋まるのが正しい
+        let padded = pad_to_width("日本語".to_string(), 10);
+        assert_eq!(padded, "日本語    ");
+        assert_eq!(unicode_width::UnicodeWidthStr::width(padded.as_str()), 10);
+    }
+
+    #[test]
+    fn pad_to_width_does_not_underflow_when_already_wide_enough() {
+        // 表示幅がすでに cols 以上のときは空白を足さない（saturating_sub）
+        assert_eq!(pad_to_width("日本語テスト".to_string(), 3), "日本語テスト");
+    }
+
+    // --- shift_highlight_indices（ハイライト位置の変換） ---
+
+    #[test]
+    fn highlight_indices_are_shifted_by_the_label_prefix() {
+        // "▌ ○ alpha" — タイトルは4文字目から
+        assert_eq!(
+            shift_highlight_indices(&[0, 2], 4, "▌ ○ alpha", 9),
+            vec![4, 6]
+        );
+    }
+
+    #[test]
+    fn highlight_indices_beyond_the_truncation_are_dropped() {
+        // 元9文字を6文字に切り詰めると、末尾は … になる（実位置5が省略記号）
+        let truncated = truncate("▌ ○ alpha", 6);
+        assert_eq!(truncated.chars().count(), 6);
+        assert_eq!(
+            shift_highlight_indices(&[0, 1, 2, 3, 4], 4, &truncated, 9),
+            vec![4],
+            "省略記号とその先の位置には色を乗せない"
+        );
+    }
+
+    // --- 先頭省略とハイライト位置 ---
+
+    #[test]
+    fn truncate_start_leaves_short_strings_alone() {
+        assert_eq!(truncate_start("/a/b", 5), ("/a/b".to_string(), 0));
+        // 境界: ちょうど収まるときは省略記号を付けない
+        assert_eq!(truncate_start("/a/bc", 5), ("/a/bc".to_string(), 0));
+    }
+
+    #[test]
+    fn truncate_start_drops_the_head_within_budget() {
+        // "/bb" までは境界候補だが幅に収まらないので、収まる直近の境界 "/cc" へ丸める
+        let (folded, dropped) = truncate_start("/aa/bb/cc", 5);
+        assert_eq!(folded, "…/cc");
+        assert_eq!(dropped, 6);
+        // 収まる `/` 境界が無いときだけ、従来どおり文字幅で機械的に末尾を残す
+        // （全角は2セルぶん食う）
+        let (folded, dropped) = truncate_start("/あ/いう", 5);
+        assert_eq!(folded, "…いう");
+        assert_eq!(dropped, 3);
+    }
+
+    #[test]
+    fn truncate_start_rounds_to_a_slash_boundary() {
+        // ディレクトリ名の途中で切らず、`…` の直後が必ず `/` になるように
+        // 収まる範囲でいちばん手前の区切りへ丸める（中途半端な文字列を避ける調整）
+        let (folded, dropped) =
+            truncate_start("/Users/example/development/oss/zellij-plugins/fujin", 24);
+        assert_eq!(folded, "…/zellij-plugins/fujin");
+        assert_eq!(dropped, 30);
+    }
+
+    #[test]
+    fn truncate_start_falls_back_to_character_width_when_no_boundary_fits() {
+        // 区切りが無い（か、区切りまで残しても収まらない）ほど1セグメントが
+        // 長いときは、`…/` を諦めて文字幅で機械的に末尾を残す
+        let (folded, dropped) = truncate_start("/aaaaaaaaaa", 5);
+        assert_eq!(folded, "…aaaa");
+        assert_eq!(dropped, 7);
+    }
+
+    #[test]
+    fn highlight_indices_follow_a_leading_ellipsis() {
+        // "/aa/bb/cc" を先頭省略すると "…b/cc"。落ちた側（0..5）のヒットは捨て、
+        // 残った側は省略記号1文字ぶん右へずれる
+        assert_eq!(
+            fold_highlight_indices(&[0, 4, 5, 8], "…b/cc", 5, 9, 6),
+            vec![6 + 1, 6 + 1 + 3]
+        );
+    }
+
+    #[test]
+    fn highlight_indices_after_a_trailing_ellipsis_are_dropped() {
+        // 末尾切り詰め側は既存の規則のまま。"abcdefghi" を "abcd…" に詰めたので、
+        // 見えている 0..4 は offset ぶんずらし、省略記号に重なる 4 以降は捨てる
+        assert_eq!(
+            fold_highlight_indices(&[0, 3, 4, 8], "abcd…", 0, 9, 4),
+            vec![4, 7]
+        );
+    }
+}

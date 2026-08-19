@@ -444,3 +444,89 @@ impl State {
         self.prune_stale_commands(&live_commands);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deploy;
+
+    // --- AgentState ---
+
+    #[test]
+    fn agent_state_wire_round_trip() {
+        for state in [
+            AgentState::Idle,
+            AgentState::Working,
+            AgentState::Blocked,
+            AgentState::Done,
+            AgentState::Error,
+        ] {
+            assert_eq!(AgentState::from_str(state.as_str()), state);
+        }
+    }
+
+    #[test]
+    fn agent_state_from_unknown_is_idle() {
+        assert_eq!(AgentState::from_str(""), AgentState::Idle);
+        assert_eq!(AgentState::from_str("bogus"), AgentState::Idle);
+    }
+
+    // --- StatusPayload::parse ---
+
+    #[test]
+    fn parse_status_reads_all_fields() {
+        let raw = r#"{"pane_id":"12","event":"Notification","agent":"claude","cwd":"/tmp/x","detail":"needs input"}"#;
+        let payload = StatusPayload::parse(raw).expect("parses");
+        assert_eq!(payload.pane_id, 12);
+        assert_eq!(payload.event, "Notification");
+        assert_eq!(payload.agent, "claude");
+        assert_eq!(payload.cwd.as_deref(), Some("/tmp/x"));
+        assert_eq!(payload.detail.as_deref(), Some("needs input"));
+    }
+
+    #[test]
+    fn parse_status_accepts_unquoted_numbers_and_spaces() {
+        let raw = r#"{ "pane_id": 7, "event": "Stop" }"#;
+        let payload = StatusPayload::parse(raw).expect("parses");
+        assert_eq!(payload.pane_id, 7);
+        assert_eq!(payload.event, "Stop");
+    }
+
+    #[test]
+    fn parse_status_defaults_missing_agent() {
+        let raw = r#"{"pane_id":"3","event":"Stop"}"#;
+        let payload = StatusPayload::parse(raw).expect("parses");
+        assert_eq!(payload.agent, "unknown");
+        assert_eq!(payload.cwd, None);
+        assert_eq!(payload.detail, None);
+    }
+
+    #[test]
+    fn parse_status_reads_the_session_start_source() {
+        // フックスクリプト（extras/claude-hooks/fujin-hook.sh）の jq が実際に吐く形。
+        // `source` は SessionStart にだけ入り、他のイベントでは with_entries で落ちる
+        let raw = r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"startup","cwd":"/tmp/x"}"#;
+        let payload = StatusPayload::parse(raw).expect("parses");
+        assert_eq!(payload.source.as_deref(), Some("startup"));
+        assert!(deploy::detect_new_agent(payload.source.as_deref()));
+
+        let raw = r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"clear","cwd":"/tmp/x"}"#;
+        let payload = StatusPayload::parse(raw).expect("parses");
+        assert_eq!(payload.source.as_deref(), Some("clear"));
+        assert!(!deploy::detect_new_agent(payload.source.as_deref()));
+
+        // `source` を持たないイベントは None のまま
+        let raw = r#"{"pane_id":7,"agent":"claude","event":"Stop","cwd":"/tmp/x"}"#;
+        assert_eq!(StatusPayload::parse(raw).expect("parses").source, None);
+    }
+
+    #[test]
+    fn parse_status_rejects_incomplete_payloads() {
+        // pane_id / event はどちらも必須
+        assert!(StatusPayload::parse(r#"{"event":"Stop"}"#).is_none());
+        assert!(StatusPayload::parse(r#"{"pane_id":"3"}"#).is_none());
+        // 数値にできない pane_id は捨てる
+        assert!(StatusPayload::parse(r#"{"pane_id":"abc","event":"Stop"}"#).is_none());
+        assert!(StatusPayload::parse("not json at all").is_none());
+    }
+}

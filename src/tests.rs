@@ -6,7 +6,7 @@
 // `src/test_support.rs` に集約してある。
 
 use super::*;
-use crate::agent::{AgentState, StatusPayload};
+use crate::agent::AgentState;
 use crate::command::{CommandState, PaneStatus};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
@@ -18,145 +18,7 @@ use crate::render::{
 };
 use crate::termination::Termination;
 use crate::test_support::*;
-use crate::width::{
-    fold_highlight_indices, pad_to_width, shift_highlight_indices, truncate, truncate_start,
-};
 use zellij_tile::shim::plugin_api::event::ProtobufEvent;
-
-// --- truncate ---
-
-#[test]
-fn truncate_leaves_short_strings_alone() {
-    assert_eq!(truncate("abc", 5), "abc");
-    // 境界: ちょうど収まるときは省略記号を付けない
-    assert_eq!(truncate("abcde", 5), "abcde");
-}
-
-#[test]
-fn truncate_appends_ellipsis_within_budget() {
-    assert_eq!(truncate("abcdef", 5), "abcd…");
-    assert_eq!(truncate("abcdef", 5).chars().count(), 5);
-}
-
-#[test]
-fn truncate_counts_display_width_not_chars() {
-    // 全角文字（CJK）は2セル分として数える。6文字でも表示幅は12あるので、
-    // 文字数ベースだった旧実装ではここが誤って「そのまま返す」になっていた
-    // （docs/issues/sidebar-bottom-highlight-glitch.md）
-    assert_eq!(truncate("日本語テスト", 12), "日本語テスト");
-    assert_eq!(truncate("日本語テスト", 6), "日本…");
-}
-
-#[test]
-fn truncate_with_zero_width_is_empty() {
-    // 省略記号1文字だけがはみ出すとサイドバー幅を壊す
-    assert_eq!(truncate("abc", 0), "");
-}
-
-// --- pad_to_width ---
-
-#[test]
-fn pad_to_width_fills_with_spaces_up_to_the_column_count() {
-    assert_eq!(pad_to_width("abc".to_string(), 5), "abc  ");
-}
-
-#[test]
-fn pad_to_width_counts_cjk_chars_as_two_cells() {
-    // 全角文字混じりのラベルを文字数でパディングすると表示幅が cols を
-    // 超えてしまい、選択背景が端末側で折り返されて次の行にはみ出す
-    // （docs/issues/sidebar-bottom-highlight-glitch.md）。
-    // 「日本語」は3文字・表示幅6なので、cols=10 なら空白4個で埋まるのが正しい
-    let padded = pad_to_width("日本語".to_string(), 10);
-    assert_eq!(padded, "日本語    ");
-    assert_eq!(unicode_width::UnicodeWidthStr::width(padded.as_str()), 10);
-}
-
-#[test]
-fn pad_to_width_does_not_underflow_when_already_wide_enough() {
-    // 表示幅がすでに cols 以上のときは空白を足さない（saturating_sub）
-    assert_eq!(pad_to_width("日本語テスト".to_string(), 3), "日本語テスト");
-}
-
-// --- AgentState ---
-
-#[test]
-fn agent_state_wire_round_trip() {
-    for state in [
-        AgentState::Idle,
-        AgentState::Working,
-        AgentState::Blocked,
-        AgentState::Done,
-        AgentState::Error,
-    ] {
-        assert_eq!(AgentState::from_str(state.as_str()), state);
-    }
-}
-
-#[test]
-fn agent_state_from_unknown_is_idle() {
-    assert_eq!(AgentState::from_str(""), AgentState::Idle);
-    assert_eq!(AgentState::from_str("bogus"), AgentState::Idle);
-}
-
-// --- StatusPayload::parse ---
-
-#[test]
-fn parse_status_reads_all_fields() {
-    let raw = r#"{"pane_id":"12","event":"Notification","agent":"claude","cwd":"/tmp/x","detail":"needs input"}"#;
-    let payload = StatusPayload::parse(raw).expect("parses");
-    assert_eq!(payload.pane_id, 12);
-    assert_eq!(payload.event, "Notification");
-    assert_eq!(payload.agent, "claude");
-    assert_eq!(payload.cwd.as_deref(), Some("/tmp/x"));
-    assert_eq!(payload.detail.as_deref(), Some("needs input"));
-}
-
-#[test]
-fn parse_status_accepts_unquoted_numbers_and_spaces() {
-    let raw = r#"{ "pane_id": 7, "event": "Stop" }"#;
-    let payload = StatusPayload::parse(raw).expect("parses");
-    assert_eq!(payload.pane_id, 7);
-    assert_eq!(payload.event, "Stop");
-}
-
-#[test]
-fn parse_status_defaults_missing_agent() {
-    let raw = r#"{"pane_id":"3","event":"Stop"}"#;
-    let payload = StatusPayload::parse(raw).expect("parses");
-    assert_eq!(payload.agent, "unknown");
-    assert_eq!(payload.cwd, None);
-    assert_eq!(payload.detail, None);
-}
-
-#[test]
-fn parse_status_reads_the_session_start_source() {
-    // フックスクリプト（extras/claude-hooks/fujin-hook.sh）の jq が実際に吐く形。
-    // `source` は SessionStart にだけ入り、他のイベントでは with_entries で落ちる
-    let raw = r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"startup","cwd":"/tmp/x"}"#;
-    let payload = StatusPayload::parse(raw).expect("parses");
-    assert_eq!(payload.source.as_deref(), Some("startup"));
-    assert!(deploy::detect_new_agent(payload.source.as_deref()));
-
-    let raw =
-        r#"{"pane_id":7,"agent":"claude","event":"SessionStart","source":"clear","cwd":"/tmp/x"}"#;
-    let payload = StatusPayload::parse(raw).expect("parses");
-    assert_eq!(payload.source.as_deref(), Some("clear"));
-    assert!(!deploy::detect_new_agent(payload.source.as_deref()));
-
-    // `source` を持たないイベントは None のまま
-    let raw = r#"{"pane_id":7,"agent":"claude","event":"Stop","cwd":"/tmp/x"}"#;
-    assert_eq!(StatusPayload::parse(raw).expect("parses").source, None);
-}
-
-#[test]
-fn parse_status_rejects_incomplete_payloads() {
-    // pane_id / event はどちらも必須
-    assert!(StatusPayload::parse(r#"{"event":"Stop"}"#).is_none());
-    assert!(StatusPayload::parse(r#"{"pane_id":"3"}"#).is_none());
-    // 数値にできない pane_id は捨てる
-    assert!(StatusPayload::parse(r#"{"pane_id":"abc","event":"Stop"}"#).is_none());
-    assert!(StatusPayload::parse("not json at all").is_none());
-}
 
 // --- apply_status（イベント→状態の遷移） ---
 
@@ -3798,29 +3660,6 @@ fn refiltering_with_no_hits_clears_the_cursor() {
     assert_eq!(state.search.as_ref().unwrap().cursor, None);
 }
 
-// --- shift_highlight_indices（ハイライト位置の変換） ---
-
-#[test]
-fn highlight_indices_are_shifted_by_the_label_prefix() {
-    // "▌ ○ alpha" — タイトルは4文字目から
-    assert_eq!(
-        shift_highlight_indices(&[0, 2], 4, "▌ ○ alpha", 9),
-        vec![4, 6]
-    );
-}
-
-#[test]
-fn highlight_indices_beyond_the_truncation_are_dropped() {
-    // 元9文字を6文字に切り詰めると、末尾は … になる（実位置5が省略記号）
-    let truncated = truncate("▌ ○ alpha", 6);
-    assert_eq!(truncated.chars().count(), 6);
-    assert_eq!(
-        shift_highlight_indices(&[0, 1, 2, 3, 4], 4, &truncated, 9),
-        vec![4],
-        "省略記号とその先の位置には色を乗せない"
-    );
-}
-
 // --- 兄弟インスタンスの検出（決定202608012141） ---
 
 #[test]
@@ -5028,67 +4867,6 @@ fn a_floating_row_survives_a_sidebar_too_narrow_for_the_parentheses() {
         4,
     );
     assert!(unicode_width::UnicodeWidthStr::width(text.content()) <= 4);
-}
-
-// --- 先頭省略とハイライト位置 ---
-
-#[test]
-fn truncate_start_leaves_short_strings_alone() {
-    assert_eq!(truncate_start("/a/b", 5), ("/a/b".to_string(), 0));
-    // 境界: ちょうど収まるときは省略記号を付けない
-    assert_eq!(truncate_start("/a/bc", 5), ("/a/bc".to_string(), 0));
-}
-
-#[test]
-fn truncate_start_drops_the_head_within_budget() {
-    // "/bb" までは境界候補だが幅に収まらないので、収まる直近の境界 "/cc" へ丸める
-    let (folded, dropped) = truncate_start("/aa/bb/cc", 5);
-    assert_eq!(folded, "…/cc");
-    assert_eq!(dropped, 6);
-    // 収まる `/` 境界が無いときだけ、従来どおり文字幅で機械的に末尾を残す
-    // （全角は2セルぶん食う）
-    let (folded, dropped) = truncate_start("/あ/いう", 5);
-    assert_eq!(folded, "…いう");
-    assert_eq!(dropped, 3);
-}
-
-#[test]
-fn truncate_start_rounds_to_a_slash_boundary() {
-    // ディレクトリ名の途中で切らず、`…` の直後が必ず `/` になるように
-    // 収まる範囲でいちばん手前の区切りへ丸める（中途半端な文字列を避ける調整）
-    let (folded, dropped) =
-        truncate_start("/Users/example/development/oss/zellij-plugins/fujin", 24);
-    assert_eq!(folded, "…/zellij-plugins/fujin");
-    assert_eq!(dropped, 30);
-}
-
-#[test]
-fn truncate_start_falls_back_to_character_width_when_no_boundary_fits() {
-    // 区切りが無い（か、区切りまで残しても収まらない）ほど1セグメントが
-    // 長いときは、`…/` を諦めて文字幅で機械的に末尾を残す
-    let (folded, dropped) = truncate_start("/aaaaaaaaaa", 5);
-    assert_eq!(folded, "…aaaa");
-    assert_eq!(dropped, 7);
-}
-
-#[test]
-fn highlight_indices_follow_a_leading_ellipsis() {
-    // "/aa/bb/cc" を先頭省略すると "…b/cc"。落ちた側（0..5）のヒットは捨て、
-    // 残った側は省略記号1文字ぶん右へずれる
-    assert_eq!(
-        fold_highlight_indices(&[0, 4, 5, 8], "…b/cc", 5, 9, 6),
-        vec![6 + 1, 6 + 1 + 3]
-    );
-}
-
-#[test]
-fn highlight_indices_after_a_trailing_ellipsis_are_dropped() {
-    // 末尾切り詰め側は既存の規則のまま。"abcdefghi" を "abcd…" に詰めたので、
-    // 見えている 0..4 は offset ぶんずらし、省略記号に重なる 4 以降は捨てる
-    assert_eq!(
-        fold_highlight_indices(&[0, 3, 4, 8], "abcd…", 0, 9, 4),
-        vec![4, 7]
-    );
 }
 
 // --- render（描画パスが panic しないこと） ---
