@@ -5,16 +5,6 @@ Feature: navモード中の選択移動とジャンプ
     When ユーザーが "j" キーを押す
     Then 選択が1行下のペインへ移る
 
-  Scenario: Tabキーは選択移動に使わない
-    Given navモードでサイドバーの1行を選択している
-    When ユーザーが Tab キーを押す
-    Then 選択行は変わらない
-    And navモードは継続する
-
-  # Tab はアコーディオンのセクション切替えに割り当てる（2026-08-11 に選択移動から
-  # 外した。formation/formation-display-accordion.feature の管轄）。検索サブモード中の
-  # Tab / Shift+Tab は絞り込み結果内のカーソル移動のままで、こことは別のキー空間
-
   Scenario: Enterで選択中のペインへジャンプする
     Given navモードでペイン行を選択している
     When ユーザーが Enter キーを押す
