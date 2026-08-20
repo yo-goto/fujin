@@ -34,7 +34,7 @@ use crate::{Selectable, State};
 // 画面に縦に積む1行ぶんの中身。
 //
 // 描画（draw）とクリック位置の逆引き（pane_at_row、要件:
-// docs/requirements/click-to-focus/）が**同じ並びを共有する**ために切り出してある。
+// docs/requirements/req-click-to-focus.md）が**同じ並びを共有する**ために切り出してある。
 // 行の増減を伴うレイアウト変更は必ず visible_rows() 側で行うこと。
 // 描画だけ直すとクリックが行ずれする
 pub(crate) enum Row<'a> {
@@ -51,7 +51,7 @@ pub(crate) enum Row<'a> {
     //    要件: sidebar-footer.feature の「フッターの高さと位置はモードによらず常に同じ」）
     //  - フッターと zellij 本体の status-bar のあいだに空ける最下部の1行
     Blank,
-    // ヘルプオーバーレイの1行（要件: docs/requirements/nav-mode/）。
+    // ヘルプオーバーレイの1行（要件: docs/requirements/req-nav-mode.md）。
     // 開いている間は content（ツリー）がこの行に置き換わる。枠は出したまま
     Help(&'a HelpRow),
     // 一覧が空であることの通知行（検索の0件・トリアージの対象なし）。
@@ -71,7 +71,7 @@ pub(crate) enum Row<'a> {
         flat_index: usize,
         hit: Option<&'a Hit>,
     },
-    // トリアージ一覧の1行（要件: docs/requirements/triage-mode/）。
+    // トリアージ一覧の1行（要件: docs/requirements/req-triage-mode.md）。
     // タブ見出し行を持たないフラットな並びなので、所属タブ名を行に併記する
     Triage {
         entry: &'a Selectable,
@@ -159,7 +159,7 @@ const COLUMN_GAP: usize = 1;
 // タブ名が長くてもペイン名を潰さないための上限
 const TRIAGE_TAB_SHARE: usize = 3;
 // フローティングペインのペイン名を囲む丸括弧が占める幅（前後で2セル。
-// 要件: docs/requirements/floating-pane-indicator/）
+// 要件: docs/requirements/req-floating-pane-indicator.md）
 const FLOATING_BRACKETS: usize = 2;
 // 右端に常に空ける幅。文字がサイドバーの縁に貼り付くと窮屈に見える。
 // 左マージン（選択バーぶんの2セル）と揃えてある
@@ -631,7 +631,7 @@ impl State {
         self.scroll = reconcile_scroll(list_len, area, self.scroll, anchor);
     }
 
-    // 画面のこの行に載っているペイン（要件: docs/requirements/click-to-focus/）。
+    // 画面のこの行に載っているペイン（要件: docs/requirements/req-click-to-focus.md）。
     // ヘッダ・タブ見出し行・あふれマーカー行・一覧の外は None。
     // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
@@ -1397,7 +1397,7 @@ impl State {
         text
     }
 
-    // トリアージ行のタブ名列の幅（要件: docs/requirements/triage-mode/）。
+    // トリアージ行のタブ名列の幅（要件: docs/requirements/req-triage-mode.md）。
     // カウンタ列（決定202608060053）と同じくフレーム内の実測最大で決めて、行をまたいで
     // タブ名の開始位置を揃える
     pub(crate) fn triage_tab_column(&self, rows: &[Row<'_>], cols: usize) -> usize {
@@ -1410,7 +1410,7 @@ impl State {
         width.min(content_cols(cols) / TRIAGE_TAB_SHARE)
     }
 
-    // トリアージ一覧の1行ぶんの Text（要件: docs/requirements/triage-mode/）。
+    // トリアージ一覧の1行ぶんの Text（要件: docs/requirements/req-triage-mode.md）。
     //
     // レイアウトは `{アイコン} {ペイン名} …余白… {タブ名}` で、ペイン行の
     // カウンタ列（決定202608060053）の位置にタブ名を置いた形。状態アイコンは通常表示と
@@ -1538,7 +1538,7 @@ fn fit_hint(hints: &[&str], budget: usize) -> String {
 }
 
 // フローティングペインのペイン名を囲む丸括弧（要件:
-// docs/requirements/floating-pane-indicator/）。フローティング層ごと隠れうる
+// docs/requirements/req-floating-pane-indicator.md）。フローティング層ごと隠れうる
 // ペインを、一覧の上で見分けられるようにするための印。
 //
 // 色・dim は乗せない — ペイン名の色は落とさない（決定202608080027）うえ、色は状態・モードへ

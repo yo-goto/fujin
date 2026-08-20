@@ -1,4 +1,4 @@
-// エージェント状態（要件: docs/requirements/agent-status/）: フック通知からの状態遷移・
+// エージェント状態（要件: docs/requirements/req-agent-status.md）: フック通知からの状態遷移・
 // 既読モデル・滞在猶予・消えたペインの掃除
 
 use crate::agent::AgentState;

@@ -3,7 +3,7 @@ use crate::render::HeadCells;
 use crate::test_support::*;
 use crate::*;
 
-// --- 番号ジャンプサブモード（決定202608070342、要件: docs/requirements/pane-number-jump/） ---
+// --- 番号ジャンプサブモード（決定202608070342、要件: docs/requirements/req-pane-number-jump.md） ---
 
 fn jump_buffer(state: &State) -> Option<&str> {
     state.jump.as_ref().map(|j| j.buffer.as_str())

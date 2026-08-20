@@ -1,4 +1,4 @@
-// サイドバーのツリー表示（要件: docs/requirements/sidebar-tree/）: 選択可能行の組み立て・
+// サイドバーのツリー表示（要件: docs/requirements/req-sidebar-tree.md）: 選択可能行の組み立て・
 // フッター・描画パスの頑健性・縦スクロール。ペイン行そのものの描画は pane_row.rs 側
 
 use crate::agent::AgentState;

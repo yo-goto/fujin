@@ -2,7 +2,7 @@ use crate::deploy::TROOP;
 use crate::test_support::*;
 use crate::*;
 
-// --- 配置演出（要件: docs/requirements/header-animation/） ---
+// --- 配置演出（要件: docs/requirements/req-header-animation.md） ---
 
 // 兵が使える領域の実測値（幅32セル・右マージン2セル・`▲ fujin` は7セル）。
 // 発進位置は本文の右端の1つ先、いちばん奥の着地列は内容幅の右端

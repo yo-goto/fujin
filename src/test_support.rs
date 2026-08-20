@@ -428,7 +428,7 @@ pub(crate) fn pipe_message(name: &str, payload: &str) -> PipeMessage {
     }
 }
 
-// --- 配置演出（要件: docs/requirements/header-animation/） ---
+// --- 配置演出（要件: docs/requirements/req-header-animation.md） ---
 
 // ペイン一覧を差し替えて1回ぶん観測させる。`Event::PaneUpdate` の扱いと同じ順序。
 // **配置演出のトリガーはもう一覧を見ない**（フック通知だけで判定する）ので、ここでは

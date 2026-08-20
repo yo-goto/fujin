@@ -118,7 +118,7 @@ struct Selectable {
     title: String,
     // フォーカス時の should_float_if_hidden に使う（決定202608012142）。
     // ペイン名を丸括弧で囲むかの判定も兼ねる
-    //（要件: docs/requirements/floating-pane-indicator/）
+    //（要件: docs/requirements/req-floating-pane-indicator.md）
     is_floating: bool,
 }
 
@@ -307,9 +307,9 @@ impl ZellijPlugin for State {
             // 別の経路で来るので、これが無いと確定した文字列が消える
             //（docs/issues/ime-input-support.md）
             EventType::PastedText,
-            // 行クリックでのフォーカス移動（要件: docs/requirements/click-to-focus/）
+            // 行クリックでのフォーカス移動（要件: docs/requirements/req-click-to-focus.md）
             EventType::Mouse,
-            // 配置演出のフレーム送り（要件: docs/requirements/header-animation/）。
+            // 配置演出のフレーム送り（要件: docs/requirements/req-header-animation.md）。
             // 発火するのは再生中に set_timeout() を繋いでいる間だけ
             EventType::Timer,
             // プラグイン終了・リロード時に横取りを解除する保険
@@ -606,7 +606,7 @@ impl State {
 
     // フォーカス情報をサーバへ1回だけ問い合わせて、
     //  - 観測したフォーカスを取り込み、navモード外なら選択行を追従させる
-    //    （要件: docs/requirements/focus-sync/）
+    //    （要件: docs/requirements/req-focus-sync.md）
     //  - 自分が操作の権威を持つインスタンスか（決定202608012142）を返す
     //
     // イベントの配送は権威判定に当てにできない — PaneUpdate / TabUpdate は
@@ -679,7 +679,7 @@ impl State {
         true
     }
 
-    // 選択を引き直す先（要件: docs/requirements/focus-sync/）。
+    // 選択を引き直す先（要件: docs/requirements/req-focus-sync.md）。
     // `force` は可視化直後など、キャッシュを信用できないときに立てる
     pub(crate) fn focus_to_follow(&self, focused: Option<u32>, force: bool) -> Option<u32> {
         // navモード中の選択はユーザーの探索位置なので追従させない

@@ -2,7 +2,7 @@ use crate::agent::AgentState;
 use crate::test_support::*;
 use crate::*;
 
-// --- プレビュー（決定202608082045、要件: docs/requirements/preview/） ---
+// --- プレビュー（決定202608082045、要件: docs/requirements/req-preview.md） ---
 //
 // navモード中、いま光っている行のペインの内容をフローティングペインへ
 // スナップショット表示するトグル可能な横断的機能。

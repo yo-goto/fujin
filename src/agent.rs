@@ -76,7 +76,7 @@ impl AgentState {
         }
     }
 
-    // トリアージモードの優先度階層（要件: docs/requirements/triage-mode/）。
+    // トリアージモードの優先度階層（要件: docs/requirements/req-triage-mode.md）。
     // 小さいほど緊急。`idle`（既読）はトリアージ一覧に出さないので None を返す
     pub(crate) fn triage_rank(&self) -> Option<u8> {
         match self {

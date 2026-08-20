@@ -3,7 +3,7 @@ use crate::termination::Termination;
 use crate::test_support::*;
 use crate::*;
 
-// --- 終了操作サブモード（決定202608080140、要件: docs/requirements/pane-close-kill/） ---
+// --- 終了操作サブモード（決定202608080140、要件: docs/requirements/req-pane-close-kill.md） ---
 //
 // 実行そのもの（send_sigkill_to_pane_id / close_pane_with_id）は副作用だけの
 // ホスト関数で結果を観測できないので、その手前で畳んだ `termination_plan()`

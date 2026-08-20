@@ -1,4 +1,4 @@
-// 終了操作サブモード（決定202608080140。要件: docs/requirements/pane-close-kill/）。
+// 終了操作サブモード（決定202608080140。要件: docs/requirements/req-pane-close-kill.md）。
 //
 // 対象のペインを閉じる（close）・killする（kill）・確実に閉じる（kill→close）。
 // 対象はマーク（決定202608080250）が1件以上あればマーク集合、0件なら選択行の1件。

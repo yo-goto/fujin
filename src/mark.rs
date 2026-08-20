@@ -1,4 +1,4 @@
-// 複数選択（マーク。決定202608080250。要件: docs/requirements/pane-termination-multi-select/）。
+// 複数選択（マーク。決定202608080250。要件: docs/requirements/req-pane-termination-multi-select.md）。
 //
 // 一括操作の対象として選んだペインの集合を持つ。既存の「選択」（`State::selected`、
 // 単一のナビゲーションカーソル）とは別概念で、**タブをまたいでよく、navモードを

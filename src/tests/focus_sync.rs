@@ -1,9 +1,9 @@
-// フォーカス同期（要件: docs/requirements/focus-sync/）と、そこから派生したフォーカスの預かり（決定202608072359）
+// フォーカス同期（要件: docs/requirements/req-focus-sync.md）と、そこから派生したフォーカスの預かり（決定202608072359）
 
 use crate::test_support::*;
 use crate::*;
 
-// --- フォーカス同期（要件: docs/requirements/focus-sync/） ---
+// --- フォーカス同期（要件: docs/requirements/req-focus-sync.md） ---
 //
 // 実フォーカスの問い合わせ（refresh_focus）はここでは呼べないので、
 // 観測結果を畳んだ State::focused_pane を直接立てて先のロジックを見る。

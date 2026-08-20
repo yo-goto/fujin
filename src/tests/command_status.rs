@@ -1,4 +1,4 @@
-// コマンド状態（要件: docs/requirements/command-status/）: PaneManifest からの導出・
+// コマンド状態（要件: docs/requirements/req-command-status.md）: PaneManifest からの導出・
 // インスタンス間同期・フォーカス中に終了したときの既読の猶予
 
 use crate::agent::AgentState;
@@ -8,7 +8,7 @@ use crate::render::HeadCells;
 use crate::test_support::*;
 use crate::*;
 
-// --- コマンド状態（決定202608072218。要件: docs/requirements/command-status/） ---
+// --- コマンド状態（決定202608072218。要件: docs/requirements/req-command-status.md） ---
 //
 // コマンドペインの走行・終了を PaneManifest から導出する。エージェント状態とは
 // 別概念だが、記号・既読モデル・待ち件数・トリアージ一覧は共用する

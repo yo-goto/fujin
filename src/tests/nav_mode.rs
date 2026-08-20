@@ -1,4 +1,4 @@
-// navモード（要件: docs/requirements/nav-mode/）: 入退場とキー操作、操作ヒントとヘルプオーバーレイ
+// navモード（要件: docs/requirements/req-nav-mode.md）: 入退場とキー操作、操作ヒントとヘルプオーバーレイ
 
 use crate::agent::AgentState;
 use crate::render::divider_line;
@@ -80,7 +80,7 @@ fn nav_leaves_on_undefined_keys() {
     }
 }
 
-// --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/nav-mode/） ---
+// --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/req-nav-mode.md） ---
 //
 // サイドバー幅は32文字（決定202607302256）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 

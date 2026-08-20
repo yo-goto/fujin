@@ -1,4 +1,4 @@
-// ペイン行の描画（要件: docs/requirements/sidebar-tree/）: カウンタ列のレイアウト・cwd行・
+// ペイン行の描画（要件: docs/requirements/req-sidebar-tree.md）: カウンタ列のレイアウト・cwd行・
 // ペイン名が空のときのフォールバック。フローティングの区別表示は floating_pane_indicator.rs 側
 
 use crate::agent::AgentState;

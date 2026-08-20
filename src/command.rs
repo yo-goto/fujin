@@ -1,4 +1,4 @@
-// コマンド状態の管理（決定202608072218。要件: docs/requirements/command-status/）。
+// コマンド状態の管理（決定202608072218。要件: docs/requirements/req-command-status.md）。
 //
 // コマンドペインの走行・終了を、エージェント状態と同じ記号でサイドバーに出す。
 // 別概念で、持つ値は `working` / `done` / `error` の3値だけ。

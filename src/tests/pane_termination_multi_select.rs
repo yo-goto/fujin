@@ -1,4 +1,4 @@
-// 複数選択（マーク。要件: docs/requirements/pane-termination-multi-select/）: マークの付け外し・
+// 複数選択（マーク。要件: docs/requirements/req-pane-termination-multi-select.md）: マークの付け外し・
 // 終了操作との連携・インスタンス間の同期
 
 use crate::agent::AgentState;
@@ -9,7 +9,7 @@ use crate::test_support::*;
 use crate::*;
 
 // --- 複数選択（マーク。決定202608080250、要件:
-// docs/requirements/pane-termination-multi-select/） ---
+// docs/requirements/req-pane-termination-multi-select.md） ---
 //
 // 一括操作の対象として選んだペインの集合。単一のナビゲーションカーソルである
 // 選択（`State::selected`）とは別概念で、タブをまたぎ、navモードを退場しても残る

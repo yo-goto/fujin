@@ -3,7 +3,7 @@ use crate::render::Row;
 use crate::test_support::*;
 use crate::*;
 
-// --- トリアージモード（要件: docs/requirements/triage-mode/） ---
+// --- トリアージモード（要件: docs/requirements/req-triage-mode.md） ---
 //
 // navモードの内側で `p` から入る、エージェント状態の緊急度順のフラット一覧。
 // ツリー表示の並び順（決定202607302256）には手を触れず、切り替えて使う
