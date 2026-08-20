@@ -88,7 +88,8 @@ resident fujin session are never touched.
       --fresh         kill an existing session of the same name first
       --open          open the session in a new terminal window and return
       --keep          with --open, do NOT clean up when the window's zellij exits
-      --terminal CMD  terminal emulator for --open (default: autodetect)
+      --terminal CMD  terminal emulator for --open
+                      (alacritty/wezterm/ghostty; default: alacritty)
       --nested        allow starting from inside a zellij session (nested)
       --clean         kill the session, delete the config dir, and exit
       --clean-all     do that for every fujin-try-* session, and exit
@@ -533,7 +534,7 @@ resolve_terminal() {
     printf '%s' "$terminal"
     return 0
   fi
-  for t in ${FUJIN_TERMINAL:-} ${TERMINAL:-} wezterm alacritty kitty ghostty; do
+  for t in ${FUJIN_TERMINAL:-} ${TERMINAL:-} alacritty wezterm ghostty; do
     if command -v "$t" >/dev/null 2>&1; then printf '%s' "$t"; return 0; fi
   done
   return 1
