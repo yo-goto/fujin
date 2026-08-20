@@ -24,8 +24,7 @@ use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
 use crate::host;
 use crate::mark::MARK_GLYPH;
-use crate::nav::SearchPhase;
-use crate::search::{Field, Hit};
+use crate::search::{Field, Hit, SearchPhase};
 use crate::width::{
     colorable_char_limit, fold_highlight_indices, fold_to_width, pad_left, pad_to_width,
     shift_highlight_indices, truncate, truncate_start,

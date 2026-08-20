@@ -1,11 +1,11 @@
 use crate::agent::AgentState;
 use crate::config::Kind;
 use crate::config::SETTINGS;
-use crate::nav::SearchPhase;
 use crate::render::overflow_row;
 use crate::render::Row;
 use crate::render::NO_AGENT_ICON;
 use crate::render::NO_AGENT_LABEL;
+use crate::search::SearchPhase;
 use crate::test_support::*;
 use crate::*;
 

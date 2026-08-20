@@ -1,4 +1,4 @@
-use crate::nav::SearchPhase;
+use crate::search::SearchPhase;
 use crate::test_support::*;
 use crate::*;
 

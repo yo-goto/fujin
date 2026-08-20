@@ -15,8 +15,9 @@
 // - agent  — フックイベントの解釈とエージェント状態の遷移
 // - config — configuration の取り込みと設定仕様の正本（決定202608080346）
 // - command — コマンドペインのライフサイクルからのコマンド状態の導出（決定202608072218）
-// - nav    — navモード（決定202607310311）と検索サブモードのキー操作、行クリック
-// - search — ファジーマッチの純粋ロジック
+// - nav    — navモード（決定202607310311）の入退場・選択移動・行クリック
+// - search — 検索サブモードのキー操作と、ファジーマッチの純粋ロジック（`search::matcher`）
+// - jump   — 番号ジャンプサブモード（決定202608070342）の通し番号とキー操作
 // - triage — トリアージモード（navモードの内側の優先度順一覧）
 // - mark   — 複数選択（マーク。決定202608080250）の集合と、その配布
 // - preview — プレビュー（決定202608082045。選択行のペインの内容を覗き見る）
@@ -35,6 +36,7 @@ mod config;
 mod deploy;
 mod entry;
 mod host;
+mod jump;
 mod mark;
 mod nav;
 mod preview;
@@ -59,8 +61,9 @@ use agent::AgentInfo;
 use command::CommandInfo;
 use config::{Config, ShowDeployAnimation};
 use deploy::Deployment;
-use nav::{JumpState, SearchState};
+use jump::JumpState;
 use preview::{PreviewContent, PreviewState};
+use search::SearchState;
 use termination::TerminationState;
 use triage::TriageState;
 

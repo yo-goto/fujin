@@ -17,8 +17,8 @@
 //   フィールドを直接立てて検証する
 
 use crate::agent::{AgentState, StatusPayload};
-use crate::nav::SearchPhase;
 use crate::render::{CounterColumn, HeadCells, Row};
+use crate::search::SearchPhase;
 use crate::*;
 use std::collections::HashMap;
 
