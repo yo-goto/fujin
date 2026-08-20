@@ -279,7 +279,7 @@ fn the_command_state_pipe_takes_a_dump() {
     );
 }
 
-// --- 既読の猶予（docs/issues/command-status-error-icon-swallowed.md） ---
+// --- 既読の猶予（docs/issues/issue-command-status-error-icon-swallowed.md） ---
 //
 // `zellij run` は新しいペインへフォーカスを移すので、一瞬で終わるコマンドは
 // 必ず「フォーカス中に終了」する。素直に既読モデルを当てると、状態が付いた

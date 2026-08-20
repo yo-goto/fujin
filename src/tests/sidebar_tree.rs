@@ -252,7 +252,7 @@ fn render_survives_the_preview_pane() {
     state.render(0, 0);
 }
 
-// --- 縦スクロール（docs/issues/sidebar-vertical-overflow.md） ---
+// --- 縦スクロール（docs/issues/issue-sidebar-vertical-overflow.md） ---
 //
 // 行番号の勘定は「画面高に収まるぶんだけを切り出す」ところに集まっているので、
 // 純粋関数（reconcile_scroll）と、描画・クリックの逆引きが同じ並びを見ているか

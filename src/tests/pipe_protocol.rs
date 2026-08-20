@@ -94,7 +94,7 @@ fn sync_pipe_request_does_not_touch_the_local_state() {
 fn toggle_cwd_pipe_flips_the_local_value_when_unprompted() {
     // ユーザーのキー操作からはpayloadが付かない（決定202607302258）。全インスタンスが
     // 同じ値から出発している前提で、権威を立てず各自が独立に反転する
-    // （docs/issues/toggle-cwd-key.md）
+    // （docs/issues/issue-toggle-cwd-key.md）
     let mut state = State::default();
     assert!(!state.show_cwd);
 

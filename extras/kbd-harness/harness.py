@@ -11,7 +11,7 @@
 # マウスモード無効化の書き込みで EIO を unwrap して SIGABRT で落ちる
 # （zellij 0.44.3 のバグ。配下のシェルが孤児化し、閉じた pty に対する
 # select/read の空振りで CPU を食い尽くす)。
-# → docs/issues/window-close-panics-orphan-shell.md
+# → docs/issues/issue-window-close-panics-orphan-shell.md
 #
 # したがって終了経路は一本に集約し、**クライアントを先に終わらせてから
 # master を閉じる**順序を必ず守る。子は setsid() 済みで親のプロセスグループから

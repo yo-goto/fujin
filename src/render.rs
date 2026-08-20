@@ -173,7 +173,7 @@ const PREVIEW_PLACEHOLDER: &str = "preview";
 // エージェント状態もコマンド状態も持たないペイン（CLIエージェントが乗っていない
 // 作業ペイン）の状態アイコン列に置く印。**AgentState には含めない** — 既存の5状態は
 // どれも「エージェントが居る」前提の状態で、「居ない」はその一種ではないため、
-// 表示層のプレースホルダーとして持つ（docs/issues/sidebar-cwd-row-legibility.md）。
+// 表示層のプレースホルダーとして持つ（docs/issues/issue-sidebar-cwd-row-legibility.md）。
 // **状態色（0/1/2/3/6）は乗せない** — 意味の軸が違うものに状態色を割り当てない
 // （原則2）。装飾も持たせず既定色のまま出す
 pub(crate) const NO_AGENT_ICON: &str = "›";
@@ -183,7 +183,7 @@ pub(crate) const NO_AGENT_LABEL: &str = "no agent";
 // 入力欄（検索・番号ジャンプ）の状態ごとの見た目。
 //
 // **疑似カーソルは持たない**（決定202608131200、2026-08-13 に地の文の疑似カーソルを廃止。
-// 経緯: docs/issues/search-input-cursor-shape.md）。位置表示は編集状態・操作状態
+// 経緯: docs/issues/issue-search-input-cursor-shape.md）。位置表示は編集状態・操作状態
 // どちらもテキストカーソル（`sync_input_cursor`）に一本化した——プラグイン側から形状を
 // 指定できず端末既定はほぼブロックなので、地の文の字を描き分けてもテキストカーソルの
 // 下に隠れる/隠れないでコロコロ変わり、当てにならない見分け手段だった。
@@ -499,7 +499,7 @@ impl State {
                 // 既に同じパスが出ており、2行並べても情報が増えない（決定202608070102）
                 let cwd_hit = hit.filter(|h| h.field == Field::Cwd);
                 // エージェントが終了したペインでは出さない
-                //（docs/issues/sidebar-cwd-persists-after-exit.md）。cwd はフック由来
+                //（docs/issues/issue-sidebar-cwd-persists-after-exit.md）。cwd はフック由来
                 // なので `pane_cwds` はエージェントが去った後も残るが、show_cwd が
                 // 見せたいのは動いているエージェントの居場所。終了後も出し続けると、
                 // シェルがタイトルを cwd に戻した瞬間から同じパスが2行並ぶ。
@@ -809,7 +809,7 @@ impl State {
     // サイドバーを描き直すと、zellij は描画の最後にテキストカーソルを入力欄へ戻す。
     // IMEで変換している最中にこれが起きると、端末が描いていた未確定文字列が
     // 上書きされ、**変換候補ウィンドウが打っている途中で飛ぶ**（実測。
-    // docs/issues/ime-input-support.md）。外から届くイベント（他ペインの変化・
+    // docs/issues/issue-ime-input-support.md）。外から届くイベント（他ペインの変化・
     // 状態通知・タイマー）は入力が終わるまで描画を待たせる。
     //
     // 代償: 入力中は一覧が古いまま止まる。**状態そのものは更新し続けている**
@@ -834,13 +834,13 @@ impl State {
     //
     // **IME の変換候補ウィンドウは端末がテキストカーソルの位置に出す**ので、置かないと
     // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
-    // 変換の確定そのものが効かない端末もある（docs/issues/ime-input-support.md）。
+    // 変換の確定そのものが効かない端末もある（docs/issues/issue-ime-input-support.md）。
     //
     // 検索サブモードは**編集状態・操作状態のどちらでも**カーソルを置く（決定202608131200、
     // 2026-08-13 に一本化）。以前は操作状態を隠して地の文の疑似カーソルに位置表示を
     // 譲っていたが、端末のカーソル形状はこちらから指定できず地の文の字も
     // その下に隠れるため、見分けの手がかりとして機能していなかった
-    // （docs/issues/search-input-cursor-shape.md）。テキストカーソルへ一本化し、
+    // （docs/issues/issue-search-input-cursor-shape.md）。テキストカーソルへ一本化し、
     // 状態の違いは入力文字列の明暗とフッターのヒント文言で示す
     //
     // **分岐は `footer_line` と同じ順序で見ること。** 入力欄が出ていないのに
@@ -1258,7 +1258,7 @@ impl State {
     //
     // claude は終了時に空文字のタイトルを OSC で送り、zellij 側にそれを戻す経路が
     // 無いため、エージェントを落とした瞬間にペイン名が空のまま残る
-    // （docs/issues/pane-title-blank-on-exit.md）。前回の名前を保持すると死んだ
+    // （docs/issues/issue-pane-title-blank-on-exit.md）。前回の名前を保持すると死んだ
     // エージェントが動いているように見えるので、いまそこに何があるかが分かる cwd へ落とす
     pub(crate) fn display_title<'a>(&'a self, entry: &'a Selectable) -> &'a str {
         self.title_fallback(entry).unwrap_or(&entry.title)
@@ -1297,7 +1297,7 @@ impl State {
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定202608072218）
         let status = self.pane_status(entry.pane_id);
         // 状態を持たないペインでも列は埋める。空白のままだと、エージェントが乗る行と
-        // 並べたときに左端が欠けて見える（docs/issues/sidebar-cwd-row-legibility.md）
+        // 並べたときに左端が欠けて見える（docs/issues/issue-sidebar-cwd-row-legibility.md）
         let icon = status.map(|s| s.icon()).unwrap_or(NO_AGENT_ICON);
         let head = row_head(is_highlighted, number, mark, icon);
         let head_width = UnicodeWidthStr::width(head.text.as_str());
@@ -1495,7 +1495,7 @@ impl State {
 //
 // `hints` は右端に出す操作ヒントの項目で、収まらないぶんは末尾から落とす。
 // 入力位置はテキストカーソル（`sync_input_cursor`）が示す。地の文の疑似カーソルは
-// 持たない（決定202608131200。経緯: docs/issues/search-input-cursor-shape.md）
+// 持たない（決定202608131200。経緯: docs/issues/issue-search-input-cursor-shape.md）
 //
 // 入力本体は本文なので既定色のまま、先頭の `tag`（`/` や `n`）はモード名と
 // 同じ扱いでレベル3。状態色で統一するのはヒント側（要件: sidebar-footer）
@@ -1526,7 +1526,7 @@ fn input_footer(
 
 // 入力欄の右に出せるだけのヒント。**末尾の項目ごと落とす** — `キー:動作` の形が
 // 壊れたヒントは読めないので `…` で切らない（direct-keys のヒントと同じ削り方。
-// docs/issues/direct-keys-hint-overflow.md）。入力とヒントの間は最低1セル空ける
+// docs/issues/issue-direct-keys-hint-overflow.md）。入力とヒントの間は最低1セル空ける
 fn fit_hint(hints: &[&str], budget: usize) -> String {
     for count in (1..=hints.len()).rev() {
         let line = hints[..count].join("  ");
@@ -1609,7 +1609,7 @@ fn row_head(
 // プレフィックスは `z` の1文字で、パースは通る。
 //
 // 落としているものは無い — 併用時も `selected` は false と解釈されており、
-// 帯の背景は元から `opaque` 側が塗っている（docs/issues/idle-icon-color-on-selection.md）
+// 帯の背景は元から `opaque` 側が塗っている（docs/issues/issue-idle-icon-color-on-selection.md）
 fn highlight_row(text: Text) -> Text {
     text.opaque().color_range(2, 0..1)
 }
@@ -1710,7 +1710,7 @@ fn rows_shown(list_len: usize, area: usize, scroll: usize) -> usize {
 }
 
 // 選択行が画面に入るようスクロール位置を寄せ直す
-//（docs/issues/sidebar-vertical-overflow.md）。行番号はいずれも
+//（docs/issues/issue-sidebar-vertical-overflow.md）。行番号はいずれも
 // 一覧（固定行を除いた部分）の中で数える。
 //
 // `anchor` は選択行の範囲（ペイン行 + cwd行のように2行にまたがる）。
@@ -1754,7 +1754,7 @@ pub(crate) fn reconcile_scroll(
 
 // cwd行1行ぶんの Text（決定202608060053）。ペイン行の続きとして読めるよう字下げして dim で
 // 出す。zellij側の実装制約で dim は bold を打ち消さないため、見た目上は bold+dim
-// になる（決定202608080027の対象外。docs/issues/sidebar-cwd-bold.md）。
+// になる（決定202608080027の対象外。docs/issues/issue-sidebar-cwd-bold.md）。
 // パスは末尾のディレクトリ名のほうが識別に効くので、先頭省略で畳む
 pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: usize) -> Text {
     // 選択中は左端のバーをこの行まで伸ばし、ペイン行と1つの帯に見せる
@@ -1764,7 +1764,7 @@ pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: 
     let (path, dropped) = truncate_start(cwd, inner.saturating_sub(CWD_INDENT));
 
     // 字下げだけで幅を使い切るほど狭いときの保険。はみ出した行は端末側で
-    // 折り返り、選択背景が次の行を汚す（docs/issues/sidebar-bottom-highlight-glitch.md）
+    // 折り返り、選択背景が次の行を汚す（docs/issues/issue-sidebar-bottom-highlight-glitch.md）
     let mut label = truncate(&format!("{}{}", indent, path), inner);
     if is_highlighted {
         label = pad_to_width(label, cols);

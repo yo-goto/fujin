@@ -7,7 +7,7 @@
 //
 // 取り込みを1本の入口（`Config::parse`）に集約しているのは、KDL の書式差で
 // 設定が黙って無視される実測バグへの対応でもある
-//（docs/issues/config-requirements-review.md の問題1）。zellij はプロパティ
+//（docs/issues/issue-config-requirements-review.md の問題1）。zellij はプロパティ
 // 書式（`show_cwd="true"`）の値を `KdlValue` の `Display` で文字列化するため
 // **引用符が付いたまま**プラグインへ渡り、子ノード書式（`show_cwd "true"`）と
 // 違う値になる。値の正規化をここでまとめてかけて差を吸収する。

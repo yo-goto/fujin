@@ -19,7 +19,7 @@ use crate::*;
 #[test]
 fn a_pane_without_a_status_gets_the_no_agent_marker() {
     // 状態アイコン列を空白のままにすると、エージェントが乗る行と並べたときに
-    // 左端が欠けて見える（docs/issues/sidebar-cwd-row-legibility.md）
+    // 左端が欠けて見える（docs/issues/issue-sidebar-cwd-row-legibility.md）
     let state = state_with_one_pane("shell");
 
     let text = state.pane_row(
@@ -85,7 +85,7 @@ fn the_status_icon_keeps_its_color_on_the_highlighted_row() {
     //
     // `selected()` と `opaque()` を併用していたころは、レベル0（idle）の位置指定
     // だけが zellij 本体のパースで壊れ、選択行の idle アイコンがテーマの base 色
-    //（白系）に落ちていた（docs/issues/idle-icon-color-on-selection.md）
+    //（白系）に落ちていた（docs/issues/issue-idle-icon-color-on-selection.md）
     for target in [
         AgentState::Idle,
         AgentState::Working,
@@ -282,7 +282,7 @@ fn rows_with_any_counter_still_share_the_frames_column_width() {
 fn a_counter_less_row_is_unaffected_by_other_rows_counters() {
     // 「+1」のようなカウンタが1行にでも出ると、それを持たない他の行まで右端が
     // 削られていた不具合の回帰テスト
-    // （docs/issues/counter-column-collateral-truncation.md）。
+    // （docs/issues/issue-counter-column-collateral-truncation.md）。
     // 同じ行を「静かな列（ゼロ幅）」と「実測した列（非ゼロ幅）」の両方で描画し、
     // 自分自身がカウンタを持たなければ結果が完全に一致することを確認する
     let mut state = state_with_panes(0);
@@ -461,7 +461,7 @@ fn the_cwd_row_is_not_highlighted_by_a_pane_name_hit() {
 #[test]
 fn the_cwd_row_disappears_when_the_agent_exits() {
     // エージェントが去ったら cwd行も引っ込める
-    //（docs/issues/sidebar-cwd-persists-after-exit.md）
+    //（docs/issues/issue-sidebar-cwd-persists-after-exit.md）
     let mut state = state_with_one_pane("claude-worker");
     state.show_cwd = true;
     set_agent_state(&mut state, 1, AgentState::Idle);
@@ -534,7 +534,7 @@ fn the_cwd_row_keeps_the_tail_of_the_path() {
 // --- ペイン名フォールバック（決定202608070102） ---
 //
 // claude は終了時に空のタイトルを OSC で送るため、エージェントを落とした瞬間に
-// ペイン名が空のまま残る（docs/issues/pane-title-blank-on-exit.md）
+// ペイン名が空のまま残る（docs/issues/issue-pane-title-blank-on-exit.md）
 
 #[test]
 fn an_empty_pane_name_falls_back_to_the_cwd() {

@@ -115,7 +115,7 @@ fn flight_frames(index: usize, launch: usize, width: usize) -> Option<usize> {
 // **エージェントの着任**を意味するかを、`source` から判定する。
 //
 // 判定材料をフック通知に一本化してあるのが要点（2026-08-09 に差し替え。
-// docs/issues/deploy-animation-trigger-scope.md）。増えたターミナルペインで判定して
+// docs/issues/issue-deploy-animation-trigger-scope.md）。増えたターミナルペインで判定して
 // いた旧実装は、そのペインで何が動くかを一切見ていなかったため、`vim` やビルド
 // コマンドでも演出が出るうえ、前から開いてあるペインで後からエージェントを起動しても
 // 出なかった。`SessionStart` はエージェント側のイベントでしか飛ばないので、

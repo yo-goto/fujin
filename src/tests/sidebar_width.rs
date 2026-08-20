@@ -1,6 +1,6 @@
 use crate::*;
 
-// --- サイドバー幅のタブ間追従（docs/issues/sidebar-width-persist-across-tabs.md） ---
+// --- サイドバー幅のタブ間追従（docs/issues/issue-sidebar-width-persist-across-tabs.md） ---
 //
 // 寄せる側（`apply_width_target`）の実際の一手はホスト関数（resize_pane_with_id）を
 // 呼ぶが、`own_plugin_id` が None なら撃つ手前で抜けるので、状態機械の判定

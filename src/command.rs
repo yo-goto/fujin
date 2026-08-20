@@ -79,7 +79,7 @@ pub(crate) struct CommandInfo {
     // **旗で持つ必要がある。** 状態そのものを捨てると、終了したコマンドペインは
     // 次の PaneUpdate で `exited` から同じ状態が再導出されて復活してしまう
     pub(crate) read: bool,
-    // 既読の猶予（docs/issues/command-status-error-icon-swallowed.md）。
+    // 既読の猶予（docs/issues/issue-command-status-error-icon-swallowed.md）。
     //
     // **状態が付いた瞬間にそのペインがフォーカスされていたら、その状態は
     // フォーカスが一度離れて戻ってくるまで既読にしない。** `zellij run` は
@@ -192,7 +192,7 @@ impl State {
                     read: false,
                     // 状態が付いた瞬間にフォーカスしていたなら、既読はフォーカスが
                     // 一度離れて戻るまで待つ
-                    //（docs/issues/command-status-error-icon-swallowed.md）
+                    //（docs/issues/issue-command-status-error-icon-swallowed.md）
                     awaiting_refocus: pane.is_focused,
                 },
             );
@@ -324,7 +324,7 @@ impl CommandInfo {
 }
 
 impl State {
-    // 既読の猶予を解く（docs/issues/command-status-error-icon-swallowed.md）。
+    // 既読の猶予を解く（docs/issues/issue-command-status-error-icon-swallowed.md）。
     //
     // アクティブタブでフォーカスされていないコマンドペインは「ユーザーが離れた」
     // とみなす。別タブのコマンドペインもここに含まれる（フォーカスはアクティブ

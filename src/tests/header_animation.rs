@@ -119,7 +119,7 @@ fn a_session_start_without_a_source_still_counts() {
 #[test]
 fn other_hook_events_are_never_new_agent_detections() {
     // **リロード直後の誤検出を防いでいるのがこの性質。** プラグインをリロードすると
-    // `agents` マップは空になる（docs/issues/redeploy-resets-agent-state.md）が、
+    // `agents` マップは空になる（docs/issues/issue-redeploy-resets-agent-state.md）が、
     // 稼働中のエージェントから次に届くのは SessionStart 以外のイベントなので、
     // 既存エージェントが新規と誤検出されることはない
     let mut state = sidebar_state();

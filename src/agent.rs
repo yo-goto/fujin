@@ -328,7 +328,7 @@ impl State {
         self.release_read_grace(&focused);
         // フォーカスを外れたペインの保留は捨てる。**通過しただけのペインは
         // 滞在猶予が満ちる前に必ずここへ来る**ので、注意を引く状態はそのまま残る
-        //（決定202608080109。docs/issues/transit-focus-clears-read-state.md）
+        //（決定202608080109。docs/issues/issue-transit-focus-clears-read-state.md）
         self.pending_reads
             .retain(|pane_id, _| focused.contains(pane_id));
         for pane_id in focused {

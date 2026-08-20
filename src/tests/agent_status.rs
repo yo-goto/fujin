@@ -200,7 +200,7 @@ fn focusing_a_pane_marks_it_read() {
     assert_eq!(state.agents[&2].state, AgentState::Done);
 }
 
-// --- 滞在猶予（docs/issues/transit-focus-clears-read-state.md） ---
+// --- 滞在猶予（docs/issues/issue-transit-focus-clears-read-state.md） ---
 //
 // zellijネイティブのペイン移動（`Alt+矢印` 等）はキー1打ごとに実フォーカスを
 // 確定させるので、目的地までに経由したペインにも本物のフォーカスが一瞬当たる。

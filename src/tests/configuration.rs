@@ -224,7 +224,7 @@ fn the_footer_becomes_the_query_field_while_searching() {
 #[test]
 fn the_footer_hints_change_with_the_search_phase() {
     // 状態インジケータは入力文字列の明暗とヒント文言の2つ（決定202608131200、2026-08-13に
-    // 地の文の疑似カーソルを廃止。経緯: docs/issues/search-input-cursor-shape.md）
+    // 地の文の疑似カーソルを廃止。経緯: docs/issues/issue-search-input-cursor-shape.md）
     let mut state = navigating_search("");
     let footer = state.footer_line(32);
     let footer = footer.content();
@@ -251,7 +251,7 @@ fn the_footer_hints_change_with_the_search_phase() {
 #[test]
 fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
     // 地の文の疑似カーソルは無くテキストカーソルへ位置表示を一本化した（決定202608131200、
-    // 2026-08-13。経緯: docs/issues/search-input-cursor-shape.md）ので、状態を
+    // 2026-08-13。経緯: docs/issues/issue-search-input-cursor-shape.md）ので、状態を
     // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。打てない状態でも
     // 位置を見失わせないよう、沈めるのはクエリだけでテキストカーソルは点いたまま残す
     let mut state = searchable_state();
@@ -302,7 +302,7 @@ fn a_long_query_wins_over_the_hints() {
 #[test]
 fn the_hints_drop_whole_items_when_they_do_not_fit() {
     // 幅が足りないときは `…` で切らず末尾の項目ごと落とす（direct-keys の
-    // ヒントと同じ削り方。docs/issues/direct-keys-hint-overflow.md）
+    // ヒントと同じ削り方。docs/issues/issue-direct-keys-hint-overflow.md）
     let state = navigating_search("");
     let footer = state.footer_line(32);
     let footer = footer.content();

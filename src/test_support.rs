@@ -48,7 +48,7 @@ pub(crate) fn plugin_pane(id: u32, url: &str) -> PaneInfo {
 }
 
 // フォーカスしたまま滞在猶予（READ_DELAY）が満ちるまで居座る
-//（docs/issues/transit-focus-clears-read-state.md）。
+//（docs/issues/issue-transit-focus-clears-read-state.md）。
 //
 // 実機では 0.15 秒刻みで Timer が届くが、期限は経過時間で見るので
 // 1回にまとめてよい。**目的地としてフォーカスした**ことの表明として、
@@ -171,7 +171,7 @@ pub(crate) fn repeat_status(state: &mut State, pane_id: u32, event: &str, times:
 // **プレフィックスは zellij 本体と同じ順（x → z）で剥がす。** 本体は
 // `parse_selected` → `parse_opaque` の順に先頭1文字ずつ見るので、剥がし残しは
 // そのままレベル0の先頭の数値にくっついて位置指定を壊す。ここで同じ順を踏むことで、
-// 実機と同じ見え方を検査できる（docs/issues/idle-icon-color-on-selection.md）
+// 実機と同じ見え方を検査できる（docs/issues/issue-idle-icon-color-on-selection.md）
 pub(crate) fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
     let mut serialized = text.serialize();
     for marker in ['x', 'z'] {

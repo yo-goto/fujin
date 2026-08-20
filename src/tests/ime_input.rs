@@ -5,7 +5,7 @@ use crate::test_support::*;
 use crate::*;
 use zellij_tile::shim::plugin_api::event::ProtobufEvent;
 
-// --- IME経由の非ASCII入力（決定202608111836 / docs/issues/ime-input-support.md） ---
+// --- IME経由の非ASCII入力（決定202608111836 / docs/issues/issue-ime-input-support.md） ---
 //
 // プラグインAPIのデコードが `Char` をコードポイントの下位1バイトへ畳むため、
 // 素通しでは日本語がASCIIに化ける（navモードでは別のキーとして誤発火する）。
@@ -120,7 +120,7 @@ fn the_input_cursor_follows_the_query_end() {
 
     // 操作状態もテキストは受け付けないが、位置表示はテキストカーソルに一本化した
     // ので出したままにする（決定202608131200、2026-08-13。経緯:
-    // docs/issues/search-input-cursor-shape.md）
+    // docs/issues/issue-search-input-cursor-shape.md）
     state.handle_nav_key(key(BareKey::Esc));
     assert!(state.input_cursor_position().is_some());
     state.handle_nav_key(key(BareKey::Char('i')));

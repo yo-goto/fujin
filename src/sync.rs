@@ -13,7 +13,7 @@
 // タブを作るたびに迷子のサイドバーペインが増えるところだった。
 // 宛先をプラグインIDで直接指定すれば起動は起こらない。
 //
-// ただし押し付けだけでは届かない（docs/issues/tab-switch-agent-status-desync.md）。
+// ただし押し付けだけでは届かない（docs/issues/issue-tab-switch-agent-status-desync.md）。
 // 新しいタブができた瞬間は**新入りが可視・既存が全員非可視**なので、押し付けの
 // 起点である `PaneUpdate` が既存側で発火しない。そこで新入りは自分が兄弟を
 // 見つけた時点で**状態ダンプを要求する**（宛先はプラグインID指定なので上記の
@@ -30,7 +30,7 @@ use crate::{
 };
 
 // 目標の幅へ寄せるために撃つ相対リサイズの上限回数
-//（docs/issues/sidebar-width-persist-across-tabs.md）。zellij のリサイズは
+//（docs/issues/issue-sidebar-width-persist-across-tabs.md）。zellij のリサイズは
 // 端末幅の一定割合ずつ動く量子化された操作で、目標にぴったり乗る保証が無い。
 // 乗らないまま撃ち続けると幅が振動するので回数で打ち切る
 pub(crate) const WIDTH_MAX_ATTEMPTS: usize = 6;
@@ -60,7 +60,7 @@ pub(crate) fn send_to_plugin(plugin_id: u32, pipe: &str, payload: String) {
 }
 
 impl State {
-    // fujin_toggle_cwd の受け口（docs/issues/toggle-cwd-key.md）。
+    // fujin_toggle_cwd の受け口（docs/issues/issue-toggle-cwd-key.md）。
     // payload無し＝ユーザーのキー操作（各自反転）、"true"/"false"＝新入り
     // インスタンスへの現在値push（決定202608012141。そのままセット）
     pub(crate) fn handle_toggle_cwd_pipe(&mut self, payload: Option<&str>) -> bool {
@@ -192,14 +192,14 @@ impl State {
         if newcomers.is_empty() {
             return;
         }
-        // 幅だけは押し付けでは届かない（docs/issues/sidebar-width-persist-across-tabs.md）。
+        // 幅だけは押し付けでは届かない（docs/issues/issue-sidebar-width-persist-across-tabs.md）。
         // 新しいタブを作ると新入りが前面に出て、既存インスタンスは非可視になり
         // PaneUpdate を受け取らない ＝ 新入りに気づけるのが新入り自身しかいない。
         // 状態と違って「まだ知らない側」から取りに行く
         if self.width_target.is_none() {
             self.broadcast_to_siblings(WIDTH_PIPE, WIDTH_REQUEST);
         }
-        // エージェント状態も同じ理由で取りに行く（docs/issues/tab-switch-agent-status-desync.md）。
+        // エージェント状態も同じ理由で取りに行く（docs/issues/issue-tab-switch-agent-status-desync.md）。
         // 幅と違って「まだ知らない」を持ち物から判定できない — 自分が生まれた後に
         // 飛んできたフック通知で `agents` が1件埋まっているだけでも、それ以前から
         // 座っているペインの状態は欠けたままなので、空かどうかでは分岐できない。
@@ -216,10 +216,10 @@ impl State {
         // タブのサイドバーにだけ印が出ないと「どれを選んだか」が食い違う
         let marked = !self.marked.is_empty();
         for id in newcomers {
-            // cwd表示の現在値も配る（docs/issues/toggle-cwd-key.md）。他と違って
+            // cwd表示の現在値も配る（docs/issues/issue-toggle-cwd-key.md）。他と違って
             // 無条件に送る理由は push_show_cwd_to 側のコメントに書いてある
             self.push_show_cwd_to(id);
-            // 幅の目標も配る（docs/issues/sidebar-width-persist-across-tabs.md）。
+            // 幅の目標も配る（docs/issues/issue-sidebar-width-persist-across-tabs.md）。
             // 新しいタブはレイアウトの雛形の幅で開くので、これが無いと
             // 新規タブだけ幅が戻る
             self.push_width_to(id);
@@ -244,7 +244,7 @@ impl State {
         send_to_plugin(plugin_id, SYNC_STATE_PIPE, self.state_dump());
     }
 
-    // 新入りへ cwd表示の現在値を伝える（docs/issues/toggle-cwd-key.md）。
+    // 新入りへ cwd表示の現在値を伝える（docs/issues/issue-toggle-cwd-key.md）。
     //
     // 新入りは起動時のconfig既定値からしか出発できないので、実行中にトグルされて
     // いれば新入りだけ食い違う。他の配布物（状態ダンプ・マーク）と違って**中身が
@@ -285,7 +285,7 @@ impl State {
 
     // 配られた状態ダンプを取り込む。戻り値は再描画するか。
     //
-    // **自分が持っていないペインだけを埋める**（docs/issues/tab-switch-agent-status-desync.md）。
+    // **自分が持っていないペインだけを埋める**（docs/issues/issue-tab-switch-agent-status-desync.md）。
     // 以前は「自分の `agents` が空のときだけ丸ごと取り込む」全か無かで、1件でも
     // 自前の登録があると欠けたまま直らなかった。逆に既にある登録を上書きしないのは、
     // フック通知は全インスタンスへ届く＝登録さえあれば中身は揃っているためで、
@@ -347,7 +347,7 @@ impl State {
         true
     }
 
-    // --- サイドバー幅のタブ間追従（docs/issues/sidebar-width-persist-across-tabs.md） ---
+    // --- サイドバー幅のタブ間追従（docs/issues/issue-sidebar-width-persist-across-tabs.md） ---
     //
     // zellij の `new_tab_template` はタブ生成時に複製されるだけの静的な雛形で、
     // 実行時のリサイズは書き戻されない。そこで「誰かがリサイズしたら、その桁数を
@@ -416,7 +416,7 @@ impl State {
     // 目標に近いほうで止める。刻みが目標に乗らないのは、ドラッグリサイズが
     // 1セル単位で動く（実測: mouse_handler が delta/viewport で percent を出す）
     // 一方、プラグインの resize は 5% 固定刻みしか撃てないため
-    //（docs/issues/sidebar-width-persist-across-tabs.md）
+    //（docs/issues/issue-sidebar-width-persist-across-tabs.md）
     fn settle_width_after_step(&mut self, previous: usize, cols: usize) {
         let Some(target) = self.width_target else {
             return;
@@ -487,7 +487,7 @@ impl State {
     pub(crate) fn handle_width_pipe(&mut self, payload: Option<&str>, source: &PipeSource) -> bool {
         // CLI からの送信は payload 付きの1通目の後に payload 無しの2通目
         //（EOFマーカー）が届く。意味は無いので黙って捨てる
-        //（docs/issues/cli-pipe-testing-pitfalls.md）
+        //（docs/issues/issue-cli-pipe-testing-pitfalls.md）
         let Some(raw) = payload else {
             return false;
         };

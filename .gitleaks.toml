@@ -4,7 +4,7 @@
 # 方針: 誤検知の除外（allowlist）は先回りして書かず、実際に誤検知が出てから足す。
 # ここに置くのは、既定ルールに無い自前の検出ルールだけ。
 # 過去のコミットに入っていた分は履歴ごと書き換えて消したので、既知として
-# 見逃す `.gitleaksignore` は持たない（docs/issues/history-rewrite-home-path.md）。
+# 見逃す `.gitleaksignore` は持たない（docs/issues/issue-history-rewrite-home-path.md）。
 
 title = "fujin"
 

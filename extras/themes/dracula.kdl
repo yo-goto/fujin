@@ -2,7 +2,7 @@
 // (zellij-utils/assets/themes/dracula.kdl, fetched 2026-08-11)
 //
 // Used by try-worktree.sh --theme dracula to check that fujin's state colors
-// (docs/issues/agent-status-color-theme-variance.md) follow zellij's theme
+// (docs/issues/issue-agent-status-color-theme-variance.md) follow zellij's theme
 // instead of hardcoding RGB values.
 themes {
     dracula {

@@ -2,7 +2,7 @@
 # fujin worktree 試用スクリプト（開発者向け。利用者向けの導入は extras/setup.sh）
 #
 # 「今の常駐セッションを一切リロードせずに、別 worktree のビルドを試す」ためのもの。
-# docs/issues/parallel-development-bottleneck.md の方針をそのまま実装している。
+# docs/issues/issue-parallel-development-bottleneck.md の方針をそのまま実装している。
 #
 #   1. 対象 worktree を release ビルドする
 #   2. その worktree 専用の zellij config dir を作る
@@ -81,7 +81,7 @@ resident fujin session are never touched.
       --theme NAME    append a theme from extras/themes/NAME.kdl and select it
                       (comments out any existing "theme" line first). Used to
                       check that fujin's colors follow zellij's theme instead
-                      of hardcoding RGB (docs/issues/agent-status-color-theme-variance.md).
+                      of hardcoding RGB (docs/issues/issue-agent-status-color-theme-variance.md).
 
       --no-build      skip `cargo build --release`
       --no-grant      do not pre-register the permissions (approve by hand instead)
@@ -487,7 +487,7 @@ grant_permissions() {
   # 判定はパスの有無ではなく**中身**で行う。エントリだけ先にあって権限が
   # 足りない状態（前回の実行のあと fujin が新しい権限を要求するようになった場合）
   # を見落とすと、未承認が1つ残るだけでサイドバーは承認プロンプトすら出さずに
-  # 空白のまま描画される（docs/issues/sidebar-blank-in-fresh-session.md）
+  # 空白のまま描画される（docs/issues/issue-sidebar-blank-in-fresh-session.md）
   local granted missing
   granted=$(entry_permissions "$perms")
   missing=$(comm -23 <(printf '%s\n' "$types") <(printf '%s\n' "$granted"))
@@ -597,7 +597,7 @@ start_session() {
     # **窓の中身を zellij 単体にしない。** それだと窓の中に「終わらせ方」が無く、
     # ×ボタンで閉じるしか道が残らない。zellij 0.44.3 はその閉じ方で
     # クライアントが panic し、配下のシェルが孤児化して CPU を食う
-    # （docs/issues/window-close-panics-orphan-shell.md）。
+    # （docs/issues/issue-window-close-panics-orphan-shell.md）。
     # シェルで包んでおけば、正常終了・detach・窓を閉じたときの SIGHUP の
     # どれでも後始末（セッションと config dir の破棄）を通せる
     local -a launch
