@@ -141,10 +141,10 @@ fn the_highlighted_row_keeps_its_bar_and_background() {
         "左端のバーが消えている: {:?}",
         text.content()
     );
-    // opaque のプレフィックス（`z`）が付いていることを直接見る。背景が塗られないと
-    // 帯にならず、幅いっぱいへ伸ばした空白（pad_to_width）が無駄になる
+    // opaque が付いていることを見る。背景が塗られないと帯にならず、
+    // 幅いっぱいへ伸ばした空白（pad_to_width）が無駄になる
     assert!(
-        text.serialize().starts_with('z'),
+        is_opaque(&text),
         "opaque が落ちている: {:?}",
         text.serialize()
     );

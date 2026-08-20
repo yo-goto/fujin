@@ -15,6 +15,14 @@
 //   テストでは検証しない。フォーカス同期（要件: focus-sync）のうち、
 //   問い合わせ結果を畳んだ先（State::focused_pane）から先のロジックは
 //   フィールドを直接立てて検証する
+// - navモードの入場は2経路を使い分ける。入場・退場の**副作用そのもの**
+//   （park_focus・intercept_key_presses・初期選択の nav_entry_selection）を
+//   検証するテストは本番経路の `state.enter_nav_mode()` を、navモード中の
+//   **表示・キー解釈**だけを見るテストは `nav_mode = true` の直接代入
+//   （または searchable_state 等のヘルパ）を使う。直接代入は focus_parked を
+//   持たない最小状態を作る意図で、入場時の挙動に関わるテストを直接代入で
+//   書くと nav_entry_selection まわりの回帰をすり抜ける
+//  （docs/issues/issue-test-support-conventions.md）
 
 use crate::agent::{AgentState, StatusPayload};
 use crate::render::{CounterColumn, HeadCells, Row};
@@ -198,6 +206,16 @@ pub(crate) fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
 // そのレベルの装飾が乗っている文字位置（乗っていなければ空）
 pub(crate) fn ink_at(text: &Text, level: usize) -> Vec<usize> {
     ink_levels(text).get(level).cloned().unwrap_or_default()
+}
+
+// opaque（選択行の背景の帯）が乗っているか。プレフィックスは ink_levels と
+// 同じ並び（x → z）なので、selected の有無に関わらず判定できる
+pub(crate) fn is_opaque(text: &Text) -> bool {
+    let serialized = text.serialize();
+    serialized
+        .strip_prefix('x')
+        .unwrap_or(&serialized)
+        .starts_with('z')
 }
 
 pub(crate) const DIM_LEVEL: usize = 4;
