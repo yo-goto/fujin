@@ -143,6 +143,39 @@ todo() { printf '    %stodo%s %s\n' "$c_yellow" "$c_off" "$*"; }
 warn() { printf '    %swarning:%s %s\n' "$c_yellow" "$c_off" "$*" >&2; }
 die()  { printf 'try-worktree.sh: %s\n' "$*" >&2; exit 1; }
 
+# zellij のサーバソケットは $TMPDIR/zellij-<uid>/contract_version_1/<セッション名>
+# に作られ、Unix domain socket のパス上限（macOS で104バイト）に当たりうる
+# （issue-try-open-picks-unlaunched-terminal.md「第二の問題」）。$TMPDIR はブート
+# ごとに変わるので、ここで実測して budget を出す。
+# **使えるのは103バイトまで**（104ではない）。zellij 側の判定は
+# zellij-utils/src/cli.rs の validate_session で `パス長 >= ZELLIJ_SOCK_MAX_LENGTH`
+# なので、104ちょうどは既に弾かれる。`contract_version_1` の数字は
+# CLIENT_SERVER_CONTRACT_VERSION（0.44.3 で 1）
+assert_session_name_fits() {
+  # 上限値も socket dir の求め方も macOS 固有なので、他OSでは黙って見送る。
+  # Linux は $XDG_RUNTIME_DIR 起点で桁数がまるで違い、誤検知するほうが害が大きい
+  [ "$(uname -s)" = Darwin ] || return 0
+
+  local sess=$1 sock_dir prefix budget
+  if [ -n "${ZELLIJ_SOCKET_DIR:-}" ]; then
+    # zellij はこの環境変数があれば $TMPDIR より優先する（envs::get_socket_dir）
+    sock_dir=${ZELLIJ_SOCKET_DIR%/}
+  else
+    sock_dir=${TMPDIR:-/tmp}
+    # Rust の PathBuf::push と同じく、末尾スラッシュは重ねない
+    sock_dir="${sock_dir%/}/zellij-${UID:-$(id -u)}"
+  fi
+  prefix="$sock_dir/contract_version_1/"
+  budget=$((103 - ${#prefix}))
+
+  if [ "$budget" -le 0 ]; then
+    die "no session name can fit: $prefix is already ${#prefix} bytes and a unix socket path caps at 104 bytes on macOS -- set a shorter TMPDIR (or ZELLIJ_SOCKET_DIR) for both this command and any later --clean"
+  fi
+  if [ "${#sess}" -gt "$budget" ]; then
+    die "session name \"$sess\" is ${#sess} bytes but only $budget fit under $prefix (a unix socket path caps at 104 bytes on macOS) -- pass a shorter one with -s/--session, and the same -s to --clean afterwards"
+  fi
+}
+
 # ---------------------------------------------------------------- resolve
 
 # 引数はパスとしても worktree 名としても受ける。名前で来たら repos/ 配下を見る
@@ -273,6 +306,11 @@ if [ "$clean" -eq 1 ]; then
   printf '\n'
   exit 0
 fi
+
+# **セッション名の検査は clean のあと。** 長すぎる名前で起動に失敗した人が最初に
+# 叩くのは --clean なので、そこで die すると後始末の手段まで塞いでしまう。
+# 名前を使うのはここから先（起動）だけなので、この位置で足りる
+assert_session_name_fits "$session"
 
 printf 'fujin try-worktree\n'
 info "worktree    $worktree"
@@ -587,6 +625,16 @@ start_session() {
   if [ "$open_window" -eq 1 ]; then
     local term
     term=$(resolve_terminal) || die "no terminal emulator found (pass --terminal CMD)"
+
+    # **--clean は既定名を組み立て直す。** -s / --config-dir を明示されていた場合、
+    # 素の `--clean <worktree>` を案内すると *別の*（既定名の）セッションと config dir
+    # を畳みに行く。セッション名が長すぎるときの回避策が -s なので、案内する側が
+    # それを落とさないようにする
+    local clean_cmd="$self_sh --clean ${worktree_arg:-$name}"
+    [ "$session" = "fujin-try-$name" ] || clean_cmd="$clean_cmd -s $session"
+    [ "$config_dir" = "$HOME/.config/zellij-fujin-$name" ] ||
+      clean_cmd="$clean_cmd --config-dir $config_dir"
+
     # 「このコマンドを実行しろ」の渡し方はターミナルごとに違う。
     # wezterm だけサブコマンド形式で、残りは -e で揃う
     local -a exec_args
@@ -607,11 +655,15 @@ start_session() {
     else
       launch=("${env_prefix[@]}"
         FUJIN_TRY_SH="$self_sh" FUJIN_TRY_WT="${worktree_arg:-$name}"
+        FUJIN_TRY_SESSION="$session" FUJIN_TRY_CFG="$config_dir"
         sh -c 'cleanup() {
   # trap 経由と最後の1行と、両方から呼ばれるので冪等にしておく
   if [ -z "${FUJIN_TRY_CLEANED-}" ]; then
     FUJIN_TRY_CLEANED=1
-    "$FUJIN_TRY_SH" --clean "$FUJIN_TRY_WT" >/dev/null 2>&1 || true
+    # -s / --config-dir は必ず渡す。省くと --clean 側が既定名を組み立て直すので、
+    # 明示指定で起動していた場合に別のセッション・config dir を消してしまう
+    "$FUJIN_TRY_SH" --clean "$FUJIN_TRY_WT" \
+      -s "$FUJIN_TRY_SESSION" --config-dir "$FUJIN_TRY_CFG" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup HUP TERM INT
@@ -619,17 +671,59 @@ trap cleanup HUP TERM INT
 cleanup' sh "${cmd[@]}")
     fi
 
-    nohup "$term" "${exec_args[@]}" "${launch[@]}" >/dev/null 2>&1 &
+    # **成否は握り潰さない。** 以前は出力を /dev/null に捨て、起動の成否を見ずに
+    # ok を出していたため、窓が開かなくても「開いた」と報告していた
+    # （issue-try-open-picks-unlaunched-terminal.md）。$term の出力は残し、
+    # セッションが実際に現れるまで少し待ってから成否を判定する。
+    # **ログの置き場所は config dir の外。** 窓の中の zellij が即死する類の失敗だと、
+    # 包んだシェルの cleanup が --clean を呼んで config dir ごと消してしまい、
+    # 下でログを読むころには残っていない
+    local log_dir=${TMPDIR:-/tmp}
+    local log_file="${log_dir%/}/fujin-try-$name-open.log"
+    : >"$log_file"
+    nohup "$term" "${exec_args[@]}" "${launch[@]}" >"$log_file" 2>&1 &
     disown
-    ok "opened a new $term window running \"$session\""
-    if [ "$keep" -eq 1 ]; then
-      info "--keep: nothing is cleaned up automatically"
-      info "close it with: $self_sh --clean ${worktree_arg:-$name}"
-    else
-      info "the session and $config_dir are dropped when that window's zellij exits"
-      info "to tear it down from here: $self_sh --clean ${worktree_arg:-$name}"
+
+    # $term の pid で早期打ち切りはしない: GUIアプリはlaunchd経由で再親化され、
+    # 元プロセスが即終了しても窓は後から開くことがあるため「死んだ=失敗」と
+    # 判定できない。素直にタイムアウトまでセッションの出現だけを見る。
+    # ターミナルのコールドスタート込みで実測1〜2秒なので、10秒あれば足りる
+    local timeout_s=10 tick=0 ticks launched=0
+    ticks=$((timeout_s * 5))
+    while [ "$tick" -lt "$ticks" ]; do
+      if session_is_running "$session"; then
+        launched=1
+        break
+      fi
+      sleep 0.2
+      tick=$((tick + 1))
+    done
+
+    if [ "$launched" -eq 1 ]; then
+      ok "opened a new $term window running \"$session\""
+      if [ "$keep" -eq 1 ]; then
+        info "--keep: nothing is cleaned up automatically"
+        info "close it with: $clean_cmd"
+      else
+        info "the session and $config_dir are dropped when that window's zellij exits"
+        info "to tear it down from here: $clean_cmd"
+      fi
+      return 0
     fi
-    return 0
+
+    # **ここで 0 を返さない。** 窓が開いていない以上これは失敗で、`make try` を
+    # 緑にしてしまうと「報告だけ成功していて実体が無い」元の症状に逆戻りする
+    warn "\"$session\" did not come up within ${timeout_s}s -- the $term window probably never opened"
+    if [ -s "$log_file" ]; then
+      info "$term wrote:"
+      sed 's/^/        /' "$log_file"
+    else
+      info "$term wrote nothing (log: $log_file)"
+    fi
+    info "try another terminal with --terminal CMD, or open one yourself and run:"
+    printf '\n        ZELLIJ_CONFIG_DIR=%s %s\n\n' "$config_dir" "${cmd[*]}"
+    info "clean up whatever is left with: $clean_cmd"
+    exit 1
   fi
 
   # zellij の中から素直に起動するとネストを拒否される。ネストは操作しづらく
