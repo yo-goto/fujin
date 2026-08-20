@@ -13,7 +13,7 @@
 //
 // モジュール構成:
 // - agent  — フックイベントの解釈とエージェント状態の遷移
-// - config — configuration の取り込みと設定仕様の正本（決定202608080346）
+// - config — 設定仕様の正本と configuration の取り込み・設定警告の表示期限（決定202608080346）
 // - command — コマンドペインのライフサイクルからのコマンド状態の導出（決定202608072218）
 // - focus  — フォーカス同期と、navモード中のフォーカスの預かり（決定202608072359）
 // - nav    — navモード（決定202607310311）の入退場・選択移動・行クリック
@@ -63,7 +63,7 @@ use zellij_tile::prelude::*;
 
 use agent::AgentInfo;
 use command::CommandInfo;
-use config::{Config, ShowDeployAnimation};
+use config::ShowDeployAnimation;
 use deploy::Deployment;
 use focus::ParkedFocus;
 use jump::JumpState;
@@ -115,10 +115,6 @@ const DISMISS_PIPE: &str = "fujin_dismiss";
 // 有無だけでは原理的に区別できない**ので、滞在時間で分ける。
 // 実機での調整が残っている暫定値
 const READ_DELAY: f64 = 0.6;
-
-// 設定の警告をフッターへ優先表示する時間（秒）。決定202608080346の「起動直後の一定時間
-// だけ優先表示」。過ぎればフッターは通常の表示へ戻る。警告は stderr にも残る
-const CONFIG_WARNING_SECS: f64 = 8.0;
 
 // サイドバーに並べる選択対象（ターミナルペイン1つぶん）
 #[derive(Debug, Clone)]
@@ -551,66 +547,6 @@ impl State {
             self.arm_timer();
         }
         render
-    }
-
-    // 設定の警告の表示期限を切る（決定202608080346）。フッターを通常表示へ戻すために
-    // 1回だけ描き直しが要るので、切れた瞬間を返す
-    fn expire_config_warning(&mut self) -> bool {
-        match self.config_warning_until {
-            Some(until) if self.elapsed >= until => {
-                self.config_warning_until = None;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    // 設定の警告を出し始める。警告が無ければ何もしない（タイマーも張らない）
-    pub(crate) fn arm_config_warning(&mut self) {
-        if self.config_warnings.is_empty() {
-            return;
-        }
-        self.config_warning_until = Some(self.elapsed + CONFIG_WARNING_SECS);
-        self.arm_timer();
-    }
-
-    // いまフッターに設定の警告を出しているか（決定202608080346）。
-    //
-    // **ユーザーがいま操作している文脈は警告より優先する** — 入力欄
-    //（検索クエリ・番号ジャンプ）と確認プロンプト（終了操作）、ヘルプの
-    // 閉じ方は、そこに出ていないと操作が成立しない。警告が譲るのは静的な
-    // ヒント（nav・トリアージの help/exit、direct-keys）に対してだけで、
-    // 譲っているあいだも期限は進む — 見せ場を作るために操作を待たせない
-    pub(crate) fn showing_config_warning(&self) -> bool {
-        self.config_warning_until.is_some()
-            && !self.help_overlay
-            && self.termination.is_none()
-            && self.search.is_none()
-            && self.jump.is_none()
-    }
-
-    // configuration を取り込む（決定202608080346）。**設定の入口はここ1本だけ**にして、
-    // 値の正規化と解釈できない値の扱いを項目ごとにばらけさせない。
-    // 解釈と仕様の正本は config.rs 側にある。
-    //
-    // direct-keys のヒント（決定202608070226）が「キーの表記だけを設定で受け取る」形なのは、
-    // zellij 0.44.3 のプラグインAPIが `Action::KeybindPipe` の `name`/`payload` を
-    // 捨てて渡すため、実際の割り当てを `Event::InitialKeybinds` から解決できないから
-    //（`zellij-utils/src/plugin_api/action.rs`）
-    pub(crate) fn apply_config(&mut self, configuration: &BTreeMap<String, String>) {
-        let config = Config::parse(configuration);
-        self.show_cwd = config.show_cwd;
-        self.show_deploy_animation = config.show_deploy_animation;
-        self.direct_keys = config.direct_keys;
-        self.config_warnings = config.warnings;
-        // フッターは幅32でキー名しか出せない。何が悪かったのかを追える形は
-        // ログ側に残す（開発時の出力先は docs/dev/dev-workflow.md 参照）
-        for key in &self.config_warnings {
-            eprintln!(
-                "fujin: unusable value for `{}` in the plugin configuration",
-                key
-            );
-        }
     }
 
     // 自分のプラグインペインが指定タブに居るか。
