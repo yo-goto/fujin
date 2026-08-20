@@ -131,7 +131,7 @@ fn running_out_of_attempts_settles_the_width() {
     let mut state = State {
         viewport_cols: 40,
         width_target: Some(56),
-        width_attempts: crate::sync::WIDTH_MAX_ATTEMPTS,
+        width_attempts: crate::width_sync::WIDTH_MAX_ATTEMPTS,
         ..Default::default()
     };
     state.reconcile_width(40);

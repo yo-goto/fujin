@@ -27,6 +27,7 @@
 // - render — サイドバーの描画
 // - width  — 表示セル幅の計算・切り詰めの純粋関数
 // - sync   — インスタンス間の状態同期（決定202608012141）
+// - width_sync — サイドバー幅のタブ間追従（用語: width-sync）
 // - summon — フローティングでの臨時召喚（決定202608011644）
 // - entry  — wasm のエクスポート関数（`register_plugin!` の自前版。決定202608111836）
 // - host   — ホストコマンドの間接層（テストビルドでは発行の記録に差し替わる）
@@ -49,6 +50,7 @@ mod sync;
 mod termination;
 mod triage;
 mod width;
+mod width_sync;
 
 #[cfg(test)]
 mod test_support;
