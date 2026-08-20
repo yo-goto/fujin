@@ -12,7 +12,7 @@ use zellij_tile::prelude::*;
 
 use crate::host;
 use crate::render::HelpRow;
-use crate::{ParkedFocus, Selectable, State};
+use crate::{Selectable, State};
 
 impl State {
     // fujin_up / fujin_down（直接キー方式・決定202607302258）の受け口。
@@ -72,72 +72,6 @@ impl State {
         self.broadcast_selection();
         self.park_focus();
         host::intercept_key_presses();
-    }
-
-    // navモード中だけ、実フォーカスをサイドバー自身へ預かる（決定202608072359）。
-    //
-    // フォーカス枠の色だけを消すAPIは無いが、**枠はセッション内で1枚しか点かない**
-    //（実測）ので、フォーカスをサイドバーへ移せば作業ペインの枠は非フォーカス色に
-    // 戻り、サイドバーのハイライトと二重に「ここが操作対象」を主張しなくなる。
-    // 召喚インスタンス（決定202608011644）は最初から自分がフォーカスを持っているので、
-    // これは常駐サイドバーを召喚と同じ状態に揃える操作でもある
-    fn park_focus(&mut self) {
-        // 既に預かっている（入場のやり直し）なら二重に動かさない
-        if self.summoned || self.focus_parked.is_some() {
-            return;
-        }
-        // 実フォーカスがプラグインペイン側にあるなら、作業ペインに枠は
-        // 点いていない（上記の1枚だけの性質）。預かる理由が無い
-        if !self.focus_on_terminal {
-            return;
-        }
-        let (Some(pane_id), Some(own_id)) = (self.focused_pane, self.own_plugin_id) else {
-            return;
-        };
-        let is_floating = self.pane_is_floating(pane_id);
-        // unselectable なペインはフォーカスできない（実測。api-reference.md）ので、
-        // 預かる間だけ selectable に戻す。navモード中は全キーを横取りしているため
-        // 巡回でサイドバーへ入り込む余地は無く、決定202607302258の意図は保たれる
-        host::set_selectable(true);
-        host::focus_plugin_pane(own_id, false, false);
-        self.focus_parked = Some(ParkedFocus {
-            pane_id,
-            is_floating,
-            confirmed: false,
-        });
-    }
-
-    // 預かったフォーカスを手放す（決定202608072359）。`refocus` が真なら作業ペインへ返す。
-    //
-    // 退場の2系統（exit_nav_mode / leave_nav_mode）と `Event::BeforeClose` の
-    // どこを通っても必ず手放すため、「預かった相手」を覚えておいて冪等に戻す。
-    // ジャンプ経路も一度は作業ペインへ返す — 呼び出し側の `focus_selected()` が
-    // すぐ上書きするが、フローティング層の出し入れを含む移動の起点を
-    // navモードに入る前と同じ状態に揃えられる
-    pub(crate) fn release_parked_focus(&mut self, refocus: bool) {
-        let Some(parked) = self.focus_parked.take() else {
-            return;
-        };
-        if refocus {
-            if let Some((pane_id, is_floating)) = self.refocus_target(parked) {
-                host::focus_pane_with_id(PaneId::Terminal(pane_id), is_floating, false);
-            }
-        }
-        // 決定202607302258へ戻す。**フォーカスを返したあとに** unselectable にすること —
-        // 逆順だと自分にフォーカスが残ったまま巡回対象から外れる
-        host::set_selectable(false);
-    }
-
-    // フォーカスの返し先。原則は預かった当のペインだが、**navモード中に
-    // 閉じられていたら選択行のペインへ返す**（決定202608072359）。unselectable な自分に
-    // フォーカスが残ると、横取りも解いた後なのでキーの行き先が無くなる
-    pub(crate) fn refocus_target(&self, parked: ParkedFocus) -> Option<(u32, bool)> {
-        if self.selectable.iter().any(|e| e.pane_id == parked.pane_id) {
-            return Some((parked.pane_id, parked.is_floating));
-        }
-        self.selectable
-            .get(self.selected)
-            .map(|entry| (entry.pane_id, entry.is_floating))
     }
 
     // 入場時に選択すべきペイン（要件: docs/requirements/req-focus-sync.md）。
