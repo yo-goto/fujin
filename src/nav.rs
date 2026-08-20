@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use zellij_tile::prelude::*;
 
+use crate::host;
 use crate::render::HelpRow;
 use crate::search::{match_pane, Hit};
 use crate::{ParkedFocus, Selectable, State};
@@ -108,7 +109,7 @@ impl State {
         }
         self.broadcast_selection();
         self.park_focus();
-        intercept_key_presses();
+        host::intercept_key_presses();
     }
 
     // navモード中だけ、実フォーカスをサイドバー自身へ預かる（決定202608072359）。
@@ -135,8 +136,8 @@ impl State {
         // unselectable なペインはフォーカスできない（実測。api-reference.md）ので、
         // 預かる間だけ selectable に戻す。navモード中は全キーを横取りしているため
         // 巡回でサイドバーへ入り込む余地は無く、決定202607302258の意図は保たれる
-        set_selectable(true);
-        focus_plugin_pane(own_id, false, false);
+        host::set_selectable(true);
+        host::focus_plugin_pane(own_id, false, false);
         self.focus_parked = Some(ParkedFocus {
             pane_id,
             is_floating,
@@ -157,12 +158,12 @@ impl State {
         };
         if refocus {
             if let Some((pane_id, is_floating)) = self.refocus_target(parked) {
-                focus_pane_with_id(PaneId::Terminal(pane_id), is_floating, false);
+                host::focus_pane_with_id(PaneId::Terminal(pane_id), is_floating, false);
             }
         }
         // 決定202607302258へ戻す。**フォーカスを返したあとに** unselectable にすること —
         // 逆順だと自分にフォーカスが残ったまま巡回対象から外れる
-        set_selectable(false);
+        host::set_selectable(false);
     }
 
     // フォーカスの返し先。原則は預かった当のペインだが、**navモード中に
@@ -216,12 +217,12 @@ impl State {
         // フォーカスの返却（決定202608072359）は召喚インスタンスの自死（下）より前に置く —
         // 自分を閉じたあとではホストコマンドが届くか分からない
         self.release_parked_focus(true);
-        clear_key_presses_intercepts();
+        host::clear_key_presses_intercepts();
         // 召喚インスタンスは用が済んだら自分で退場する（決定202608011644）。残すと作業
         // ペインに重なり続ける。次の入場でまた呼べばよい（召喚から入場まで実測16ms）
         if self.summoned {
             if let Some(own_id) = self.own_plugin_id {
-                close_plugin_pane(own_id);
+                host::close_plugin_pane(own_id);
             }
         }
     }
@@ -739,7 +740,7 @@ impl State {
             // ペインにジャンプできない**（タブ切り替えすら起きず無反応）。
             // かといって常に true にすると、今度は**フローティング層を表示中に
             // タイルペインへ戻れなくなる**。どちらも実測で確認済み
-            focus_pane_with_id(PaneId::Terminal(entry.pane_id), entry.is_floating, false);
+            host::focus_pane_with_id(PaneId::Terminal(entry.pane_id), entry.is_floating, false);
         }
     }
 

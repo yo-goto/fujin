@@ -27,12 +27,14 @@
 // - sync   — インスタンス間の状態同期（決定202608012141）
 // - summon — フローティングでの臨時召喚（決定202608011644）
 // - entry  — wasm のエクスポート関数（`register_plugin!` の自前版。決定202608111836）
+// - host   — ホストコマンドの間接層（テストビルドでは発行の記録に差し替わる）
 
 mod agent;
 mod command;
 mod config;
 mod deploy;
 mod entry;
+mod host;
 mod mark;
 mod nav;
 mod preview;
@@ -280,8 +282,8 @@ impl ZellijPlugin for State {
         // selectable はペイン側の属性でリロードしても前回の false が残り、承認
         // プロンプトにフォーカスできないデッドロックになるため、毎回戻す。
         // 承認済みなら PermissionRequestResult が即返り、すぐ false に戻る
-        set_selectable(true);
-        request_permission(&[
+        host::set_selectable(true);
+        host::request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::ReadCliPipes,
@@ -297,7 +299,7 @@ impl ZellijPlugin for State {
             // せず「取れなかった」扱い（preview::UNAVAILABLE）に落ちる
             PermissionType::ReadPaneContents,
         ]);
-        subscribe(&[
+        host::subscribe(&[
             EventType::TabUpdate,
             EventType::PaneUpdate,
             EventType::PermissionRequestResult,
@@ -340,11 +342,11 @@ impl ZellijPlugin for State {
                     // 例外**（決定202608011644）— unselectable だとロジックが壊れたとき普段の
                     // ペイン操作で消せなくなるので、「必ず自分で消せる」ほうを取る
                     if !self.summoned {
-                        set_selectable(false);
+                        host::set_selectable(false);
                     }
                     // 既定のペイン名はwasmのフルURLで長すぎるので短くする
                     if let Some(id) = self.own_plugin_id {
-                        rename_plugin_pane(id, "fujin");
+                        host::rename_plugin_pane(id, "fujin");
                     }
                     // ここより前に来た PaneUpdate は未承認として捨てている。
                     // 承認を待たずに一覧が揃うと入場の機会がここしか無い
@@ -398,7 +400,7 @@ impl ZellijPlugin for State {
                 // close_plugin_pane() すると二重解放になる
                 if self.nav_mode {
                     self.nav_mode = false;
-                    clear_key_presses_intercepts();
+                    host::clear_key_presses_intercepts();
                 }
                 // プレビューと預かったフォーカスの後始末。どちらも対象は自分では
                 // なく別のペインなので、閉じられている最中でも投げてよい。
@@ -452,7 +454,7 @@ impl ZellijPlugin for State {
         // CLI pipe は即座にunblockしないと送信側が1秒タイムアウトまで待たされ、
         // フックのレイテンシに直結する（実測でroute.rsのタイムアウトを確認済み）
         if is_ours && matches!(pipe_message.source, PipeSource::Cli(_)) {
-            unblock_cli_pipe_input(&pipe_message.name);
+            host::unblock_cli_pipe_input(&pipe_message.name);
         }
         // プレビュー用フローティングペイン（決定202608082045）が扱うのはスナップショットだけ。
         // 状態通知や同期まで取り込むと、描くのに使わない状態を溜め込んだうえに
@@ -518,7 +520,7 @@ impl State {
                 // API が無く（決定202608072359）、内容領域の背景色は「色はテーマから
                 // 借りる」原則（ui-design.md 原則1）と衝突するため、
                 // ネイティブのタイトルバー文字列で代替している
-                rename_plugin_pane(id, "▣ preview");
+                host::rename_plugin_pane(id, "▣ preview");
             }
         }
         true
@@ -532,7 +534,7 @@ impl State {
     // 経過時間で期限を見るので、刻みが細かくても判定はずれない）
     pub(crate) fn arm_timer(&mut self) {
         if !self.timer_armed {
-            set_timeout(deploy::FRAME_INTERVAL);
+            host::set_timeout(deploy::FRAME_INTERVAL);
             self.timer_armed = true;
         }
     }

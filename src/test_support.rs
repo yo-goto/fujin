@@ -6,7 +6,9 @@
 //
 // テストできる範囲について:
 // - 副作用だけのホストコマンド（focus_pane_with_id, pipe_message_to_plugin,
-//   intercept_key_presses 等）は下のスタブで何もしなくなるので、呼ばれても安全
+//   intercept_key_presses 等）は host.rs の間接層がテストビルドで記録に差し替える
+//   ため、`host::take_host_calls()` で発行と引数を検証できる
+//  （docs/issues/issue-host-command-recorder.md）
 // - **戻り値を stdin から読み返す問い合わせ系は呼べない**（get_plugin_ids,
 //   get_focused_pane_info 等）。テスト中に呼ぶと stdin の読み取りに失敗して panic する。
 //   したがって refresh_focus() とそれを経由する pipe ハンドラ（NAV_*）は

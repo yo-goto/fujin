@@ -1,6 +1,7 @@
 // navモード（要件: docs/requirements/req-nav-mode.md）: 入退場とキー操作、操作ヒントとヘルプオーバーレイ
 
 use crate::agent::AgentState;
+use crate::host::{take_host_calls, HostCall};
 use crate::render::divider_line;
 use crate::test_support::*;
 use crate::*;
@@ -60,6 +61,70 @@ fn nav_enter_leaves_the_mode() {
     state.nav_mode = true;
     state.handle_nav_key(KeyWithModifier::new(BareKey::Enter));
     assert!(!state.nav_mode);
+}
+
+// --- ジャンプで発行されるホストコマンド（要件: nav-mode-selection-jump.feature） ---
+//
+// host.rs の間接層で発行を記録して検証する。従来はリンクスタブが握り潰すため
+// 「呼ばれたことも引数も観測できない」領域だった
+// （docs/issues/issue-cucumber-test-automation.md の再検討条件1）。
+// フローティング層の出し入れは focus_pane_with_id の第2引数
+// should_float_if_hidden が決める（focus_selected のコメント参照）
+
+#[test]
+fn nav_enter_focuses_the_selected_tiled_pane_and_hides_the_floating_layer() {
+    let mut state = state_with_panes(3);
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('j')));
+    take_host_calls();
+
+    state.handle_nav_key(key(BareKey::Enter));
+    assert_eq!(
+        take_host_calls(),
+        vec![
+            // フォーカス移動でタブが変わりうるので、横取り解除が先（handle_nav_key の順序）
+            HostCall::ClearKeyPressesIntercepts,
+            HostCall::FocusPaneWithId {
+                pane_id: PaneId::Terminal(2),
+                // false = タイルペインへのジャンプではフローティング層を出さない（隠れる）
+                should_float_if_hidden: false,
+                should_be_in_place_if_hidden: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn nav_enter_focuses_the_selected_floating_pane_and_shows_the_floating_layer() {
+    let mut state = state_with_panes(0);
+    state.panes = Some(manifest(vec![(
+        0,
+        vec![
+            terminal_pane(1, "alpha"),
+            PaneInfo {
+                is_floating: true,
+                ..terminal_pane(2, "bravo")
+            },
+        ],
+    )]));
+    state.rebuild_selectable();
+    state.nav_mode = true;
+    state.handle_nav_key(key(BareKey::Char('j')));
+    take_host_calls();
+
+    state.handle_nav_key(key(BareKey::Enter));
+    assert_eq!(
+        take_host_calls(),
+        vec![
+            HostCall::ClearKeyPressesIntercepts,
+            HostCall::FocusPaneWithId {
+                pane_id: PaneId::Terminal(2),
+                // true = 隠れていたフローティング層ごと表示してフォーカスする
+                should_float_if_hidden: true,
+                should_be_in_place_if_hidden: false,
+            },
+        ]
+    );
 }
 
 #[test]

@@ -11,6 +11,7 @@
 
 use zellij_tile::prelude::*;
 
+use crate::host;
 use crate::nav::has_hard_modifier;
 use crate::render::HelpRow;
 use crate::State;
@@ -158,10 +159,10 @@ impl State {
             // 順序は kill → close（決定202608080140）。どちらのホスト関数も送りっぱなしで
             // 応答を待たない（zellij-tile 0.44.3 の shim）
             if sigkill {
-                send_sigkill_to_pane_id(pane);
+                host::send_sigkill_to_pane_id(pane);
             }
             if close {
-                close_pane_with_id(pane);
+                host::close_pane_with_id(pane);
             }
         }
     }

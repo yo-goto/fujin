@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 use crate::config::PREVIEW_KEY;
+use crate::host;
 use crate::summon::SIDEBAR_WIDTH;
 use crate::{State, PREVIEW_PIPE};
 
@@ -102,7 +103,7 @@ impl State {
             return;
         };
         if let Some(pane_id) = preview.pane {
-            close_plugin_pane(pane_id);
+            host::close_plugin_pane(pane_id);
         }
     }
 
@@ -175,7 +176,7 @@ impl State {
         };
         // 開くときに渡した座標は効かず、pinned だけが通る（召喚で実測済み）。
         // 開いた後に指定し直す
-        change_floating_panes_coordinates(vec![(
+        host::change_floating_panes_coordinates(vec![(
             PaneId::Plugin(pane_id),
             Self::preview_coordinates(),
         )]);
@@ -185,7 +186,7 @@ impl State {
         // プレビュー用フローティングペインを自分の一部として数えるので、
         // 移動が届く前に PaneUpdate が来ても navモードを抜けたりはしない
         if let Some(own_id) = self.own_plugin_id {
-            focus_plugin_pane(own_id, false, false);
+            host::focus_plugin_pane(own_id, false, false);
         }
         if let Some(preview) = &mut self.preview {
             preview.pane = Some(pane_id);

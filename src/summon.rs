@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 use crate::config::SUMMONED_KEY;
+use crate::host;
 use crate::{State, SYNC_STATE_PIPE};
 
 // 召喚するフローティングの幅。レイアウトの常駐サイドバー（size=32）に合わせる。
@@ -73,7 +74,7 @@ impl State {
         if let Some(previous) = self.summoned_panes.get(&focused_tab).copied() {
             if get_pane_info(PaneId::Plugin(previous)).is_some() {
                 eprintln!("fujin: dismissing summon {previous} (toggled off)");
-                close_plugin_pane(previous);
+                host::close_plugin_pane(previous);
                 self.summoned_panes.remove(&focused_tab);
                 return;
             }
@@ -121,7 +122,7 @@ impl State {
         // **開くときに渡した座標は効かない。** 実測では pinned だけが通り、
         // x/y/width/height は既定のカスケード配置のままだった。
         // 開いた後に指定し直すと効く
-        change_floating_panes_coordinates(vec![(
+        host::change_floating_panes_coordinates(vec![(
             PaneId::Plugin(new_id),
             Self::summon_coordinates(),
         )]);
@@ -167,7 +168,7 @@ impl State {
         self.pending_nav_entry = true;
         // 開いたときの座標は zellij 既定のカスケード配置なので、常駐サイドバーと
         // 同じ位置・幅に置き直す（召喚経路と同じ手当て。summon_coordinates 参照）
-        change_floating_panes_coordinates(vec![(
+        host::change_floating_panes_coordinates(vec![(
             PaneId::Plugin(own_id),
             Self::summon_coordinates(),
         )]);
@@ -279,7 +280,7 @@ impl State {
                 && Some(pane.id) != self.own_plugin_id
             {
                 eprintln!("fujin: dismissing stranded summon {}", pane.id);
-                close_plugin_pane(pane.id);
+                host::close_plugin_pane(pane.id);
             }
         }
         self.summoned_panes.clear();

@@ -22,6 +22,7 @@ use zellij_tile::prelude::*;
 use crate::agent::{AgentInfo, AgentState};
 use crate::config::{Kind, SETTINGS};
 use crate::deploy::TROOP;
+use crate::host;
 use crate::mark::MARK_GLYPH;
 use crate::nav::SearchPhase;
 use crate::search::{Field, Hit};
@@ -778,7 +779,7 @@ impl State {
     pub(crate) fn sync_input_cursor(&mut self) {
         let next = self.input_cursor_position();
         if next != self.cursor_shown {
-            show_cursor(next);
+            host::show_cursor(next);
             self.cursor_shown = next;
         }
     }

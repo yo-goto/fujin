@@ -24,6 +24,7 @@ use std::collections::BTreeSet;
 use zellij_tile::prelude::*;
 
 use crate::agent::{AgentInfo, AgentState};
+use crate::host;
 use crate::{
     State, COMMAND_STATE_PIPE, READ_CLEAR_PIPE, SELECTION_PIPE, SYNC_STATE_PIPE, TOGGLE_CWD_PIPE,
     WIDTH_PIPE,
@@ -52,7 +53,7 @@ const STATE_REQUEST: &str = "?";
 // URL指定（`with_plugin_url`）は配送ではなく**新しいプラグインの起動**になる
 //（ファイル冒頭の経緯参照）
 pub(crate) fn send_to_plugin(plugin_id: u32, pipe: &str, payload: String) {
-    pipe_message_to_plugin(
+    host::pipe_message_to_plugin(
         MessageToPlugin::new(pipe)
             .with_destination_plugin_id(plugin_id)
             .with_payload(payload),
@@ -474,7 +475,7 @@ impl State {
             Resize::Decrease
         };
         // サイドバーは左端に置かれる（決定202607302257）ので、自分の幅を動かす境界は右側
-        resize_pane_with_id(
+        host::resize_pane_with_id(
             ResizeStrategy::new(resize, Some(Direction::Right)),
             PaneId::Plugin(own_id),
         );
