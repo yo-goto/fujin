@@ -4,7 +4,7 @@
 # stdin で受けたフックJSONを最小のペイロードに変換し、稼働中の
 # fujin プラグインへ届ける。
 #
-# 重要（docs/04-design-decisions.md リスク1）:
+# 重要（docs/concept/design-decisions.md リスク1）:
 #   `--plugin` は絶対に付けないこと。付けると未起動のプラグインを
 #   勝手に起動してしまう。--plugin なしなら起動中のプラグインにのみ
 #   配送され、未起動時は完全な no-op になる。
