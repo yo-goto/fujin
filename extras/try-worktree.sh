@@ -387,7 +387,7 @@ install_config() {
       >>"$config_file"
 
     # エイリアスの location だけを worktree のビルドへ向け直す。
-    # 1行の置換で済むのは、config.kdl 側が決定17でエイリアスに寄せてあるため
+    # 1行の置換で済むのは、config.kdl 側が決定202608022309でエイリアスに寄せてあるため
     if grep -qE "^[[:space:]]*$layout_name[[:space:]]+location=" "$config_file"; then
       local tmp="$config_file.try.$$"
       sed -E "s|^([[:space:]]*$layout_name[[:space:]]+location=\")[^\"]*(\")|\1file:$wasm_path\2|" \
@@ -478,7 +478,7 @@ grant_permissions() {
   perms="$cache_dir/permissions.kdl"
 
   # 要求する権限は wasm 側の正本（src/main.rs）から拾う。手で並べると
-  # 権限が増えたとき（決定42 の ReadPaneContents など）に取り残される
+  # 権限が増えたとき（決定202608082045 の ReadPaneContents など）に取り残される
   local types
   types=$(grep -oE 'PermissionType::[A-Za-z]+' "$worktree/src/main.rs" 2>/dev/null \
     | sed 's/PermissionType:://' | sort -u)
