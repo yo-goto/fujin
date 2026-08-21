@@ -3,6 +3,12 @@
 # .cargo/config.toml で既定ターゲットを wasm32-wasip1 にしているため、
 # 素の `cargo test` は wasm 向けにテストをビルドしてしまい実行できない
 # （wasm ランタイムが要る）。テストはホストターゲットで走らせる。
+#
+# 依存解決を伴う cargo 呼び出しには --locked を付けている。crates.io は同一
+# バージョンの再公開ができず Cargo.lock は sha256 を持つので、lock を固定して
+# いる限り「既に取り込んだ版が後から差し替わる」経路は塞がる。--locked が無いと
+# ビルドついでに黙って解決し直され、その保証が外れる。
+# lock が古いと落ちるので、依存を変えたときは意図して `cargo update` を実行する。
 
 HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 
@@ -15,10 +21,10 @@ PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
 all: check
 
 build:
-	cargo build
+	cargo build --locked
 
 release:
-	cargo build --release
+	cargo build --release --locked
 
 # 稼働中のセッションには反映されない。既存インスタンスは古い wasm のまま動くので、
 # 入れ替えたらセッションを作り直すこと（start-or-reload-plugin は1インスタンスしか
@@ -40,7 +46,7 @@ try:
 	./extras/try-worktree.sh $(WORKTREE) $(TRY_ARGS)
 
 test:
-	cargo test --target $(HOST_TARGET)
+	cargo test --locked --target $(HOST_TARGET)
 
 fmt:
 	cargo fmt
@@ -50,8 +56,8 @@ fmt-check:
 
 # wasm 向け（本番のビルド構成）とホスト向け（テストコードを含む）の両方を見る
 lint:
-	cargo clippy --all-targets -- -D warnings
-	cargo clippy --target $(HOST_TARGET) --all-targets -- -D warnings
+	cargo clippy --locked --all-targets -- -D warnings
+	cargo clippy --locked --target $(HOST_TARGET) --all-targets -- -D warnings
 
 check: fmt-check lint test
 
@@ -67,4 +73,4 @@ changelog:
 # README の設定節を src/config.rs の SETTINGS から再生成する（決定40）。
 # 生成物とのずれは make test 側で落ちるので、落ちたらこれを実行する
 readme:
-	UPDATE_README=1 cargo test --target $(HOST_TARGET) readme_settings_section
+	UPDATE_README=1 cargo test --locked --target $(HOST_TARGET) readme_settings_section
