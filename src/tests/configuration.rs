@@ -3,10 +3,10 @@ use crate::config::Config;
 use crate::config::Kind;
 use crate::config::CONFIG_WARNING_SECS;
 use crate::config::SETTINGS;
-use crate::render::overflow_row;
 use crate::render::Row;
 use crate::render::NO_AGENT_ICON;
 use crate::render::NO_AGENT_LABEL;
+use crate::render::{overflow_row, Line};
 use crate::search::SearchPhase;
 use crate::test_support::*;
 use crate::*;
@@ -721,7 +721,7 @@ fn the_no_agent_legend_carries_no_decoration() {
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));
 
-    let overlay: Vec<Text> = state
+    let overlay: Vec<Line> = state
         .screen_rows(40)
         .iter()
         .filter_map(|row| match row {
@@ -753,7 +753,7 @@ fn the_status_legend_carries_the_state_colors() {
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));
 
-    let overlay: Vec<Text> = state
+    let overlay: Vec<Line> = state
         .screen_rows(40)
         .iter()
         .filter_map(|row| match row {

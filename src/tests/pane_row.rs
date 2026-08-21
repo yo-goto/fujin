@@ -146,7 +146,7 @@ fn the_highlighted_row_keeps_its_bar_and_background() {
     assert!(
         is_opaque(&text),
         "opaque が落ちている: {:?}",
-        text.serialize()
+        Text::from(&text).serialize()
     );
 }
 

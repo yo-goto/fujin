@@ -11,7 +11,7 @@ impl State {
     //
     // 色を乗せるのは三角とモードラベルで、ブランド名は dim のまま。名前まで色を
     // 付けるとツリーの状態アイコンの色分けと喧嘩する
-    pub(crate) fn header_line(&self, cols: usize) -> Text {
+    pub(crate) fn header_line(&self, cols: usize) -> Line {
         // 兵の間を埋める空白は借用されるので、断片を組む前に作っておく
         let pads = self.troop_pads(cols);
         let mut segments = self.header_segments();

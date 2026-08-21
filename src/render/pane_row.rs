@@ -7,14 +7,14 @@ use super::*;
 
 impl State {
     // タブ見出し行1行ぶんの Text を組み立てる
-    pub(crate) fn tab_heading(&self, tab: &TabInfo, cols: usize) -> Text {
+    pub(crate) fn tab_heading(&self, tab: &TabInfo, cols: usize) -> Line {
         let marker = if tab.active { "▾" } else { "▸" };
         let prefix = format!("{} {} ", marker, tab.position + 1);
         let full_heading = format!("{}{}", prefix, tab.name);
         let title = truncate(&full_heading, content_cols(cols));
-        let mut text = Text::new(&title);
+        let mut text = Line::new(&title);
         if tab.active {
-            text = text.color_range(0, ..title.chars().count());
+            text = text.color_range(0, 0..title.chars().count());
         }
         // タブ名にヒットしたら見出し側をハイライトする（ヒット箇所の提示）。
         // 配下のどのペインの Hit も同じタブ名を指すので、最初の1つで足りる
@@ -81,7 +81,7 @@ impl State {
         column: CounterColumn,
         cells: HeadCells<'_>,
         cols: usize,
-    ) -> Text {
+    ) -> Line {
         let HeadCells { number, mark } = cells;
         let agent = self.agents.get(&entry.pane_id);
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定202608072218）
@@ -152,7 +152,7 @@ impl State {
             )
         });
 
-        let mut text = Text::new(&label);
+        let mut text = Line::new(&label);
         if !is_highlighted {
             text = unbold_name(text, &head.text, open, &title, close);
         }
@@ -192,7 +192,7 @@ impl State {
 // 出す。zellij側の実装制約で dim は bold を打ち消さないため、見た目上は bold+dim
 // になる（決定202608080027の対象外。docs/issues/issue-sidebar-cwd-bold.md）。
 // パスは末尾のディレクトリ名のほうが識別に効くので、先頭省略で畳む
-pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: usize) -> Text {
+pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: usize) -> Line {
     // 選択中は左端のバーをこの行まで伸ばし、ペイン行と1つの帯に見せる
     let bar = if is_highlighted { "▌" } else { " " };
     let indent = format!("{}{}", bar, " ".repeat(CWD_INDENT.saturating_sub(1)));
@@ -205,7 +205,7 @@ pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: 
     if is_highlighted {
         label = pad_to_width(label, cols);
     }
-    let mut text = Text::new(&label);
+    let mut text = Line::new(&label);
     let end = label.chars().count();
     if end > CWD_INDENT {
         // cwd は主役ではないので落として出す。選択中も落としたまま — 外すと

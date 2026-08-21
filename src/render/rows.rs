@@ -306,7 +306,7 @@ impl State {
 // 記号はタブ見出し行と同じ三角の系列で、上下どちら側が隠れているかを向きで示す。
 // タブ見出しと同列（x=0）に置く — 一覧の1項目ではなく、一覧そのものが
 // そこで打ち切られていることを表す行なので、階層の外側に出す
-pub(crate) fn overflow_row(hidden: usize, above: bool, cols: usize) -> Text {
+pub(crate) fn overflow_row(hidden: usize, above: bool, cols: usize) -> Line {
     let marker = if above { "▴" } else { "▾" };
     // `…` はペインの cwd（truncate_start）と同じ省略記号。マーカーと数字の
     // あいだに挟み、一覧がそこで途切れていることを添える。

@@ -23,6 +23,8 @@
 // 複数の子から使うものだけをここへ置くこと — 子どうしは兄弟なので、片方の中に
 // 置いたものはもう片方から見えない。
 
+use std::ops::Range;
+
 use unicode_width::UnicodeWidthStr;
 use zellij_tile::prelude::*;
 
@@ -227,6 +229,92 @@ enum Ink {
     Accent(usize),
 }
 
+// 1行の中間表現。**印字の直前まで `Text` にしない。**
+//
+// `Text` は装飾を「レベルごとの文字位置」へ畳んで文字列に抱えてしまうので、組み立ての
+// 途中でも後からでも中身を読み返せない。レイアウトの回帰をテストから検査できるように
+// するための中間形（docs/issues/issue-ui-requirements-approach.md の層2）。
+//
+// ビルダーは `Text` の同名メソッドと1対1のミラーで、**使用中の5種類だけ**を持つ。
+// 掛ける順序がそのまま `Text` へ写るように、呼び出しを記録して後から再生する。
+// 変換は印字の直前に `Text::from(&line)` で行う
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Line {
+    text: String,
+    decorations: Vec<Decoration>,
+}
+
+// `Text` のビルダー呼び出しを、掛ける順序のまま覚えておくための記録
+#[derive(Clone, Debug)]
+enum Decoration {
+    Color(usize, Range<usize>),
+    ColorIndices(usize, Vec<usize>),
+    Dim(Range<usize>),
+    Unbold(Range<usize>),
+    Opaque,
+}
+
+impl Line {
+    pub(crate) fn new(text: impl AsRef<str>) -> Self {
+        Self {
+            text: text.as_ref().to_string(),
+            decorations: Vec::new(),
+        }
+    }
+
+    // 本文（装飾を除いた、実際に画面へ出る文字列）。名前は `Text::content()` の
+    // ミラー——ビルダーと同じく、呼ぶ側が `Text` との違いを意識せずに済む。
+    // 本番の描画は `Text` へ変換してから印字するので、読み出すのはテストだけ
+    #[cfg(test)]
+    pub(crate) fn content(&self) -> &str {
+        &self.text
+    }
+
+    fn color_range(mut self, level: usize, range: Range<usize>) -> Self {
+        self.decorations.push(Decoration::Color(level, range));
+        self
+    }
+
+    fn color_indices(mut self, level: usize, indices: Vec<usize>) -> Self {
+        self.decorations
+            .push(Decoration::ColorIndices(level, indices));
+        self
+    }
+
+    fn dim_range(mut self, range: Range<usize>) -> Self {
+        self.decorations.push(Decoration::Dim(range));
+        self
+    }
+
+    fn unbold_range(mut self, range: Range<usize>) -> Self {
+        self.decorations.push(Decoration::Unbold(range));
+        self
+    }
+
+    fn opaque(mut self) -> Self {
+        self.decorations.push(Decoration::Opaque);
+        self
+    }
+}
+
+impl From<&Line> for Text {
+    fn from(line: &Line) -> Self {
+        let mut text = Text::new(&line.text);
+        for decoration in &line.decorations {
+            text = match decoration {
+                Decoration::Color(level, range) => text.color_range(*level, range.clone()),
+                Decoration::ColorIndices(level, indices) => {
+                    text.color_indices(*level, indices.clone())
+                }
+                Decoration::Dim(range) => text.dim_range(range.clone()),
+                Decoration::Unbold(range) => text.unbold_range(range.clone()),
+                Decoration::Opaque => text.opaque(),
+            };
+        }
+        text
+    }
+}
+
 // ヘッダーの三角・モードラベルとフッターに乗せる色（要件: sidebar-header /
 // sidebar-footer）。navモード・検索サブモードはレベル2（green）で、zellij の
 // タブバーがアクティブなタブに使う色に対応させる
@@ -249,32 +337,32 @@ const LAUNCH_GAP: usize = 1;
 //
 // 色の指定は文字位置で行うため、文言を直すたびに位置を数え直すことになる。
 // 断片の並びから位置を計算させて、その手間と数え間違いを無くす
-fn compose(segments: &[(&str, Ink)], cols: usize) -> Text {
-    let mut line = String::new();
+fn compose(segments: &[(&str, Ink)], cols: usize) -> Line {
+    let mut body = String::new();
     let mut spans = Vec::with_capacity(segments.len());
     for (fragment, ink) in segments {
-        let start = line.chars().count();
-        line.push_str(fragment);
-        spans.push((start, line.chars().count(), *ink));
+        let start = body.chars().count();
+        body.push_str(fragment);
+        spans.push((start, body.chars().count(), *ink));
     }
-    let full_len = line.chars().count();
-    let line = truncate(&line, cols);
-    let limit = colorable_char_limit(line.chars().count(), full_len);
-    let mut text = Text::new(&line);
+    let full_len = body.chars().count();
+    let body = truncate(&body, cols);
+    let limit = colorable_char_limit(body.chars().count(), full_len);
+    let mut line = Line::new(&body);
     for (start, end, ink) in spans {
         let end = end.min(limit);
         if start >= end {
             continue;
         }
-        text = match ink {
-            Ink::Plain => text,
-            Ink::Tag => text.color_range(3, start..end),
-            Ink::Key => text.color_range(2, start..end),
-            Ink::Muted => text.dim_range(start..end),
-            Ink::Accent(level) => text.color_range(level, start..end),
+        line = match ink {
+            Ink::Plain => line,
+            Ink::Tag => line.color_range(3, start..end),
+            Ink::Key => line.color_range(2, start..end),
+            Ink::Muted => line.dim_range(start..end),
+            Ink::Accent(level) => line.color_range(level, start..end),
         };
     }
-    text
+    line
 }
 
 // カウンタ列の幅（決定202608060053、2026-08-08追記）。サブエージェント数 `+N`・未完了タスク数
@@ -412,7 +500,7 @@ fn row_head(
 //
 // 落としているものは無い — 併用時も `selected` は false と解釈されており、
 // 帯の背景は元から `opaque` 側が塗っている（docs/issues/issue-idle-icon-color-on-selection.md）
-fn highlight_row(text: Text) -> Text {
+fn highlight_row(text: Line) -> Line {
     text.opaque().color_range(2, 0..1)
 }
 
@@ -437,7 +525,7 @@ fn append_right_column(label: &mut String, column: &str, inner: usize) -> Option
 // 色や選択行の背景が相対的に沈むため。**選択行はboldのまま残す** — 実機確認で
 // 選択行まで落とすと「いまどこにいるか」が弱まった。丸括弧もペイン名の一部として
 // 同じ太さで出す（要件: floating-pane-indicator）
-fn unbold_name(text: Text, head: &str, open: &str, title: &str, close: &str) -> Text {
+fn unbold_name(text: Line, head: &str, open: &str, title: &str, close: &str) -> Line {
     let start = head.chars().count();
     let end = start + open.chars().count() + title.chars().count() + close.chars().count();
     text.unbold_range(start..end)
@@ -449,7 +537,7 @@ fn unbold_name(text: Text, head: &str, open: &str, title: &str, close: &str) -> 
 // サイドバーは borderless で運用していて自前の枠は引かないが、この3本だけは
 // 例外。領域を囲う枠ではなく境目を示す線なので許容する。
 // 右マージンは他の行と同じく空ける — 端まで引くと縁に貼り付いて見える
-pub(crate) fn divider_line(cols: usize) -> Text {
+pub(crate) fn divider_line(cols: usize) -> Line {
     let cols = content_cols(cols);
     let line = "─".repeat(cols);
     compose(&[(line.as_str(), Ink::Muted)], cols)

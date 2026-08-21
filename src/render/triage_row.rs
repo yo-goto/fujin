@@ -35,7 +35,7 @@ impl State {
         tab_column: usize,
         mark: Option<bool>,
         cols: usize,
-    ) -> Text {
+    ) -> Line {
         let status = self.pane_status(entry.pane_id);
         let icon = status.map(|s| s.icon()).unwrap_or(" ");
         // マーク列もペイン行と同じ位置（アイコンの手前）に出す（決定202608080250）。
@@ -74,7 +74,7 @@ impl State {
             label = pad_to_width(label, cols);
         }
 
-        let mut text = Text::new(&label);
+        let mut text = Line::new(&label);
         if !is_highlighted {
             text = unbold_name(text, &head.text, open, &title, close);
         }

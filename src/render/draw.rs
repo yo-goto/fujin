@@ -7,26 +7,39 @@
 use super::*;
 
 impl State {
+    // 描画の入口。組み立ては `render_ui()` が済ませているので、ここは印字するだけ
     pub(crate) fn draw(&self, rows: usize, cols: usize) {
+        for (y, line) in self.render_ui(rows, cols).into_iter().enumerate() {
+            // 高さを占めるだけの行は印字しない。位置は詰めない
+            let Some(line) = line else { continue };
+            print_text_with_coordinates(Text::from(&line), 0, y, None, None);
+        }
+    }
+
+    // 画面に並ぶ行を組み立てる。**`draw()` と1対1**——プレビュー・権限未承認の
+    // early-return もここに含める。印字だけを剥がしたことが自明になり、分岐の
+    // 取りこぼしが起きないため（docs/issues/issue-ui-requirements-approach.md）。
+    //
+    // 高さを占めるだけの行（`Row::Blank`）は `None`。印字しない行のぶんも位置を
+    // 残すので、添字はそのまま画面上の y になる
+    pub(crate) fn render_ui(&self, rows: usize, cols: usize) -> Vec<Option<Line>> {
         // プレビュー用フローティングペイン（決定202608082045）はサイドバーの枠組みを持たない。
         // 一覧も状態も持っていないので、共通の描画へ落とすと空の枠だけが出る
         if self.is_preview {
-            self.draw_preview(rows, cols);
-            return;
+            return self.preview_lines(rows, cols);
         }
         if !self.permissions_granted {
-            print_text_with_coordinates(
-                Text::new("permissions required (press y)"),
-                0,
-                0,
-                None,
-                None,
-            );
-            return;
+            return vec![Some(Line::new("permissions required (press y)"))];
         }
         if rows == 0 {
-            return;
+            return Vec::new();
         }
+        self.sidebar_lines(rows, cols)
+    }
+
+    // 枠と中身の行。`render_ui()` の本線で、プレビュー・権限未承認・高さ0は
+    // 呼び出し側が先に分けている
+    fn sidebar_lines(&self, rows: usize, cols: usize) -> Vec<Option<Line>> {
         // 画面高での打ち切りは screen_rows() が済ませている。ここで改めて
         // 打ち切ると、あふれマーカー行の勘定と食い違ってクリックが行ずれする
         let screen = self.screen_rows(rows);
@@ -39,45 +52,22 @@ impl State {
         let marks = self.mark_column(&screen);
         // カーソルは一覧から導出されるので、行ごとに引き直さず1度だけ求める
         let triage_cursor = self.triage_cursor();
-        for (y, row) in screen.into_iter().enumerate() {
-            match row {
-                Row::Header => {
-                    print_text_with_coordinates(self.header_line(cols), 0, y, None, None);
-                }
-                Row::Footer => {
-                    print_text_with_coordinates(self.footer_line(cols), 0, y, None, None);
-                }
+        screen
+            .into_iter()
+            .map(|row| match row {
+                Row::Header => Some(self.header_line(cols)),
+                Row::Footer => Some(self.footer_line(cols)),
                 // 高さを占めるだけの行。描くものは無い
-                Row::Blank => {}
-                Row::Divider => {
-                    print_text_with_coordinates(divider_line(cols), 0, y, None, None);
-                }
-                Row::Help(row) => {
-                    print_text_with_coordinates(self.help_line(row, cols), 0, y, None, None);
-                }
+                Row::Blank => None,
+                Row::Divider => Some(divider_line(cols)),
+                Row::Help(row) => Some(self.help_line(row, cols)),
                 Row::Notice(notice) => {
                     // 操作の対象ではない通知なので、一覧の行より落として出す
                     let label = format!("  {}", notice);
-                    print_text_with_coordinates(
-                        compose(&[(&label, Ink::Muted)], cols),
-                        0,
-                        y,
-                        None,
-                        None,
-                    );
+                    Some(compose(&[(&label, Ink::Muted)], cols))
                 }
-                Row::Overflow { hidden, above } => {
-                    print_text_with_coordinates(
-                        overflow_row(hidden, above, cols),
-                        0,
-                        y,
-                        None,
-                        None,
-                    );
-                }
-                Row::Tab(tab) => {
-                    print_text_with_coordinates(self.tab_heading(tab, cols), 0, y, None, None);
-                }
+                Row::Overflow { hidden, above } => Some(overflow_row(hidden, above, cols)),
+                Row::Tab(tab) => Some(self.tab_heading(tab, cols)),
                 Row::Pane {
                     entry,
                     flat_index,
@@ -90,15 +80,12 @@ impl State {
                         number: number.as_ref().map(|(n, m)| (n.as_str(), *m)),
                         mark: marks.then(|| self.is_marked(entry.pane_id)),
                     };
-                    let row = self.pane_row(entry, is_highlighted, hit, column, cells, cols);
-                    print_text_with_coordinates(row, 0, y, None, None);
+                    Some(self.pane_row(entry, is_highlighted, hit, column, cells, cols))
                 }
                 Row::Triage { entry, tab_name } => {
                     let is_highlighted = triage_cursor == Some(entry.pane_id);
                     let mark = marks.then(|| self.is_marked(entry.pane_id));
-                    let row =
-                        self.triage_row(entry, tab_name, is_highlighted, tab_column, mark, cols);
-                    print_text_with_coordinates(row, 0, y, None, None);
+                    Some(self.triage_row(entry, tab_name, is_highlighted, tab_column, mark, cols))
                 }
                 Row::Cwd {
                     entry,
@@ -107,11 +94,10 @@ impl State {
                     hit,
                 } => {
                     let is_highlighted = self.row_is_highlighted(entry, flat_index);
-                    let row = cwd_row(cwd, is_highlighted, hit, cols);
-                    print_text_with_coordinates(row, 0, y, None, None);
+                    Some(cwd_row(cwd, is_highlighted, hit, cols))
                 }
-            }
-        }
+            })
+            .collect()
     }
 
     // 入力欄のテキストカーソル位置をホストへ伝える。位置が変わったときだけ送る。
@@ -214,9 +200,11 @@ impl State {
     //
     // 本文は右マージンも取らず幅いっぱいを使う（同じ理由）。取れるのは装飾を
     // 持たないプレーンテキストだけで、色付きの再現はできない（決定202608082045の技術調査）
-    fn draw_preview(&self, rows: usize, cols: usize) {
+    // プレビュー用フローティングペインの行。サイドバーの枠は持たず、
+    // 見出し・境界線・本文の3段だけ（決定202608082045）
+    fn preview_lines(&self, rows: usize, cols: usize) -> Vec<Option<Line>> {
         if !self.permissions_granted || rows == 0 {
-            return;
+            return Vec::new();
         }
         let indent = " ".repeat(HEADER_INDENT);
         let title = if self.preview_content.title.is_empty() {
@@ -224,32 +212,19 @@ impl State {
         } else {
             self.preview_content.title.as_str()
         };
-        print_text_with_coordinates(
-            compose(
-                &[(&indent, Ink::Plain), (title, Ink::Muted)],
-                content_cols(cols),
-            ),
-            0,
-            0,
-            None,
-            None,
-        );
+        let mut lines = vec![Some(compose(
+            &[(&indent, Ink::Plain), (title, Ink::Muted)],
+            content_cols(cols),
+        ))];
         if rows < PREVIEW_HEAD {
-            return;
+            return lines;
         }
-        print_text_with_coordinates(divider_line(cols), 0, 1, None, None);
-        for (index, line) in self
-            .preview_body(rows.saturating_sub(PREVIEW_HEAD))
-            .iter()
-            .enumerate()
-        {
-            print_text_with_coordinates(
-                Text::new(truncate(line, cols)),
-                0,
-                PREVIEW_HEAD + index,
-                None,
-                None,
-            );
-        }
+        lines.push(Some(divider_line(cols)));
+        lines.extend(
+            self.preview_body(rows.saturating_sub(PREVIEW_HEAD))
+                .iter()
+                .map(|line| Some(Line::new(truncate(line, cols)))),
+        );
+        lines
     }
 }

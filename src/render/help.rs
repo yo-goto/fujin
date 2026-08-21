@@ -32,7 +32,7 @@ impl State {
 
     // ヘルプオーバーレイの1行。左マージンは描画位置（x）ではなく行の中に
     // 持たせる — 画面座標を行ごとに変えると、行の並びと描画がずれやすい
-    pub(crate) fn help_line(&self, row: &HelpRow, cols: usize) -> Text {
+    pub(crate) fn help_line(&self, row: &HelpRow, cols: usize) -> Line {
         let indent = " ".repeat(HELP_INDENT);
         let column = self.help_key_column();
         match row {
@@ -80,7 +80,7 @@ impl State {
                     cols,
                 )
             }
-            HelpRow::Blank => Text::new(""),
+            HelpRow::Blank => Line::new(""),
         }
     }
 }

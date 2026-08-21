@@ -16,6 +16,7 @@ mod command_status;
 mod configuration;
 mod floating_pane_indicator;
 mod focus_sync;
+mod frame_invariants;
 mod header_animation;
 mod ime_input;
 mod instance_sync;

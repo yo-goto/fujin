@@ -55,7 +55,7 @@ impl State {
     //
     // 文字色は状態色で統一する — 「キーは常にレベル2固定」という色役割の原則は
     // フッターに限り例外（決定202608070119）。ヘッダーの三角とトーンを揃えるほうを取る
-    pub(crate) fn footer_line(&self, cols: usize) -> Text {
+    pub(crate) fn footer_line(&self, cols: usize) -> Line {
         // ツリーの行と同じく右端は空ける
         let inner = content_cols(cols);
         let indent = " ".repeat(HEADER_INDENT);
@@ -209,7 +209,7 @@ fn input_footer(
     indent: &str,
     ink: Ink,
     cols: usize,
-) -> Text {
+) -> Line {
     // 余白は表示セル幅で数える。入力に全角文字が入ると文字数とセル数が
     // ずれ、操作ヒントが右端からはみ出す
     let budget = cols

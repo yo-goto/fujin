@@ -25,7 +25,7 @@
 //  （docs/issues/issue-test-support-conventions.md）
 
 use crate::agent::{AgentState, StatusPayload};
-use crate::render::{CounterColumn, HeadCells, Row};
+use crate::render::{CounterColumn, HeadCells, Line, Row};
 use crate::search::SearchPhase;
 use crate::*;
 use std::collections::HashMap;
@@ -182,8 +182,8 @@ pub(crate) fn repeat_status(state: &mut State, pane_id: u32, event: &str, times:
 // `parse_selected` → `parse_opaque` の順に先頭1文字ずつ見るので、剥がし残しは
 // そのままレベル0の先頭の数値にくっついて位置指定を壊す。ここで同じ順を踏むことで、
 // 実機と同じ見え方を検査できる（docs/issues/issue-idle-icon-color-on-selection.md）
-pub(crate) fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
-    let mut serialized = text.serialize();
+pub(crate) fn ink_levels(line: &Line) -> Vec<Vec<usize>> {
+    let mut serialized = Text::from(line).serialize();
     for marker in ['x', 'z'] {
         if serialized.starts_with(marker) {
             serialized.remove(0);
@@ -203,15 +203,14 @@ pub(crate) fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
         .collect()
 }
 
-// そのレベルの装飾が乗っている文字位置（乗っていなければ空）
-pub(crate) fn ink_at(text: &Text, level: usize) -> Vec<usize> {
-    ink_levels(text).get(level).cloned().unwrap_or_default()
+pub(crate) fn ink_at(line: &Line, level: usize) -> Vec<usize> {
+    ink_levels(line).get(level).cloned().unwrap_or_default()
 }
 
 // opaque（選択行の背景の帯）が乗っているか。プレフィックスは ink_levels と
 // 同じ並び（x → z）なので、selected の有無に関わらず判定できる
-pub(crate) fn is_opaque(text: &Text) -> bool {
-    let serialized = text.serialize();
+pub(crate) fn is_opaque(line: &Line) -> bool {
+    let serialized = Text::from(line).serialize();
     serialized
         .strip_prefix('x')
         .unwrap_or(&serialized)
