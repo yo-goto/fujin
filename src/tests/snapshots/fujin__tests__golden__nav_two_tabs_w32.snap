@@ -1,0 +1,19 @@
+---
+source: src/tests/golden.rs
+expression: "screen_snapshot(&state.render_ui(16, SIDEBAR))"
+---
+──────────────────────────────
+▲ fujin  [nav]
+──────────────────────────────
+▾ 1 tab1
+▌ » alpha               +2 [3]  
+  ◆ bravo
+      …/zellij-plugins/fujin
+▸ 2 tab2
+  ○ charlie
+
+
+
+
+──────────────────────────────
+  ?:help  esc:exit
