@@ -2,7 +2,7 @@
 //
 // タブ > ペインの縦並び表示、エージェント状態の可視化、グローバルキーでのジャンプ。
 // 設計決定は docs/concept/design-decisions.md、モジュール構成の詳細は
-// docs/dev/architecture.md を参照。
+// docs/dev/module-map.md を参照。
 //
 // アーキテクチャ上の前提（実測確認済み。docs/dev/api-reference.md）:
 // - タブ数ぶんのインスタンスが同時稼働する（zellijの構造上回避不能）
