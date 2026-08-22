@@ -18,7 +18,7 @@ impl State {
 
     // 画面に並ぶ行を組み立てる。**`draw()` と1対1**——プレビュー・権限未承認の
     // early-return もここに含める。印字だけを剥がしたことが自明になり、分岐の
-    // 取りこぼしが起きないため（docs/issues/issue-ui-requirements-approach.md）。
+    // 取りこぼしが起きないため（.docs/issues/issue-ui-requirements-approach.md）。
     //
     // 高さを占めるだけの行（`Row::Blank`）は `None`。印字しない行のぶんも位置を
     // 残すので、添字はそのまま画面上の y になる

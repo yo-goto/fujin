@@ -14,7 +14,7 @@ zellij-tile = "0.44.3"
 
 [dev-dependencies]
 # golden file（snapshot testing）。上流の zellij も同じ 1.48 系を5クレートで
-# dev-dependency に置いている（docs/issues/issue-ui-requirements-approach.md の層2）
+# dev-dependency に置いている（.docs/issues/issue-ui-requirements-approach.md の層2）
 insta = "1.48"
 
 [lints.rust]

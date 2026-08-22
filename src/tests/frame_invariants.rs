@@ -1,4 +1,4 @@
-// サイドバーの枠の不変条件（docs/issues/issue-ui-requirements-approach.md の層1）。
+// サイドバーの枠の不変条件（.docs/issues/issue-ui-requirements-approach.md の層1）。
 // `.feature` はランナーを持たずドキュメントとしてのみ存在するので、そこに書かれた
 // 不変条件へ実行可能な裏付けを与えるのがこの層の役割。
 //

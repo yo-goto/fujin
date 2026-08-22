@@ -174,7 +174,7 @@ pub(crate) fn repeat_status(state: &mut State, pane_id: u32, event: &str, times:
 
 // golden file 用の文字列化。**段階1では本文だけを出す**——`Line` は装飾も持っているが、
 // 属性行（色の乗り位置を示す2段目）を足すのは検索ハイライト・番号ジャンプの回帰を
-// 実際に踏んでからにする（docs/issues/issue-ui-requirements-approach.md の層2）。
+// 実際に踏んでからにする（.docs/issues/issue-ui-requirements-approach.md の層2）。
 //
 // 印字しない行（`Row::Blank`）は空行として出す。**行の位置がそのまま絵になる**ので、
 // 詰めるとフッターを最下部へ固定している埋め草が絵から消えてしまう

@@ -59,7 +59,7 @@ lint:
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo clippy --locked --target $(HOST_TARGET) --all-targets -- -D warnings
 
-# golden file の後始末を検査する（docs/issues/issue-ui-requirements-approach.md 層2）。
+# golden file の後始末を検査する（.docs/issues/issue-ui-requirements-approach.md 層2）。
 #
 # - 未承認: `.snap.new` を放置するとテストは落ち続ける。`cargo insta review` か
 #   `INSTA_UPDATE=always make test` で畳んでからコミットする

@@ -1,4 +1,4 @@
-// サイドバーの見た目の回帰検出（docs/issues/issue-ui-requirements-approach.md の層2）。
+// サイドバーの見た目の回帰検出（.docs/issues/issue-ui-requirements-approach.md の層2）。
 //
 // **正本は生成物。** 人が絵を書き起こすのではなく、`render_ui()` が返した行を
 // そのまま golden file（insta の `.snap`）へ落とし、人は差分を承認する。
