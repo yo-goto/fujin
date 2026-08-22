@@ -1,4 +1,4 @@
-// 検索サブモード（navモード内の `/`、決定202608031908。要件: docs/requirements/req-search-explorer.md）。
+// 検索サブモード（navモード内の `/`、決定202608031908。要件: .docs/requirements/req-search-explorer.md）。
 //
 // 絞り込みのキー操作と、その結果を持つローカルUI状態を担う。
 // 編集状態/操作状態の2状態に分かれる（決定202608131200）。
@@ -203,7 +203,7 @@ impl State {
     // 複数文字が一度に来る入力は `InterceptedKeyPress` ではなく `PastedText` に
     // 分かれる（zellij クライアントの入力ハンドラが、まとまった文字列を
     // `InputEvent::Paste` として解釈するため）。購読していないと、変換で確定した
-    // 文字列が丸ごと消えたように見える（docs/issues/issue-ime-input-support.md）。
+    // 文字列が丸ごと消えたように見える（.docs/issues/issue-ime-input-support.md）。
     //
     // navモードの安全弁（決定202607310311）はここには効かせない — 未定義の**キー**で抜ける
     // 仕組みであって、入力欄の外に落ちたテキストは操作ではないので黙って捨てる

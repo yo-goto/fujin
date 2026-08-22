@@ -1,4 +1,4 @@
-// サイドバーのツリー表示（要件: docs/requirements/req-sidebar-tree.md）: 選択可能行の組み立て・
+// サイドバーのツリー表示（要件: .docs/requirements/req-sidebar-tree.md）: 選択可能行の組み立て・
 // フッター・描画パスの頑健性・縦スクロール。ペイン行そのものの描画は pane_row.rs 側
 
 use crate::agent::AgentState;
@@ -252,7 +252,7 @@ fn render_survives_the_preview_pane() {
     state.render(0, 0);
 }
 
-// --- 縦スクロール（docs/issues/issue-sidebar-vertical-overflow.md） ---
+// --- 縦スクロール（.docs/issues/issue-sidebar-vertical-overflow.md） ---
 //
 // 行番号の勘定は「画面高に収まるぶんだけを切り出す」ところに集まっているので、
 // 純粋関数（reconcile_scroll）と、描画・クリックの逆引きが同じ並びを見ているか
@@ -377,7 +377,7 @@ fn the_frame_stays_pinned_while_the_list_scrolls() {
 #[test]
 fn the_overflow_marker_sits_in_the_tab_heading_column() {
     // マーカーは一覧の1項目ではなく「一覧がそこで打ち切られている」ことを示す行なので、
-    // ペイン行の階段ではなくタブ見出しと同じ x=0 に置く（docs/concept/ui-design.md）。
+    // ペイン行の階段ではなくタブ見出しと同じ x=0 に置く（.docs/concept/ui-design.md）。
     // タブ見出し行の `▾` と記号がぶつかるため、続く `…` で見分けさせている
     for (above, marker) in [(true, '▴'), (false, '▾')] {
         let row = overflow_row(7, above, SIDEBAR);

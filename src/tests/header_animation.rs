@@ -2,7 +2,7 @@ use crate::deploy::TROOP;
 use crate::test_support::*;
 use crate::*;
 
-// --- 配置演出（要件: docs/requirements/req-header-animation.md） ---
+// --- 配置演出（要件: .docs/requirements/req-header-animation.md） ---
 
 // 兵が使える領域の実測値（幅32セル・右マージン2セル・`▲ fujin` は7セル）。
 // 発進位置は本文の右端の1つ先、いちばん奥の着地列は内容幅の右端
@@ -14,7 +14,7 @@ const DEEPEST: usize = CONTENT - 1;
 // 本番では検出（`apply_status` の戻り値）と発火（`begin_deployment`）の間に
 // 可視インスタンス判定（`State::is_visible_instance`）が挟まるが、これはホスト関数
 // `get_focused_pane_info()` を呼ぶのでテストから通せない
-//（docs/dev/build-and-test.md「テストで検証できない範囲」）。ここでは判定を通った
+//（.docs/dev/build-and-test.md「テストで検証できない範囲」）。ここでは判定を通った
 // 後の発火だけを見る
 fn deploy_agents(state: &mut State, troops: usize) {
     state.begin_deployment(troops);
@@ -119,7 +119,7 @@ fn a_session_start_without_a_source_still_counts() {
 #[test]
 fn other_hook_events_are_never_new_agent_detections() {
     // **リロード直後の誤検出を防いでいるのがこの性質。** プラグインをリロードすると
-    // `agents` マップは空になる（docs/issues/issue-redeploy-resets-agent-state.md）が、
+    // `agents` マップは空になる（.docs/issues/issue-redeploy-resets-agent-state.md）が、
     // 稼働中のエージェントから次に届くのは SessionStart 以外のイベントなので、
     // 既存エージェントが新規と誤検出されることはない
     let mut state = sidebar_state();
@@ -279,7 +279,7 @@ fn the_header_returns_to_normal_when_the_deployment_ends() {
 // 「サイドバーが表示されていない間の検出では演出は再生されない」「見逃した検出は
 // 後から遡って演出されない」の2要件は、可視インスタンス判定（`is_visible_instance`）
 // が担っている。ホスト関数 `get_focused_pane_info()` を呼ぶためユニットテストからは
-// 通せない（docs/dev/build-and-test.md「テストで検証できない範囲」）ので、実機での
+// 通せない（.docs/dev/build-and-test.md「テストで検証できない範囲」）ので、実機での
 // 手動確認に頼る。
 
 #[test]

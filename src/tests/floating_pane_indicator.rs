@@ -5,7 +5,7 @@ use crate::render::NO_AGENT_ICON;
 use crate::test_support::*;
 use crate::*;
 
-// --- フローティングペインの区別表示（要件: docs/requirements/req-floating-pane-indicator.md） ---
+// --- フローティングペインの区別表示（要件: .docs/requirements/req-floating-pane-indicator.md） ---
 //
 // フローティングペインはフローティング層ごと隠れうるので、一覧の上で見分けられる
 // ようにペイン名を丸括弧で囲む。色・dim は使わない（決定202608080027）

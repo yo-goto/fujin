@@ -1,4 +1,4 @@
-// コマンド状態（要件: docs/requirements/req-command-status.md）: PaneManifest からの導出・
+// コマンド状態（要件: .docs/requirements/req-command-status.md）: PaneManifest からの導出・
 // インスタンス間同期・フォーカス中に終了したときの既読の猶予
 
 use crate::agent::AgentState;
@@ -8,7 +8,7 @@ use crate::render::HeadCells;
 use crate::test_support::*;
 use crate::*;
 
-// --- コマンド状態（決定202608072218。要件: docs/requirements/req-command-status.md） ---
+// --- コマンド状態（決定202608072218。要件: .docs/requirements/req-command-status.md） ---
 //
 // コマンドペインの走行・終了を PaneManifest から導出する。エージェント状態とは
 // 別概念だが、記号・既読モデル・待ち件数・トリアージ一覧は共用する
@@ -279,7 +279,7 @@ fn the_command_state_pipe_takes_a_dump() {
     );
 }
 
-// --- 既読の猶予（docs/issues/issue-command-status-error-icon-swallowed.md） ---
+// --- 既読の猶予（.docs/issues/issue-command-status-error-icon-swallowed.md） ---
 //
 // `zellij run` は新しいペインへフォーカスを移すので、一瞬で終わるコマンドは
 // 必ず「フォーカス中に終了」する。素直に既読モデルを当てると、状態が付いた

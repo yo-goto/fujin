@@ -9,7 +9,7 @@ use super::*;
 // 入力欄（検索・番号ジャンプ）の状態ごとの見た目。
 //
 // **疑似カーソルは持たない**（決定202608131200、2026-08-13 に地の文の疑似カーソルを廃止。
-// 経緯: docs/issues/issue-search-input-cursor-shape.md）。位置表示は編集状態・操作状態
+// 経緯: .docs/issues/issue-search-input-cursor-shape.md）。位置表示は編集状態・操作状態
 // どちらもテキストカーソル（`sync_input_cursor`）に一本化した——プラグイン側から形状を
 // 指定できず端末既定はほぼブロックなので、地の文の字を描き分けてもテキストカーソルの
 // 下に隠れる/隠れないでコロコロ変わり、当てにならない見分け手段だった。
@@ -198,7 +198,7 @@ impl State {
 //
 // `hints` は右端に出す操作ヒントの項目で、収まらないぶんは末尾から落とす。
 // 入力位置はテキストカーソル（`sync_input_cursor`）が示す。地の文の疑似カーソルは
-// 持たない（決定202608131200。経緯: docs/issues/issue-search-input-cursor-shape.md）
+// 持たない（決定202608131200。経緯: .docs/issues/issue-search-input-cursor-shape.md）
 //
 // 入力本体は本文なので既定色のまま、先頭の `tag`（`/` や `n`）はモード名と
 // 同じ扱いでレベル3。状態色で統一するのはヒント側（要件: sidebar-footer）
@@ -229,7 +229,7 @@ fn input_footer(
 
 // 入力欄の右に出せるだけのヒント。**末尾の項目ごと落とす** — `キー:動作` の形が
 // 壊れたヒントは読めないので `…` で切らない（direct-keys のヒントと同じ削り方。
-// docs/issues/issue-direct-keys-hint-overflow.md）。入力とヒントの間は最低1セル空ける
+// .docs/issues/issue-direct-keys-hint-overflow.md）。入力とヒントの間は最低1セル空ける
 fn fit_hint(hints: &[&str], budget: usize) -> String {
     for count in (1..=hints.len()).rev() {
         let line = hints[..count].join("  ");

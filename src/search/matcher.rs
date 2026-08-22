@@ -1,7 +1,7 @@
 // ファジーマッチ（検索サブモード用）。
 //
 // zellij のホスト関数に一切依存しない純粋ロジック。外部クレートも使わない
-// （候補の比較と根拠は docs/requirements/req-search-explorer-spec.md 参照）。
+// （候補の比較と根拠は .docs/requirements/req-search-explorer-spec.md 参照）。
 //
 // 一致判定は fzf v1 と同じ2パスのサブシーケンス:
 // forward で一致の終端を見つけ、そこから backward で始端を締める。

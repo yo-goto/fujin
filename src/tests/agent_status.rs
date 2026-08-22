@@ -1,4 +1,4 @@
-// エージェント状態（要件: docs/requirements/req-agent-status.md）: フック通知からの状態遷移・
+// エージェント状態（要件: .docs/requirements/req-agent-status.md）: フック通知からの状態遷移・
 // 既読モデル・滞在猶予・消えたペインの掃除
 
 use crate::agent::AgentState;
@@ -200,7 +200,7 @@ fn focusing_a_pane_marks_it_read() {
     assert_eq!(state.agents[&2].state, AgentState::Done);
 }
 
-// --- 滞在猶予（docs/issues/issue-transit-focus-clears-read-state.md） ---
+// --- 滞在猶予（.docs/issues/issue-transit-focus-clears-read-state.md） ---
 //
 // zellijネイティブのペイン移動（`Alt+矢印` 等）はキー1打ごとに実フォーカスを
 // 確定させるので、目的地までに経由したペインにも本物のフォーカスが一瞬当たる。

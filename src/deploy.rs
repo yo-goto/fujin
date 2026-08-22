@@ -1,5 +1,5 @@
 // 配置演出 — 新規エージェント検出をトリガーに、ヘッダーで一度だけ再生する
-// 一過性のアニメーション（要件: docs/requirements/req-header-animation.md）。
+// 一過性のアニメーション（要件: .docs/requirements/req-header-animation.md）。
 //
 // 兵（検出したエージェント1体につき1体）がブランド行の右側から発進して右へ流れ、
 // 着地列（先に発進した兵ほど奥、後続ほど手前）に整列して静止する。少し見せたのち
@@ -115,7 +115,7 @@ fn flight_frames(index: usize, launch: usize, width: usize) -> Option<usize> {
 // **エージェントの着任**を意味するかを、`source` から判定する。
 //
 // 判定材料をフック通知に一本化してあるのが要点（2026-08-09 に差し替え。
-// docs/issues/issue-deploy-animation-trigger-scope.md）。増えたターミナルペインで判定して
+// .docs/issues/issue-deploy-animation-trigger-scope.md）。増えたターミナルペインで判定して
 // いた旧実装は、そのペインで何が動くかを一切見ていなかったため、`vim` やビルド
 // コマンドでも演出が出るうえ、前から開いてあるペインで後からエージェントを起動しても
 // 出なかった。`SessionStart` はエージェント側のイベントでしか飛ばないので、
@@ -132,7 +132,7 @@ impl State {
     // 配置演出を始める。呼ぶのは**可視インスタンス判定を通した後**だけ
     //（`main.rs` の状態通知ハンドラ）— ここで判定しないのは、可視性の問い合わせが
     // ホスト関数でテストから呼べず、発火のロジックまで巻き添えにテスト不能に
-    // なるため（docs/dev/build-and-test.md）
+    // なるため（.docs/dev/build-and-test.md）
     pub(crate) fn begin_deployment(&mut self, troops: usize) {
         // 無効化されていても新規エージェント検出そのものは動かす。ここで再生だけを
         // 落とす（要件: show_deploy_animation）

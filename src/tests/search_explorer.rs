@@ -2,7 +2,7 @@ use crate::search::SearchPhase;
 use crate::test_support::*;
 use crate::*;
 
-// --- 検索サブモード（要件: docs/requirements/req-search-explorer.md） ---
+// --- 検索サブモード（要件: .docs/requirements/req-search-explorer.md） ---
 //
 // match_one / match_pane の単体テストは src/search.rs 側にある。
 // ここでは State を通したキー処理と絞り込みの追従を見る。

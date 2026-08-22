@@ -1,10 +1,10 @@
 // fujin — zellij用サイドバープラグイン
 //
 // タブ > ペインの縦並び表示、エージェント状態の可視化、グローバルキーでのジャンプ。
-// 設計決定は docs/concept/design-decisions.md、モジュール構成の詳細は
-// docs/dev/architecture.md を参照。
+// 設計決定は .docs/concept/design-decisions.md、モジュール構成の詳細は
+// .docs/dev/module-map.md を参照。
 //
-// アーキテクチャ上の前提（実測確認済み。docs/dev/api-reference.md）:
+// アーキテクチャ上の前提（実測確認済み。.docs/dev/api-reference.md）:
 // - タブ数ぶんのインスタンスが同時稼働する（zellijの構造上回避不能）
 // - pipe は全インスタンスに配送される
 // - **PaneUpdate / TabUpdate は可視インスタンスにしか届かない**ため、
@@ -82,7 +82,7 @@ const NAV_DOWN_PIPE: &str = "fujin_down";
 const NAV_GO_PIPE: &str = "fujin_go";
 // navモードへの入場（決定202607310311）
 const NAV_MODE_PIPE: &str = "fujin_mode";
-// cwd表示のトグル（docs/issues/issue-toggle-cwd-key.md）。全インスタンスが独立に
+// cwd表示のトグル（.docs/issues/issue-toggle-cwd-key.md）。全インスタンスが独立に
 // 反転するので権威判定（決定202608012142）は要らない。**反転した値を兄弟へbroadcastして
 // 補強してはいけない** — 未処理の兄弟へ先に届くと、そこからさらに反転して逆を向く
 const TOGGLE_CWD_PIPE: &str = "fujin_toggle_cwd";
@@ -100,7 +100,7 @@ const SELECTION_PIPE: &str = "fujin_selection";
 const MARK_PIPE: &str = "fujin_mark";
 // プレビューのスナップショット送付（決定202608082045）。1行目が対象ペイン名、2行目以降が内容
 const PREVIEW_PIPE: &str = "fujin_preview";
-// サイドバー幅のタブ間追従（docs/issues/issue-sidebar-width-persist-across-tabs.md）。
+// サイドバー幅のタブ間追従（.docs/issues/issue-sidebar-width-persist-across-tabs.md）。
 // zellij の `new_tab_template` はタブ生成時に複製されるだけの静的な雛形なので、
 // あるタブでリサイズしても他タブには伝播しない。観測した幅を配って各自に
 // 寄せさせる
@@ -110,7 +110,7 @@ const WIDTH_PIPE: &str = "fujin_width";
 // pipe 経由の逃げ道を用意しておく
 const DISMISS_PIPE: &str = "fujin_dismiss";
 
-// 滞在猶予（決定202608080109。docs/issues/issue-transit-focus-clears-read-state.md）。フォーカス
+// 滞在猶予（決定202608080109。.docs/issues/issue-transit-focus-clears-read-state.md）。フォーカス
 // されてからこの秒数だけ留まって初めて既読にする。**通過と到着はフォーカスの
 // 有無だけでは原理的に区別できない**ので、滞在時間で分ける。
 // 実機での調整が残っている暫定値
@@ -124,7 +124,7 @@ struct Selectable {
     title: String,
     // フォーカス時の should_float_if_hidden に使う（決定202608012142）。
     // ペイン名を丸括弧で囲むかの判定も兼ねる
-    //（要件: docs/requirements/req-floating-pane-indicator.md）
+    //（要件: .docs/requirements/req-floating-pane-indicator.md）
     is_floating: bool,
 }
 
@@ -176,7 +176,7 @@ struct State {
     selection_at_nav_exit: Option<u32>,
     // 既に把握している兄弟インスタンスのプラグインID（同期の押し付け先判定）
     known_siblings: BTreeSet<u32>,
-    // 兄弟へ状態ダンプを要求済みか（docs/issues/issue-tab-switch-agent-status-desync.md）。
+    // 兄弟へ状態ダンプを要求済みか（.docs/issues/issue-tab-switch-agent-status-desync.md）。
     // 押し付けだけでは新しいタブが取りこぼすので、兄弟を初めて見つけた1回だけ
     // こちらから取りに行く
     state_requested: bool,
@@ -214,7 +214,7 @@ struct State {
     // 直近に描画した画面幅。配置演出の着地列は幅から決まるが、タイマーは
     // 描画の外で進むのでここに控えておく
     viewport_cols: usize,
-    // タブ間で揃えたいサイドバー幅（docs/issues/issue-sidebar-width-persist-across-tabs.md）。
+    // タブ間で揃えたいサイドバー幅（.docs/issues/issue-sidebar-width-persist-across-tabs.md）。
     // 誰かがリサイズしたらその桁数が権威になり、兄弟インスタンスへ配られる
     width_target: Option<usize>,
     // 目標へ寄せるために撃ったリサイズの回数。相対リサイズは端末幅の一定割合
@@ -255,7 +255,7 @@ struct State {
 }
 
 // `register_plugin!(State)` は使わない。エクスポート関数は entry.rs が持つ
-//（IME経由の非ASCII入力を拾うため。決定202608111836 / docs/issues/issue-ime-input-support.md）
+//（IME経由の非ASCII入力を拾うため。決定202608111836 / .docs/issues/issue-ime-input-support.md）
 fn main() {
     entry::install_panic_hook();
 }
@@ -299,11 +299,11 @@ impl ZellijPlugin for State {
             EventType::InterceptedKeyPress,
             // 一括で届くテキスト入力（貼り付けと**IMEの変換確定**）。横取りとは
             // 別の経路で来るので、これが無いと確定した文字列が消える
-            //（docs/issues/issue-ime-input-support.md）
+            //（.docs/issues/issue-ime-input-support.md）
             EventType::PastedText,
-            // 行クリックでのフォーカス移動（要件: docs/requirements/req-click-to-focus.md）
+            // 行クリックでのフォーカス移動（要件: .docs/requirements/req-click-to-focus.md）
             EventType::Mouse,
-            // 配置演出のフレーム送り（要件: docs/requirements/req-header-animation.md）。
+            // 配置演出のフレーム送り（要件: .docs/requirements/req-header-animation.md）。
             // 発火するのは再生中に set_timeout() を繋いでいる間だけ
             EventType::Timer,
             // プラグイン終了・リロード時に横取りを解除する保険

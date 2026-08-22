@@ -138,7 +138,7 @@ impl State {
                 // 既に同じパスが出ており、2行並べても情報が増えない（決定202608070102）
                 let cwd_hit = hit.filter(|h| h.field == Field::Cwd);
                 // エージェントが終了したペインでは出さない
-                //（docs/issues/issue-sidebar-cwd-persists-after-exit.md）。cwd はフック由来
+                //（.docs/issues/issue-sidebar-cwd-persists-after-exit.md）。cwd はフック由来
                 // なので `pane_cwds` はエージェントが去った後も残るが、show_cwd が
                 // 見せたいのは動いているエージェントの居場所。終了後も出し続けると、
                 // シェルがタイトルを cwd に戻した瞬間から同じパスが2行並ぶ。
@@ -270,7 +270,7 @@ impl State {
         self.scroll = reconcile_scroll(list_len, area, self.scroll, anchor);
     }
 
-    // 画面のこの行に載っているペイン（要件: docs/requirements/req-click-to-focus.md）。
+    // 画面のこの行に載っているペイン（要件: .docs/requirements/req-click-to-focus.md）。
     // ヘッダ・タブ見出し行・あふれマーカー行・一覧の外は None。
     // cwd行はペイン行と同じペインを指すので、そこをクリックしても同じように当たる
     pub(crate) fn pane_at_row(&self, row: usize) -> Option<u32> {
@@ -331,7 +331,7 @@ fn rows_shown(list_len: usize, area: usize, scroll: usize) -> usize {
 }
 
 // 選択行が画面に入るようスクロール位置を寄せ直す
-//（docs/issues/issue-sidebar-vertical-overflow.md）。行番号はいずれも
+//（.docs/issues/issue-sidebar-vertical-overflow.md）。行番号はいずれも
 // 一覧（固定行を除いた部分）の中で数える。
 //
 // `anchor` は選択行の範囲（ペイン行 + cwd行のように2行にまたがる）。

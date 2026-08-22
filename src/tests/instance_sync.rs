@@ -70,7 +70,7 @@ fn state_dump_drops_panes_that_no_longer_exist() {
 fn state_dump_is_not_pruned_by_a_frozen_manifest() {
     // 非可視インスタンスの `PaneManifest` は凍っている。そこで間引くと、自分が
     // 非可視になったあとに生まれたペインの状態を受け取った端から捨ててしまう
-    //（docs/issues/issue-tab-switch-agent-status-desync.md）
+    //（.docs/issues/issue-tab-switch-agent-status-desync.md）
     let mut state = state_with_panes(1);
     assert!(!state.visible);
     state.apply_state_dump("1\tdone\t0\t0\tclaude\t\n99\tdone\t0\t0\tclaude\t\n");
@@ -131,7 +131,7 @@ fn siblings_are_the_same_plugin_in_other_tabs() {
 fn a_newcomer_asks_its_siblings_for_the_state_once() {
     // 新しいタブができた瞬間は新入りが可視・既存が全員非可視なので、押し付けの
     // 起点が既存側で発火しない。取りに行くのは新入り自身
-    //（docs/issues/issue-tab-switch-agent-status-desync.md）
+    //（.docs/issues/issue-tab-switch-agent-status-desync.md）
     let url = "file:/x/fujin.wasm";
     let mut state = State {
         own_plugin_id: Some(5),

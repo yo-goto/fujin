@@ -48,7 +48,7 @@ impl State {
     //
     // claude は終了時に空文字のタイトルを OSC で送り、zellij 側にそれを戻す経路が
     // 無いため、エージェントを落とした瞬間にペイン名が空のまま残る
-    // （docs/issues/issue-pane-title-blank-on-exit.md）。前回の名前を保持すると死んだ
+    // （.docs/issues/issue-pane-title-blank-on-exit.md）。前回の名前を保持すると死んだ
     // エージェントが動いているように見えるので、いまそこに何があるかが分かる cwd へ落とす
     pub(crate) fn display_title<'a>(&'a self, entry: &'a Selectable) -> &'a str {
         self.title_fallback(entry).unwrap_or(&entry.title)
@@ -87,7 +87,7 @@ impl State {
         // アイコンはエージェント状態・コマンド状態のどちらからでも来る（決定202608072218）
         let status = self.pane_status(entry.pane_id);
         // 状態を持たないペインでも列は埋める。空白のままだと、エージェントが乗る行と
-        // 並べたときに左端が欠けて見える（docs/issues/issue-sidebar-cwd-row-legibility.md）
+        // 並べたときに左端が欠けて見える（.docs/issues/issue-sidebar-cwd-row-legibility.md）
         let icon = status.map(|s| s.icon()).unwrap_or(NO_AGENT_ICON);
         let head = row_head(is_highlighted, number, mark, icon);
         let head_width = UnicodeWidthStr::width(head.text.as_str());
@@ -190,7 +190,7 @@ impl State {
 
 // cwd行1行ぶんの Text（決定202608060053）。ペイン行の続きとして読めるよう字下げして dim で
 // 出す。zellij側の実装制約で dim は bold を打ち消さないため、見た目上は bold+dim
-// になる（決定202608080027の対象外。docs/issues/issue-sidebar-cwd-bold.md）。
+// になる（決定202608080027の対象外。.docs/issues/issue-sidebar-cwd-bold.md）。
 // パスは末尾のディレクトリ名のほうが識別に効くので、先頭省略で畳む
 pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: usize) -> Line {
     // 選択中は左端のバーをこの行まで伸ばし、ペイン行と1つの帯に見せる
@@ -200,7 +200,7 @@ pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: 
     let (path, dropped) = truncate_start(cwd, inner.saturating_sub(CWD_INDENT));
 
     // 字下げだけで幅を使い切るほど狭いときの保険。はみ出した行は端末側で
-    // 折り返り、選択背景が次の行を汚す（docs/issues/issue-sidebar-bottom-highlight-glitch.md）
+    // 折り返り、選択背景が次の行を汚す（.docs/issues/issue-sidebar-bottom-highlight-glitch.md）
     let mut label = truncate(&format!("{}{}", indent, path), inner);
     if is_highlighted {
         label = pad_to_width(label, cols);
