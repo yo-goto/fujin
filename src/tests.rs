@@ -17,6 +17,7 @@ mod configuration;
 mod floating_pane_indicator;
 mod focus_sync;
 mod frame_invariants;
+mod golden;
 mod header_animation;
 mod ime_input;
 mod instance_sync;

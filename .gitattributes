@@ -1,0 +1,5 @@
+# golden file（insta の .snap）は、選択行が幅いっぱいまで空白で埋まる絵をそのまま
+# 期待値として持つ。末尾空白が削られると全ての golden file が壊れるので、git 側の
+# 空白正規化・改行変換から外す（docs/issues/issue-ui-requirements-approach.md 層2の
+# 「実務上の注意」）
+src/tests/snapshots/** -text -whitespace

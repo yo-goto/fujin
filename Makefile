@@ -16,7 +16,7 @@ HOST_TARGET := $(shell rustc -vV | sed -n 's/^host: //p')
 # 解決されるので、その配下を既定にしておく（zellij 側にプラグインの置き場所の規約は無い）
 PLUGIN_DIR ?= $(HOME)/.config/zellij/plugins
 
-.PHONY: all build release install setup try test fmt fmt-check lint check clean changelog readme
+.PHONY: all build release install setup try test fmt fmt-check lint check check-snapshots clean changelog readme
 
 all: check
 
@@ -59,7 +59,51 @@ lint:
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo clippy --locked --target $(HOST_TARGET) --all-targets -- -D warnings
 
-check: fmt-check lint test
+# golden file の後始末を検査する（docs/issues/issue-ui-requirements-approach.md 層2）。
+#
+# - 未承認: `.snap.new` を放置するとテストは落ち続ける。`cargo insta review` か
+#   `INSTA_UPDATE=always make test` で畳んでからコミットする
+# - 孤児: テストを消したのに `.snap` が残ると、絵だけが残って実装と対応しなくなる。
+#   ファイル名（`fujin__<モジュール>__<名前>.snap`）からモジュールのファイルを導出し、
+#   **そのファイルの中だけ**で `fn <名前>` か文字列 `"<名前>"`（名前付き
+#   `assert_snapshot!` 用）を照合する。src/ 全体を見ると、別ファイルの同名テストが
+#   孤児を隠す。同一テスト内の複数アサーションで付く `-2` 等の連番も落として照合する
+#   （`cargo insta test --unreferenced` は cargo-insta CLI が要るので使わない）
+check-snapshots:
+	@snapdir=src/tests/snapshots; \
+	if [ -d $$snapdir ]; then \
+	  pending=$$(find $$snapdir -name '*.snap.new'); \
+	  if [ -n "$$pending" ]; then \
+	    echo "未承認の golden file がある:"; echo "$$pending"; \
+	    echo "cargo insta review か INSTA_UPDATE=always make test で畳むこと"; \
+	    exit 1; \
+	  fi; \
+	  orphan=""; \
+	  for snap in $$(find $$snapdir -name '*.snap'); do \
+	    base=$$(basename $$snap .snap); \
+	    name=$${base##*__}; \
+	    mod=$${base#fujin__}; mod=$$(echo "$${mod%__*}" | sed 's/__/\//g'); \
+	    names=$$name; \
+	    trimmed=$$(echo "$$name" | sed 's/-[0-9][0-9]*$$//'); \
+	    [ "$$trimmed" != "$$name" ] && names="$$names $$trimmed"; \
+	    files=""; \
+	    [ -f "src/$$mod.rs" ] && files="src/$$mod.rs"; \
+	    [ -f "src/$$mod/mod.rs" ] && files="$$files src/$$mod/mod.rs"; \
+	    [ -n "$$files" ] || files=$$(find src -name '*.rs'); \
+	    found=""; \
+	    for n in $$names; do \
+	      for f in $$files; do \
+	        if grep -Fq "fn $$n(" "$$f" || grep -Fq "\"$$n\"" "$$f"; then found=1; fi; \
+	      done; \
+	    done; \
+	    [ -n "$$found" ] || orphan="$$orphan $$snap"; \
+	  done; \
+	  if [ -n "$$orphan" ]; then \
+	    echo "対応するテストが無い golden file がある:$$orphan"; exit 1; \
+	  fi; \
+	fi
+
+check: fmt-check lint test check-snapshots
 
 clean:
 	cargo clean

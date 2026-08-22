@@ -1,0 +1,5 @@
+# golden file（insta の .snap）だけは末尾空白を落とさない。選択行が幅いっぱいまで
+# 空白で埋まる絵が、そのまま期待値になっているため
+# （docs/issues/issue-ui-requirements-approach.md 層2の「実務上の注意」）
+[src/tests/snapshots/**]
+trim_trailing_whitespace = false

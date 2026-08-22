@@ -1,2 +1,15 @@
 [build]
 target = "wasm32-wasip1"
+
+# insta（golden file）はホスト向けテストでのみ動く。既定のままだと子プロセスを
+# 2箇所で起動する——スナップショットのパス解決に `cargo metadata`、差分表示に
+# `rustfmt`。**fujin のテストバイナリではどちらも Bad file descriptor で落ちる。**
+# zellij ホストとの stdin 通信（entry.rs の object_from_stdin）が fd 0 を閉じるため、
+# 以後このプロセスからは子プロセスへパイプを繋げない（実測 2026-08-21）。
+#
+# ワークスペース root を直接教えて `cargo metadata` を不要にし、出力を minimal へ
+# 落として `rustfmt` 経路も通らないようにする。差分を絵で見たいときは別プロセスの
+# `cargo insta review` を使う（そちらは fd の影響を受けない）
+[env]
+INSTA_WORKSPACE_ROOT = { value = ".", relative = true }
+INSTA_OUTPUT = "minimal"

@@ -38,11 +38,13 @@ fn tree_view() -> State {
     state
 }
 
-// 絞り込みで行が減る状態を作る（枠が中身の行数に引きずられないことを見るため）
+// 絞り込みで行が減る状態を作る（枠が中身の行数に引きずられないことを見るため）。
+// クエリは charlie だけに当たる "ch" — "a" のような全ペイン（タブ名含む）に
+// 当たる文字だと絞り込みが起きず、この fixture の意図を満たさない
 fn search_submode() -> State {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
-    type_query(&mut state, "a");
+    type_query(&mut state, "ch");
     state
 }
 
@@ -63,11 +65,12 @@ fn help_overlay() -> State {
 // 総当たりする幅。fold_to_width・truncate・append_right_column・counter_column は
 // どれも幅依存で、バグは境界幅に出る（既定幅は32）。
 //
-// **幅 1・2 は入れていない。** 行の先頭に固定で載る「選択バー2セル + 記号2セル」が
-// そもそも収まらず、タブ見出し行・番号列付きのペイン行・トリアージ行が 4 セルの
-// ままあふれる（2026-08-21 に実測）。実機のサイドバーがそこまで縮むことはなく、
-// 極端な引数で算術が破綻しないことは既存の `render_survives_*` が見ているので、
-// この層では実用幅だけを対象にする
+// **幅 5 以下は入れていない。** 行の先頭に固定で載るセル（選択バー2 + 記号2、
+// 番号ジャンプサブモード中はさらに番号列2）がそもそも収まらず、タブ見出し行・
+// ペイン行・トリアージ行がそのままあふれる（2026-08-21 に実測。幅 3〜5 で66件、
+// **幅 6〜19 はゼロ**）。実機のサイドバーがそこまで縮むことはなく、極端な引数で
+// 算術が破綻しないことは既存の `render_survives_*` が見ているので、この層では
+// 実用幅だけを対象にする
 const WIDTHS: [usize; 5] = [20, 28, 32, 48, 120];
 // 枠ぶん（FRAME_TOP + FRAME_BOTTOM = 6行）の直後から、一覧が余る高さまで
 const HEIGHTS: [usize; 5] = [7, 8, 12, 24, 60];
@@ -130,7 +133,7 @@ fn no_row_overflows_the_sidebar_width() {
                     let width = unicode_width::UnicodeWidthStr::width(body);
                     assert!(
                         width <= cols,
-                        "{mode}: 幅 {cols} で {y} 行目が {width} セルあふれた: {body:?}"
+                        "{mode}: 幅 {cols} に対し {y} 行目が {width} セルある: {body:?}"
                     );
                 }
             }
