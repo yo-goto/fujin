@@ -156,3 +156,66 @@ fn the_frame_is_absent_until_permissions_are_granted() {
         );
     }
 }
+
+// --- 行位置の不変（決定202608210035の対象外だが、要件としては別に存在する） ---
+
+// 行の同一性を、位置の比較ができる形へ落とす。**中身（色・番号列・マーク列）ではなく
+// 「どの行が何行目にいるか」だけ**を見たいので、行種と指し先のIDまでに畳む。
+// 番号ジャンプの番号列・終了操作のマーク列は行の中身を変えるが位置は変えないので、
+// ここで畳んでしまうのが正しい
+fn row_identity(row: &Row) -> String {
+    match row {
+        Row::Divider => "divider".to_string(),
+        Row::Header => "header".to_string(),
+        Row::Footer => "footer".to_string(),
+        Row::Blank => "blank".to_string(),
+        Row::Help(_) => "help".to_string(),
+        Row::Notice(text) => format!("notice:{text}"),
+        Row::Overflow { above, .. } => format!("overflow:{above}"),
+        Row::Tab(tab) => format!("tab:{}", tab.position),
+        Row::Pane { entry, .. } => format!("pane:{}", entry.pane_id),
+        Row::Triage { entry, .. } => format!("triage:{}", entry.pane_id),
+        Row::Cwd { entry, .. } => format!("cwd:{}", entry.pane_id),
+    }
+}
+
+fn row_identities(state: &State, rows: usize) -> Vec<String> {
+    state.screen_rows(rows).iter().map(row_identity).collect()
+}
+
+// ツリー領域の中身が入れ替わらないモードだけ。検索は一致しないタブを見出しごと落とし、
+// トリアージはフラット一覧へ差し替え、ヘルプはツリーを覆うので、**行が動くことが
+// そのモードの目的**にあたる（決定202608210035）。要件側の Examples もこの3つ
+fn modes_that_keep_row_positions() -> Vec<(&'static str, State)> {
+    vec![
+        ("navモード", searchable_state()),
+        ("番号ジャンプサブモード", {
+            let mut state = searchable_state();
+            state.handle_nav_key(key(BareKey::Char('n')));
+            state
+        }),
+        ("終了操作サブモード", {
+            let mut state = searchable_state();
+            state.handle_nav_key(key(BareKey::Char('d')));
+            state
+        }),
+    ]
+}
+
+// 要件: sidebar-header.feature「モードを出入りしてもタブ見出し行・ペイン行の位置は
+// 上下にずれない」。**枠の不変（上の3テスト）とは別の要件**で、こちらはツリー領域の
+// 中身の話。golden file では表現できない——2つの状態のあいだの関係性なので、
+// 1状態1枚の絵をいくら並べても「ずれていない」ことは機械が言えない
+#[test]
+fn entering_a_mode_does_not_shift_tree_rows() {
+    let baseline = tree_view();
+    for (mode, state) in modes_that_keep_row_positions() {
+        for rows in HEIGHTS {
+            assert_eq!(
+                row_identities(&state, rows),
+                row_identities(&baseline, rows),
+                "{mode}: 画面高 {rows} 行で、ツリーの行が上下にずれた"
+            );
+        }
+    }
+}
