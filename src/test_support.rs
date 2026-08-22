@@ -8,7 +8,7 @@
 // - 副作用だけのホストコマンド（focus_pane_with_id, pipe_message_to_plugin,
 //   intercept_key_presses 等）は host.rs の間接層がテストビルドで記録に差し替える
 //   ため、`host::take_host_calls()` で発行と引数を検証できる
-//  （docs/issues/issue-host-command-recorder.md）
+//  （.docs/issues/issue-host-command-recorder.md）
 // - **戻り値を stdin から読み返す問い合わせ系は呼べない**（get_plugin_ids,
 //   get_focused_pane_info 等）。テスト中に呼ぶと stdin の読み取りに失敗して panic する。
 //   したがって refresh_focus() とそれを経由する pipe ハンドラ（NAV_*）は
@@ -22,7 +22,7 @@
 //   （または searchable_state 等のヘルパ）を使う。直接代入は focus_parked を
 //   持たない最小状態を作る意図で、入場時の挙動に関わるテストを直接代入で
 //   書くと nav_entry_selection まわりの回帰をすり抜ける
-//  （docs/issues/issue-test-support-conventions.md）
+//  （.docs/issues/issue-test-support-conventions.md）
 
 use crate::agent::{AgentState, StatusPayload};
 use crate::render::{CounterColumn, HeadCells, Row};
@@ -58,7 +58,7 @@ pub(crate) fn plugin_pane(id: u32, url: &str) -> PaneInfo {
 }
 
 // フォーカスしたまま滞在猶予（READ_DELAY）が満ちるまで居座る
-//（docs/issues/issue-transit-focus-clears-read-state.md）。
+//（.docs/issues/issue-transit-focus-clears-read-state.md）。
 //
 // 実機では 0.15 秒刻みで Timer が届くが、期限は経過時間で見るので
 // 1回にまとめてよい。**目的地としてフォーカスした**ことの表明として、
@@ -181,7 +181,7 @@ pub(crate) fn repeat_status(state: &mut State, pane_id: u32, event: &str, times:
 // **プレフィックスは zellij 本体と同じ順（x → z）で剥がす。** 本体は
 // `parse_selected` → `parse_opaque` の順に先頭1文字ずつ見るので、剥がし残しは
 // そのままレベル0の先頭の数値にくっついて位置指定を壊す。ここで同じ順を踏むことで、
-// 実機と同じ見え方を検査できる（docs/issues/issue-idle-icon-color-on-selection.md）
+// 実機と同じ見え方を検査できる（.docs/issues/issue-idle-icon-color-on-selection.md）
 pub(crate) fn ink_levels(text: &Text) -> Vec<Vec<usize>> {
     let mut serialized = text.serialize();
     for marker in ['x', 'z'] {
@@ -448,7 +448,7 @@ pub(crate) fn pipe_message(name: &str, payload: &str) -> PipeMessage {
     }
 }
 
-// --- 配置演出（要件: docs/requirements/req-header-animation.md） ---
+// --- 配置演出（要件: .docs/requirements/req-header-animation.md） ---
 
 // ペイン一覧を差し替えて1回ぶん観測させる。`Event::PaneUpdate` の扱いと同じ順序。
 // **配置演出のトリガーはもう一覧を見ない**（フック通知だけで判定する）ので、ここでは

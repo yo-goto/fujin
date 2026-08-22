@@ -1,5 +1,5 @@
 // ホストコマンドの間接層（要件というより試験基盤。経緯:
-// docs/issues/issue-host-command-recorder.md）。
+// .docs/issues/issue-host-command-recorder.md）。
 //
 // 本番ビルドは zellij-tile の shim へ素通しし、テストビルドでは呼び出しを
 // 引数ごと記録して検証できるようにする。従来はリンクスタブ（test_support.rs）が

@@ -1,4 +1,4 @@
-// 臨時召喚（要件: docs/requirements/req-summon.md）
+// 臨時召喚（要件: .docs/requirements/req-summon.md）
 
 use crate::test_support::*;
 use crate::*;

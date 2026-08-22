@@ -1,5 +1,5 @@
-// サイドバー幅のタブ間追従（用語: docs/terms/width-sync.md。
-// 経緯: docs/issues/issue-sidebar-width-persist-across-tabs.md）。
+// サイドバー幅のタブ間追従（用語: .docs/terms/width-sync.md。
+// 経緯: .docs/issues/issue-sidebar-width-persist-across-tabs.md）。
 //
 // zellij の `new_tab_template` はタブ生成時に複製されるだけの静的な雛形で、
 // 実行時のリサイズは書き戻されない。そこで「誰かがリサイズしたら、その桁数を
@@ -8,7 +8,7 @@
 // 絶対値で幅を指定するAPIは無い（`Resize` は Increase/Decrease だけ）ので、
 // 寄せるのは「自分の幅を見て1段階撃つ」を描画のたびに繰り返す帰還制御になる。
 // 非可視インスタンスにも pipe の受け口が true を返せば描画は回る（実測5ms。
-// `docs/dev/api-reference.md`）ので、背面のタブもその場で寄る。
+// `.docs/dev/api-reference.md`）ので、背面のタブもその場で寄る。
 //
 // 状態ダンプの配布（`sync`）とは運ぶものも寄せ方も別の関心なので、モジュールを分ける。
 // セル幅の計算（`width`）とも別 — あちらは表示幅の純粋関数で、ここは幅を**寄せる**操作。
@@ -20,7 +20,7 @@ use crate::sync::send_to_plugin;
 use crate::{State, WIDTH_PIPE};
 
 // 目標の幅へ寄せるために撃つ相対リサイズの上限回数
-//（docs/issues/issue-sidebar-width-persist-across-tabs.md）。zellij のリサイズは
+//（.docs/issues/issue-sidebar-width-persist-across-tabs.md）。zellij のリサイズは
 // 端末幅の一定割合ずつ動く量子化された操作で、目標にぴったり乗る保証が無い。
 // 乗らないまま撃ち続けると幅が振動するので回数で打ち切る
 pub(crate) const WIDTH_MAX_ATTEMPTS: usize = 6;
@@ -93,7 +93,7 @@ impl State {
     // 目標に近いほうで止める。刻みが目標に乗らないのは、ドラッグリサイズが
     // 1セル単位で動く（実測: mouse_handler が delta/viewport で percent を出す）
     // 一方、プラグインの resize は 5% 固定刻みしか撃てないため
-    //（docs/issues/issue-sidebar-width-persist-across-tabs.md）
+    //（.docs/issues/issue-sidebar-width-persist-across-tabs.md）
     fn settle_width_after_step(&mut self, previous: usize, cols: usize) {
         let Some(target) = self.width_target else {
             return;
@@ -164,7 +164,7 @@ impl State {
     pub(crate) fn handle_width_pipe(&mut self, payload: Option<&str>, source: &PipeSource) -> bool {
         // CLI からの送信は payload 付きの1通目の後に payload 無しの2通目
         //（EOFマーカー）が届く。意味は無いので黙って捨てる
-        //（docs/issues/issue-cli-pipe-testing-pitfalls.md）
+        //（.docs/issues/issue-cli-pipe-testing-pitfalls.md）
         let Some(raw) = payload else {
             return false;
         };

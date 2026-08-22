@@ -1,4 +1,4 @@
-// navモード（要件: docs/requirements/req-nav-mode.md）: 入退場とキー操作、操作ヒントとヘルプオーバーレイ
+// navモード（要件: .docs/requirements/req-nav-mode.md）: 入退場とキー操作、操作ヒントとヘルプオーバーレイ
 
 use crate::agent::AgentState;
 use crate::host::{take_host_calls, HostCall};
@@ -67,7 +67,7 @@ fn nav_enter_leaves_the_mode() {
 //
 // host.rs の間接層で発行を記録して検証する。従来はリンクスタブが握り潰すため
 // 「呼ばれたことも引数も観測できない」領域だった
-// （docs/issues/issue-cucumber-test-automation.md の再検討条件1）。
+// （.docs/issues/issue-cucumber-test-automation.md の再検討条件1）。
 // フローティング層の出し入れは focus_pane_with_id の第2引数
 // should_float_if_hidden が決める（focus_selected のコメント参照）
 
@@ -145,7 +145,7 @@ fn nav_leaves_on_undefined_keys() {
     }
 }
 
-// --- 操作ヒントとヘルプオーバーレイ（要件: docs/requirements/req-nav-mode.md） ---
+// --- 操作ヒントとヘルプオーバーレイ（要件: .docs/requirements/req-nav-mode.md） ---
 //
 // サイドバー幅は32文字（決定202607302256）。ヘッダもヘルプもこの幅を前提に文言を決めてある
 
@@ -195,7 +195,7 @@ fn the_header_never_shows_the_waiting_count() {
 #[test]
 fn the_header_triangle_carries_the_mode_color() {
     // モードラベルを読まなくても三角の色だけでモードが判別できるようにする
-    //（docs/concept/ui-design.md の「ヘッダ」）
+    //（.docs/concept/ui-design.md の「ヘッダ」）
     let mut state = triage_state();
     set_agent_state(&mut state, 1, AgentState::Working);
 

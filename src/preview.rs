@@ -1,4 +1,4 @@
-// プレビュー（決定202608082045。要件: docs/requirements/req-preview.md）。
+// プレビュー（決定202608082045。要件: .docs/requirements/req-preview.md）。
 //
 // navモード中、いま光っている行のペインの内容を一時的なフローティングペインへ
 // 出して、フォーカスを移さずに「そのペインで何が起きているか」を確かめる。
@@ -32,7 +32,7 @@ use crate::{State, PREVIEW_PIPE};
 // 隙間なく続ける — サイドバーの延長として一体に見せるため。**重ねはしない**
 // （選択を動かしながら見るものなので、一覧が隠れると操作対象を見失う）。
 // かつては +2 のオフセットを置いていたが、背景が透けて「ズレて浮いている」
-// 見え方になっていた（docs/issues/issue-preview-pane-and-keybind-swap.md）
+// 見え方になっていた（.docs/issues/issue-preview-pane-and-keybind-swap.md）
 const PREVIEW_X: usize = SIDEBAR_WIDTH;
 // 幅は画面の1/3強。「大体の様子を掴む」（決定202608082045）には足りる一方、
 // 半分取ると作業ペインの取り分が圧迫されて見えた（同上）

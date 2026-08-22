@@ -119,7 +119,7 @@ impl State {
     // **`render()` の中からは呼べない。** 描画中の stdout はホストコマンドの
     // 経路と混線し、zellij 側が毎フレーム
     // 「failed to deserialize object from WASI env」で落とす（実測。
-    // [`../../docs/dev/implementation-notes.md`]）。呼ぶのはイベント処理の側
+    // [`.docs/dev/implementation-notes.md`]）。呼ぶのはイベント処理の側
     pub(crate) fn sync_input_cursor(&mut self) {
         let next = self.input_cursor_position();
         if next != self.cursor_shown {
@@ -154,7 +154,7 @@ impl State {
     // サイドバーを描き直すと、zellij は描画の最後にテキストカーソルを入力欄へ戻す。
     // IMEで変換している最中にこれが起きると、端末が描いていた未確定文字列が
     // 上書きされ、**変換候補ウィンドウが打っている途中で飛ぶ**（実測。
-    // docs/issues/issue-ime-input-support.md）。外から届くイベント（他ペインの変化・
+    // .docs/issues/issue-ime-input-support.md）。外から届くイベント（他ペインの変化・
     // 状態通知・タイマー）は入力が終わるまで描画を待たせる。
     //
     // 代償: 入力中は一覧が古いまま止まる。**状態そのものは更新し続けている**
@@ -179,13 +179,13 @@ impl State {
     //
     // **IME の変換候補ウィンドウは端末がテキストカーソルの位置に出す**ので、置かないと
     // 画面左上（プラグインペインの原点）に離れて出る。カーソル非表示のままだと
-    // 変換の確定そのものが効かない端末もある（docs/issues/issue-ime-input-support.md）。
+    // 変換の確定そのものが効かない端末もある（.docs/issues/issue-ime-input-support.md）。
     //
     // 検索サブモードは**編集状態・操作状態のどちらでも**カーソルを置く（決定202608131200、
     // 2026-08-13 に一本化）。以前は操作状態を隠して地の文の疑似カーソルに位置表示を
     // 譲っていたが、端末のカーソル形状はこちらから指定できず地の文の字も
     // その下に隠れるため、見分けの手がかりとして機能していなかった
-    // （docs/issues/issue-search-input-cursor-shape.md）。テキストカーソルへ一本化し、
+    // （.docs/issues/issue-search-input-cursor-shape.md）。テキストカーソルへ一本化し、
     // 状態の違いは入力文字列の明暗とフッターのヒント文言で示す
     //
     // **分岐は `footer_line` と同じ順序で見ること。** 入力欄が出ていないのに

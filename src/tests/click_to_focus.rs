@@ -1,7 +1,7 @@
 use crate::test_support::*;
 use crate::*;
 
-// --- 行クリック（要件: docs/requirements/req-click-to-focus.md） ---
+// --- 行クリック（要件: .docs/requirements/req-click-to-focus.md） ---
 //
 // 実際にフォーカスが移るかはホスト側の仕事（focus_pane_with_id はスタブで
 // 何もしない）なので、ここでは「どの行がどのペインに対応するか」と

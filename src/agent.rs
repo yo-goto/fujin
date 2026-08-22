@@ -76,7 +76,7 @@ impl AgentState {
         }
     }
 
-    // トリアージモードの優先度階層（要件: docs/requirements/req-triage-mode.md）。
+    // トリアージモードの優先度階層（要件: .docs/requirements/req-triage-mode.md）。
     // 小さいほど緊急。`idle`（既読）はトリアージ一覧に出さないので None を返す
     pub(crate) fn triage_rank(&self) -> Option<u8> {
         match self {
@@ -210,7 +210,7 @@ impl State {
     //（要件: header-animation）。
     //
     // 配置演出を出すかどうかまではここで決めない — 可視インスタンス判定は
-    // ホスト関数でテストから呼べない（docs/dev/build-and-test.md）。判定は
+    // ホスト関数でテストから呼べない（.docs/dev/build-and-test.md）。判定は
     // 上の pipe ハンドラに置き、ここは通知の解釈だけに徹する
     pub(crate) fn apply_status(&mut self, payload: StatusPayload) -> bool {
         if let Some(cwd) = &payload.cwd {
@@ -328,7 +328,7 @@ impl State {
         self.release_read_grace(&focused);
         // フォーカスを外れたペインの保留は捨てる。**通過しただけのペインは
         // 滞在猶予が満ちる前に必ずここへ来る**ので、注意を引く状態はそのまま残る
-        //（決定202608080109。docs/issues/issue-transit-focus-clears-read-state.md）
+        //（決定202608080109。.docs/issues/issue-transit-focus-clears-read-state.md）
         self.pending_reads
             .retain(|pane_id, _| focused.contains(pane_id));
         for pane_id in focused {

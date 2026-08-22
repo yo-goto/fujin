@@ -7,7 +7,7 @@
 //
 // 取り込みを1本の入口（`Config::parse`）に集約しているのは、KDL の書式差で
 // 設定が黙って無視される実測バグへの対応でもある
-//（docs/issues/issue-config-requirements-review.md の問題1）。zellij はプロパティ
+//（.docs/issues/issue-config-requirements-review.md の問題1）。zellij はプロパティ
 // 書式（`show_cwd="true"`）の値を `KdlValue` の `Display` で文字列化するため
 // **引用符が付いたまま**プラグインへ渡り、子ノード書式（`show_cwd "true"`）と
 // 違う値になる。値の正規化をここでまとめてかけて差を吸収する。
@@ -247,7 +247,7 @@ pub(crate) fn normalize_key(raw: &str) -> Option<String> {
         .map(|key| format_key(&key))
 }
 
-// キーの画面表記（docs/concept/ui-design.md の「文言」）。すべて小文字で、
+// キーの画面表記（.docs/concept/ui-design.md の「文言」）。すべて小文字で、
 // 修飾キーは `shift+tab` のように `+` でつなぐ。
 //
 // `KeyWithModifier` の Display は使えない — 修飾キーを空白でつなぐうえ、
@@ -333,7 +333,7 @@ impl State {
         self.direct_keys = config.direct_keys;
         self.config_warnings = config.warnings;
         // フッターは幅32でキー名しか出せない。何が悪かったのかを追える形は
-        // ログ側に残す（開発時の出力先は docs/dev/dev-workflow.md 参照）
+        // ログ側に残す（開発時の出力先は .docs/dev/dev-workflow.md 参照）
         for key in &self.config_warnings {
             eprintln!(
                 "fujin: unusable value for `{}` in the plugin configuration",

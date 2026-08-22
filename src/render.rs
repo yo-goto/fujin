@@ -57,7 +57,7 @@ pub(crate) use rows::reconcile_scroll;
 // 画面に縦に積む1行ぶんの中身。
 //
 // 描画（draw）とクリック位置の逆引き（pane_at_row、要件:
-// docs/requirements/req-click-to-focus.md）が**同じ並びを共有する**ために切り出してある。
+// .docs/requirements/req-click-to-focus.md）が**同じ並びを共有する**ために切り出してある。
 // 行の増減を伴うレイアウト変更は必ず visible_rows() 側で行うこと。
 // 描画だけ直すとクリックが行ずれする
 pub(crate) enum Row<'a> {
@@ -74,7 +74,7 @@ pub(crate) enum Row<'a> {
     //    要件: sidebar-footer.feature の「フッターの高さと位置はモードによらず常に同じ」）
     //  - フッターと zellij 本体の status-bar のあいだに空ける最下部の1行
     Blank,
-    // ヘルプオーバーレイの1行（要件: docs/requirements/req-nav-mode.md）。
+    // ヘルプオーバーレイの1行（要件: .docs/requirements/req-nav-mode.md）。
     // 開いている間は content（ツリー）がこの行に置き換わる。枠は出したまま
     Help(&'a HelpRow),
     // 一覧が空であることの通知行（検索の0件・トリアージの対象なし）。
@@ -94,7 +94,7 @@ pub(crate) enum Row<'a> {
         flat_index: usize,
         hit: Option<&'a Hit>,
     },
-    // トリアージ一覧の1行（要件: docs/requirements/req-triage-mode.md）。
+    // トリアージ一覧の1行（要件: .docs/requirements/req-triage-mode.md）。
     // タブ見出し行を持たないフラットな並びなので、所属タブ名を行に併記する
     Triage {
         entry: &'a Selectable,
@@ -182,7 +182,7 @@ const COLUMN_GAP: usize = 1;
 // タブ名が長くてもペイン名を潰さないための上限
 const TRIAGE_TAB_SHARE: usize = 3;
 // フローティングペインのペイン名を囲む丸括弧が占める幅（前後で2セル。
-// 要件: docs/requirements/req-floating-pane-indicator.md）
+// 要件: .docs/requirements/req-floating-pane-indicator.md）
 const FLOATING_BRACKETS: usize = 2;
 // 右端に常に空ける幅。文字がサイドバーの縁に貼り付くと窮屈に見える。
 // 左マージン（選択バーぶんの2セル）と揃えてある
@@ -196,7 +196,7 @@ const PREVIEW_PLACEHOLDER: &str = "preview";
 // エージェント状態もコマンド状態も持たないペイン（CLIエージェントが乗っていない
 // 作業ペイン）の状態アイコン列に置く印。**AgentState には含めない** — 既存の5状態は
 // どれも「エージェントが居る」前提の状態で、「居ない」はその一種ではないため、
-// 表示層のプレースホルダーとして持つ（docs/issues/issue-sidebar-cwd-row-legibility.md）。
+// 表示層のプレースホルダーとして持つ（.docs/issues/issue-sidebar-cwd-row-legibility.md）。
 // **状態色（0/1/2/3/6）は乗せない** — 意味の軸が違うものに状態色を割り当てない
 // （原則2）。装飾も持たせず既定色のまま出す
 pub(crate) const NO_AGENT_ICON: &str = "›";
@@ -340,7 +340,7 @@ fn counter_labels(agent: Option<&AgentInfo>) -> (String, String) {
 }
 
 // フローティングペインのペイン名を囲む丸括弧（要件:
-// docs/requirements/req-floating-pane-indicator.md）。フローティング層ごと隠れうる
+// .docs/requirements/req-floating-pane-indicator.md）。フローティング層ごと隠れうる
 // ペインを、一覧の上で見分けられるようにするための印。
 //
 // 色・dim は乗せない — ペイン名の色は落とさない（決定202608080027）うえ、色は状態・モードへ
@@ -411,7 +411,7 @@ fn row_head(
 // プレフィックスは `z` の1文字で、パースは通る。
 //
 // 落としているものは無い — 併用時も `selected` は false と解釈されており、
-// 帯の背景は元から `opaque` 側が塗っている（docs/issues/issue-idle-icon-color-on-selection.md）
+// 帯の背景は元から `opaque` 側が塗っている（.docs/issues/issue-idle-icon-color-on-selection.md）
 fn highlight_row(text: Text) -> Text {
     text.opaque().color_range(2, 0..1)
 }

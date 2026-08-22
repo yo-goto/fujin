@@ -1,5 +1,5 @@
 // 番号ジャンプサブモード（navモード内の `n`、決定202608070342。
-// 要件: docs/requirements/req-pane-number-jump.md）。
+// 要件: .docs/requirements/req-pane-number-jump.md）。
 //
 // 選択対象の全ペインに全タブ貫通の通し番号を振り、番号の入力でジャンプする。
 // 曖昧性解消方式（vimiumのリンクヒントに近い）: 数字を1つ入力するたびに

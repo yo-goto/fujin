@@ -1,11 +1,11 @@
-// トリアージ一覧の行（要件: docs/requirements/req-triage-mode.md）。
+// トリアージ一覧の行（要件: .docs/requirements/req-triage-mode.md）。
 //
 // ツリーの行と違ってタブ名を行内へ持ち、カウンタ列と cwd行を落とす。
 
 use super::*;
 
 impl State {
-    // トリアージ行のタブ名列の幅（要件: docs/requirements/req-triage-mode.md）。
+    // トリアージ行のタブ名列の幅（要件: .docs/requirements/req-triage-mode.md）。
     // カウンタ列（決定202608060053）と同じくフレーム内の実測最大で決めて、行をまたいで
     // タブ名の開始位置を揃える
     pub(crate) fn triage_tab_column(&self, rows: &[Row<'_>], cols: usize) -> usize {
@@ -18,7 +18,7 @@ impl State {
         width.min(content_cols(cols) / TRIAGE_TAB_SHARE)
     }
 
-    // トリアージ一覧の1行ぶんの Text（要件: docs/requirements/req-triage-mode.md）。
+    // トリアージ一覧の1行ぶんの Text（要件: .docs/requirements/req-triage-mode.md）。
     //
     // レイアウトは `{アイコン} {ペイン名} …余白… {タブ名}` で、ペイン行の
     // カウンタ列（決定202608060053）の位置にタブ名を置いた形。状態アイコンは通常表示と

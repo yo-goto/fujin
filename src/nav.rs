@@ -76,7 +76,7 @@ impl State {
         host::intercept_key_presses();
     }
 
-    // 入場時に選択すべきペイン（要件: docs/requirements/req-focus-sync.md）。
+    // 入場時に選択すべきペイン（要件: .docs/requirements/req-focus-sync.md）。
     //
     // - 退場後にフォーカスが動いていた → 現在のフォーカスから始める。
     //   ユーザーが作業場所を変えた以上、古い探索位置を出すと
@@ -211,15 +211,15 @@ impl State {
         // 1文字ショートカットは頭文字（t=triage, n=number, d=delete, m=mark,
         // p=preview, r=read）で、いずれも navモード内で未使用だったキー
         match key.bare_key {
-            // 検索サブモードへ（要件: docs/requirements/req-search-explorer.md）
+            // 検索サブモードへ（要件: .docs/requirements/req-search-explorer.md）
             BareKey::Char('/') => self.enter_search(),
-            // トリアージモードへ（要件: docs/requirements/req-triage-mode.md）
+            // トリアージモードへ（要件: .docs/requirements/req-triage-mode.md）
             BareKey::Char('t') => self.enter_triage(),
-            // 番号ジャンプサブモードへ（要件: docs/requirements/req-pane-number-jump.md）。
+            // 番号ジャンプサブモードへ（要件: .docs/requirements/req-pane-number-jump.md）。
             // かつての 1-9 直行ジャンプはここへ一本化して削除した（決定202608070342）。
             // navモード最上位の数字は未定義キー＝安全弁の扱い
             BareKey::Char('n') => self.enter_jump(),
-            // 終了操作サブモードへ（決定202608080140。要件: docs/requirements/req-pane-close-kill.md）。
+            // 終了操作サブモードへ（決定202608080140。要件: .docs/requirements/req-pane-close-kill.md）。
             // close/kill/kill→close を独立キーにすると押し間違いのリスクが高いので、
             // 入場キー1つ＋確認プロンプトのミニフローに畳んである
             BareKey::Char('d') => self.enter_termination(),
@@ -256,7 +256,7 @@ impl State {
     }
 
     // 行クリックでのフォーカス移動
-    //（要件: docs/requirements/req-click-to-focus.md）。戻り値は再描画するか。
+    //（要件: .docs/requirements/req-click-to-focus.md）。戻り値は再描画するか。
     //
     // 引数の `line` は描画時のy座標そのもの（zellij は isize で渡してくる）。
     // 行→ペインの対応は render 側のレイアウトから引く。

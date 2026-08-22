@@ -226,7 +226,7 @@ fn the_footer_becomes_the_query_field_while_searching() {
 #[test]
 fn the_footer_hints_change_with_the_search_phase() {
     // 状態インジケータは入力文字列の明暗とヒント文言の2つ（決定202608131200、2026-08-13に
-    // 地の文の疑似カーソルを廃止。経緯: docs/issues/issue-search-input-cursor-shape.md）
+    // 地の文の疑似カーソルを廃止。経緯: .docs/issues/issue-search-input-cursor-shape.md）
     let mut state = navigating_search("");
     let footer = state.footer_line(32);
     let footer = footer.content();
@@ -253,7 +253,7 @@ fn the_footer_hints_change_with_the_search_phase() {
 #[test]
 fn the_query_dims_while_navigating_but_the_cursor_stays_lit() {
     // 地の文の疑似カーソルは無くテキストカーソルへ位置表示を一本化した（決定202608131200、
-    // 2026-08-13。経緯: docs/issues/issue-search-input-cursor-shape.md）ので、状態を
+    // 2026-08-13。経緯: .docs/issues/issue-search-input-cursor-shape.md）ので、状態を
     // 見分ける手がかりは入力文字列の明暗とフッターのヒント文言。打てない状態でも
     // 位置を見失わせないよう、沈めるのはクエリだけでテキストカーソルは点いたまま残す
     let mut state = searchable_state();
@@ -304,7 +304,7 @@ fn a_long_query_wins_over_the_hints() {
 #[test]
 fn the_hints_drop_whole_items_when_they_do_not_fit() {
     // 幅が足りないときは `…` で切らず末尾の項目ごと落とす（direct-keys の
-    // ヒントと同じ削り方。docs/issues/issue-direct-keys-hint-overflow.md）
+    // ヒントと同じ削り方。.docs/issues/issue-direct-keys-hint-overflow.md）
     let state = navigating_search("");
     let footer = state.footer_line(32);
     let footer = footer.content();
@@ -327,7 +327,7 @@ fn the_hints_drop_whole_items_when_they_do_not_fit() {
 #[test]
 fn a_full_width_query_does_not_push_the_hint_off_the_edge() {
     // 右寄せの余白は表示セル幅で数える。文字数で数えると全角のクエリで
-    // 操作ヒントが端からはみ出す（docs/concept/ui-design.md のレイアウト規則）
+    // 操作ヒントが端からはみ出す（.docs/concept/ui-design.md のレイアウト規則）
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
     type_query(&mut state, "日本語のペイン名");
@@ -524,7 +524,7 @@ fn chrome_lines(state: &State) -> Vec<String> {
 
 #[test]
 fn the_sidebar_never_shows_japanese_text() {
-    // UI文言は英語で統一する（docs/concept/ui-design.md の「文言」）。
+    // UI文言は英語で統一する（.docs/concept/ui-design.md の「文言」）。
     // コメントとドキュメントは日本語なので、画面に出る側だけを一度に見る
     let mut lines = vec![overflow_row(3, true, SIDEBAR).content().to_string()];
 
@@ -716,7 +716,7 @@ fn the_no_agent_legend_carries_no_decoration() {
     // 他の凡例行はアイコンに状態色が乗るが、この行は状態ではないので何も乗せない。
     // dim も掛けない — 掛けると zellij が dim の解除に出す `\e[22m` が端末側で
     // bold まで消し、説明文だけ他の行と太さが揃わなくなる（実測。
-    // docs/dev/implementation-notes.md）
+    // .docs/dev/implementation-notes.md）
     let mut state = state_with_panes(2);
     state.nav_mode = true;
     state.handle_nav_key(key(BareKey::Char('?')));

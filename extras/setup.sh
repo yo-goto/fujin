@@ -127,7 +127,7 @@ warn() { printf '    %swarning:%s %s\n' "$c_yellow" "$c_off" "$*" >&2; }
 die()  { printf 'setup.sh: %s\n' "$*" >&2; exit 1; }
 
 # `~` 付きで書ける場所なら `~` に畳む。zellij は shellexpand で展開するので、
-# ホームディレクトリ名が設定に残らない（docs/issues/issue-config-and-distribution.md §1.3）
+# ホームディレクトリ名が設定に残らない（.docs/issues/issue-config-and-distribution.md §1.3）
 tildify() {
   case "$1" in
     "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;;
@@ -185,7 +185,7 @@ download_assets() {
 
 # ---------------------------------------------------------------- layout
 
-# 幅の書き方でリサイズの可否が決まる（2026-08-09 実測。docs/issues/issue-sidebar-width-adjustment.md）。
+# 幅の書き方でリサイズの可否が決まる（2026-08-09 実測。.docs/issues/issue-sidebar-width-adjustment.md）。
 #   pane size=32     -> 固定桁数。zellij はこの境界を動かさない（CLI・キーボードとも無効）
 #   pane size="20%"  -> 比率。標準の resize がそのまま効く代わりに端末幅へ比例する
 # 既定は固定のまま。サイドバーのUIは幅32前提（決定202608070119のフッター予算等）で、

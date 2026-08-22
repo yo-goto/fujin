@@ -1,12 +1,12 @@
-// フォーカス同期（用語: docs/terms/focus-sync.md。要件: docs/requirements/req-focus-sync.md）と
-// フォーカスの預かり（決定202608072359。用語: docs/terms/focus-parking.md）。
+// フォーカス同期（用語: .docs/terms/focus-sync.md。要件: .docs/requirements/req-focus-sync.md）と
+// フォーカスの預かり（決定202608072359。用語: .docs/terms/focus-parking.md）。
 //
 // 前者は「zellij の実フォーカスを観測して選択へ取り込む」、後者は「navモードの
 // 入場から退場までのあいだ実フォーカスをサイドバー自身へ移し、退場で作業ペインへ返す」。
 // 実フォーカスを軸にした表裏なので同じモジュールに置く。
 //
 // ここは `get_focused_pane_info()` を呼ぶためユニットテストで守れない範囲を含む
-// （docs/dev/build-and-test.md「テストで検証できない範囲」）。触ったら実機確認が要る。
+// （.docs/dev/build-and-test.md「テストで検証できない範囲」）。触ったら実機確認が要る。
 
 use zellij_tile::prelude::*;
 
@@ -41,7 +41,7 @@ impl State {
 
     // フォーカス情報をサーバへ1回だけ問い合わせて、
     //  - 観測したフォーカスを取り込み、navモード外なら選択行を追従させる
-    //    （要件: docs/requirements/req-focus-sync.md）
+    //    （要件: .docs/requirements/req-focus-sync.md）
     //  - 自分が操作の権威を持つインスタンスか（決定202608012142）を返す
     //
     // イベントの配送は権威判定に当てにできない — PaneUpdate / TabUpdate は
@@ -114,7 +114,7 @@ impl State {
         true
     }
 
-    // 選択を引き直す先（要件: docs/requirements/req-focus-sync.md）。
+    // 選択を引き直す先（要件: .docs/requirements/req-focus-sync.md）。
     // `force` は可視化直後など、キャッシュを信用できないときに立てる
     pub(crate) fn focus_to_follow(&self, focused: Option<u32>, force: bool) -> Option<u32> {
         // navモード中の選択はユーザーの探索位置なので追従させない

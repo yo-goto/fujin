@@ -2,7 +2,7 @@
 //
 // サイドバーの幅計算は表示セル幅（全角=2セル）で行う。文字数で数えると
 // CJK 混在時にセル幅を超え、選択背景が端末側で折り返されて次の行を汚す
-//（docs/issues/issue-sidebar-bottom-highlight-glitch.md）。
+//（.docs/issues/issue-sidebar-bottom-highlight-glitch.md）。
 // ここに置くのは zellij のホスト関数に依存しない純粋関数だけ。
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -34,7 +34,7 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
 
 // 表示セル幅ベースの先頭省略。先頭を落として `…` に畳み、末尾を残す（決定202608060053）。
 // `/` の位置で丸め、`…` の直後が必ず `/` になるようにする（`…/development/…`
-// の形。詳細は docs/issues/issue-sidebar-cwd-path-boundary.md）。どのセグメント境界でも
+// の形。詳細は .docs/issues/issue-sidebar-cwd-path-boundary.md）。どのセグメント境界でも
 // 収まらないほど狭いときだけ、文字幅で機械的に末尾を残す。
 // 返り値は (畳んだ文字列, 落とした文字数)
 pub(crate) fn truncate_start(s: &str, max: usize) -> (String, usize) {
@@ -191,7 +191,7 @@ mod tests {
     fn truncate_counts_display_width_not_chars() {
         // 全角文字（CJK）は2セル分として数える。6文字でも表示幅は12あるので、
         // 文字数ベースだった旧実装ではここが誤って「そのまま返す」になっていた
-        // （docs/issues/issue-sidebar-bottom-highlight-glitch.md）
+        // （.docs/issues/issue-sidebar-bottom-highlight-glitch.md）
         assert_eq!(truncate("日本語テスト", 12), "日本語テスト");
         assert_eq!(truncate("日本語テスト", 6), "日本…");
     }
@@ -213,7 +213,7 @@ mod tests {
     fn pad_to_width_counts_cjk_chars_as_two_cells() {
         // 全角文字混じりのラベルを文字数でパディングすると表示幅が cols を
         // 超えてしまい、選択背景が端末側で折り返されて次の行にはみ出す
-        // （docs/issues/issue-sidebar-bottom-highlight-glitch.md）。
+        // （.docs/issues/issue-sidebar-bottom-highlight-glitch.md）。
         // 「日本語」は3文字・表示幅6なので、cols=10 なら空白4個で埋まるのが正しい
         let padded = pad_to_width("日本語".to_string(), 10);
         assert_eq!(padded, "日本語    ");
