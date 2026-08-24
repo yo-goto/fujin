@@ -125,10 +125,10 @@ impl State {
         }
     }
 
-    // ジャンプを伴わない退場（Esc / q / 未定義キー、および navモード中に実フォーカスが
-    // 動いたとき）。navモード外のハイライトは常に実フォーカスと一致するので、
-    // 探索で動かした選択はここで戻す（要件: focus-sync）。探索位置そのものは
-    // exit_nav_mode() が控えていて、フォーカスが動かないまま入り直せば復元される
+    // ジャンプを伴わない退場（Esc / q / 未定義キー）。navモード外のハイライトは常に
+    // 実フォーカスと一致するので、探索で動かした選択はここで戻す（要件: focus-sync）。
+    // 探索位置そのものは exit_nav_mode() が控えていて、フォーカスが動かないまま
+    // 入り直せば復元される
     pub(crate) fn leave_nav_mode(&mut self) {
         self.exit_nav_mode();
         if let Some(focused) = self.focused_pane {
@@ -136,6 +136,19 @@ impl State {
                 self.broadcast_selection();
             }
         }
+    }
+
+    // navモード中に実フォーカスが動いたことによる強制退場（要件: focus-sync）。
+    // 主な経路はマウスでのペイン選択で、`refresh_focus()` だけがここを通る。
+    //
+    // 選択行の後始末は `leave_nav_mode()` と同じだが、**探索位置は控えない** —
+    // フォーカスが動いた＝作業場所を変えた合図なので、次の入場は探索位置を復元せず
+    // 現在のフォーカスから始めるのが要件。控えたままだと、新フォーカスを控えた
+    // `focus_at_nav_exit` と食い違って次の入場で古い探索位置が復元される
+    //（.docs/issues/issue-nav-reentry-restores-stale-selection.md）
+    pub(crate) fn interrupt_nav_mode(&mut self) {
+        self.leave_nav_mode();
+        self.selection_at_nav_exit = None;
     }
 
     // ペインIDで選択を移す。戻り値は選択が動いたか。
@@ -273,11 +286,15 @@ impl State {
         };
         // navモード中にマウスが届いた場合も Enter と同じ扱いにする（v1 の要件は
         // navモード外の行クリックのみだが、横取りを残したままフォーカスだけ動かすと
-        // 移動先で j/k を食われ続けるため、取り残しを作らない側に倒す）
+        // 移動先で j/k を食われ続けるため、取り残しを作らない側に倒す）。
+        // 選択を移すのは退場より先 — Enter と同じ順序にしないと、退場の控え
+        //（selection_at_nav_exit）が探索位置のまま残り、フォーカス中の行を
+        // クリックして抜けた直後の入場で古い探索位置が復元される
+        //（.docs/issues/issue-nav-reentry-restores-stale-selection.md と同種）
+        self.select_pane_id(pane_id);
         if self.nav_mode {
             self.exit_nav_mode();
         }
-        self.select_pane_id(pane_id);
         self.broadcast_selection();
         self.focus_selected();
         true

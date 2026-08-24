@@ -137,12 +137,84 @@ fn a_focus_move_during_nav_mode_leaves_the_mode() {
     // refresh_focus() はホスト問い合わせを含むのでここでは呼べない。
     // 「フォーカスが動いた」と観測した後の処理だけを再現する
     state.focused_pane = Some(3);
-    state.leave_nav_mode();
+    state.interrupt_nav_mode();
 
     assert!(!state.nav_mode);
     assert_eq!(
         state.selectable[state.selected].pane_id, 3,
         "ハイライトは新しい実フォーカスへ揃う"
+    );
+}
+
+#[test]
+fn nav_entry_after_an_interrupted_exit_starts_from_the_new_focus() {
+    // 強制退場は「探索をやめて作業に戻った」合図なので、次の入場は Esc 退場と違って
+    // 探索位置を復元しない（.docs/issues/issue-nav-reentry-restores-stale-selection.md）。
+    // 退場の記録は exit_nav_mode() が控えるが、そのとき focus_at_nav_exit だけが
+    // 新しいフォーカスになり selection_at_nav_exit は古い探索位置のままだったため、
+    // 入り直すと「Escで抜けたままフォーカスに触れていない」と誤読されていた
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j'))); // pane2 まで探索して
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+
+    // マウスで pane3 をクリック → refresh_focus() が強制退場させる
+    state.focused_pane = Some(3);
+    state.interrupt_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 3);
+
+    // 直後に入り直す。フォーカスは pane3 のまま動かしていない
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 3,
+        "強制退場のあとはクリック先から始める（古い探索位置を復元しない）"
+    );
+}
+
+#[test]
+fn nav_entry_follows_focus_moved_after_an_interrupted_exit() {
+    // 強制退場のあと、さらに通常のzellij操作でフォーカスが動いた組み合わせ。
+    // 控えの focus_at_nav_exit（強制退場時の新フォーカス）と一致しないので、
+    // Esc退場と同じくフォーカスの不一致側の分岐で現在のフォーカスから始まる
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.focused_pane = Some(3);
+    state.interrupt_nav_mode();
+
+    state.focused_pane = Some(2);
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 2,
+        "強制退場のあとフォーカスがさらに動いたら現在のフォーカスから始める"
+    );
+}
+
+#[test]
+fn an_esc_exit_still_restores_the_exploring_position_after_an_interrupted_one() {
+    // 強制退場で探索位置を捨てても、その次の Esc 退場では復元される
+    //（interrupt_nav_mode() が控えるのを止めるのは自分の退場ぶんだけ）
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.focused_pane = Some(3);
+    state.interrupt_nav_mode();
+
+    // pane3 から入り直して pane1 まで探索し、今度は Esc で抜ける
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('k')));
+    state.handle_nav_key(key(BareKey::Char('k')));
+    assert_eq!(state.selectable[state.selected].pane_id, 1);
+    state.handle_nav_key(key(BareKey::Esc));
+    assert_eq!(state.selectable[state.selected].pane_id, 3);
+
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 1,
+        "Esc退場のあとフォーカスを動かしていなければ探索位置を復元する"
     );
 }
 
@@ -382,7 +454,7 @@ fn an_interrupted_nav_mode_does_not_take_the_focus_back() {
     // 「フォーカスが動いた」と観測した後の処理だけを再現する
     state.release_parked_focus(false);
     state.focused_pane = Some(3);
-    state.leave_nav_mode();
+    state.interrupt_nav_mode();
 
     assert!(!state.nav_mode);
     assert_eq!(parked_pane(&state), None);

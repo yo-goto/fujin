@@ -104,8 +104,10 @@ impl State {
         self.focused_pane = focused;
         if interrupted {
             // 預かりの手放しは上（`park_lost`）で済んでいる。ここで返す形にすると
-            // ユーザーが自分で選んだ先からフォーカスを奪い返してしまう
-            self.leave_nav_mode();
+            // ユーザーが自分で選んだ先からフォーカスを奪い返してしまう。
+            // `leave_nav_mode()` ではなく `interrupt_nav_mode()` を呼ぶこと —
+            // フォーカスが動いた以上、探索位置を次の入場へ持ち越してはいけない
+            self.interrupt_nav_mode();
         } else if let Some(pane_id) = follow {
             if self.select_pane_id(pane_id) {
                 self.broadcast_selection();

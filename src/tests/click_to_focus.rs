@@ -65,6 +65,31 @@ fn clicking_in_nav_mode_jumps_and_leaves_the_mode() {
 }
 
 #[test]
+fn reentry_after_a_click_jump_starts_from_the_clicked_pane() {
+    // クリックのジャンプも Enter と同じで、退場の控えはクリック先を指す
+    //（要件: focus-sync）。控えが探索位置のまま残ると、フォーカス中の行を
+    // クリックして抜けた直後の入場で古い探索位置が復元される
+    //（.docs/issues/issue-nav-reentry-restores-stale-selection.md と同種）
+    let mut state = searchable_state();
+    state.nav_mode = false;
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j'))); // bravo まで探索して
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+
+    // フォーカス中の alpha の行をクリック（フォーカスは動かない）
+    assert!(state.handle_click(HEADER_ROWS as isize + 1));
+    assert!(!state.nav_mode);
+    assert_eq!(state.selectable[state.selected].pane_id, 1);
+
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 1,
+        "クリックで抜けた直後の入場は探索位置ではなくクリック先から始める"
+    );
+}
+
+#[test]
 fn clicking_follows_the_filtered_layout_while_searching() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));
