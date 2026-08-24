@@ -333,7 +333,7 @@ impl State {
         self.direct_keys = config.direct_keys;
         self.config_warnings = config.warnings;
         // フッターは幅32でキー名しか出せない。何が悪かったのかを追える形は
-        // ログ側に残す（開発時の出力先は .docs/dev/dev-workflow.md 参照）
+        // ログ側に残す（出力先は `zellij setup --check` で確認できる）
         for key in &self.config_warnings {
             eprintln!(
                 "fujin: unusable value for `{}` in the plugin configuration",
