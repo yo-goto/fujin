@@ -357,8 +357,23 @@ impl ZellijPlugin for State {
                     // 信用せず、実フォーカスから選択を引き直す（要件: focus-sync）
                     self.pending_focus_resync = true;
                     self.refresh_focus();
+                    true
+                } else if self.nav_mode {
+                    // 背面へ回った＝フォーカスが別のタブへ移った合図
+                    //（.docs/issues/issue-nav-mode-survives-cross-tab-click.md）。
+                    // navモード中の横取りはタブの可視性と無関係に自分へ届き続けるので、
+                    // 権威を問い合わせ直して退場の要否を決める（`refresh_focus()` が
+                    // 自分の居ないタブだと分かれば `abandon_nav_mode()` へ倒れる）。
+                    // **この合図を逃すと次の機会が無い** — `PaneUpdate` / `TabUpdate` は
+                    // 非可視インスタンスへ届かない（.docs/dev/api-reference.md
+                    //「イベントとpipeで配送先が違う」）。同じタブの中で背面へ回った
+                    // 場合（フルスクリーン等）は権威のままなので、ここでは退場しない
+                    self.refresh_focus();
+                    // navモードの表示を畳んだので、背面でも描き直しておく
+                    true
+                } else {
+                    false
                 }
-                visible
             }
             Event::TabUpdate(tabs) => {
                 self.tabs = tabs;

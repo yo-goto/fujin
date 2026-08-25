@@ -55,7 +55,16 @@ impl State {
         };
         if !self.owns_tab(focused_tab) {
             // フォーカス中のタブに居ないインスタンスは選択を自分では動かさない。
-            // 動かすのは権威1つだけで、兄弟へは決定202608012141の同期で配られる
+            // 動かすのは権威1つだけで、兄弟へは決定202608012141の同期で配られる。
+            //
+            // **navモードの退場だけは、権威を失っても自分でやる**
+            //（.docs/issues/issue-nav-mode-survives-cross-tab-click.md）。
+            // 横取り（`intercept_key_presses`）は呼んだインスタンスへタブの可視性と
+            // 関係なく届き続けるので、ここで黙って返すと移動先のタブで j/k が
+            // 食われ続ける。権威の有無とキーの届き先が食い違うのはこの経路だけ
+            if self.nav_mode {
+                self.abandon_nav_mode();
+            }
             return false;
         }
         self.focus_on_terminal = matches!(focused_pane, PaneId::Terminal(_));
