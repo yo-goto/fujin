@@ -50,15 +50,17 @@ impl State {
     // 無いため、エージェントを落とした瞬間にペイン名が空のまま残る
     // （.docs/issues/issue-pane-title-blank-on-exit.md）。前回の名前を保持すると死んだ
     // エージェントが動いているように見えるので、いまそこに何があるかが分かる cwd へ落とす
-    pub(crate) fn display_title<'a>(&'a self, entry: &'a Selectable) -> &'a str {
-        self.title_fallback(entry).unwrap_or(&entry.title)
+    pub(crate) fn display_title<'a>(&'a self, entry: &'a Selectable) -> Cow<'a, str> {
+        self.title_fallback(entry)
+            .unwrap_or(Cow::Borrowed(&entry.title))
     }
 
-    // ペイン名フォールバックが効いているならその cwd。空でないペイン名はそのまま
-    // 出すし（決定202608050055）、cwd を持たないペインは空欄のままにする
-    pub(super) fn title_fallback(&self, entry: &Selectable) -> Option<&str> {
+    // ペイン名フォールバックが効いているならその cwd（設定 show_cwd_tilde に
+    // 応じて `~` 化済みのことがある。`State::display_cwd`）。空でないペイン名は
+    // そのまま出すし（決定202608050055）、cwd を持たないペインは空欄のままにする
+    pub(super) fn title_fallback<'a>(&'a self, entry: &Selectable) -> Option<Cow<'a, str>> {
         if entry.title.trim().is_empty() {
-            self.pane_cwds.get(&entry.pane_id).map(String::as_str)
+            self.display_cwd(entry.pane_id)
         } else {
             None
         }
@@ -115,9 +117,10 @@ impl State {
         let inner = content_cols(cols);
         let title_budget = inner.saturating_sub(reserved);
         let fallback = self.title_fallback(entry);
-        let source = fallback.unwrap_or(&entry.title);
+        let is_fallback = fallback.is_some();
+        let source: Cow<str> = fallback.unwrap_or_else(|| Cow::Borrowed(&entry.title));
         let title_original_len = source.chars().count();
-        let (title, title_dropped) = fold_to_width(source, title_budget);
+        let (title, title_dropped) = fold_to_width(&source, title_budget);
         let (open, close) = floating_brackets(entry, &title);
 
         let mut label = format!("{}{}{}{}", head.text, open, title, close);
@@ -136,7 +139,7 @@ impl State {
         // ペイン名自身の畳んだ結果から判定する。
         // ペイン名フォールバック中はこの位置に出ているのが cwd なので、
         // 拾うヒットも cwd のものに切り替える（決定202608070102）
-        let field = if fallback.is_some() {
+        let field = if is_fallback {
             Field::Cwd
         } else {
             Field::Title

@@ -94,7 +94,7 @@ impl State {
                     hit,
                 } => {
                     let is_highlighted = self.row_is_highlighted(entry, flat_index);
-                    Some(cwd_row(cwd, is_highlighted, hit, cols))
+                    Some(cwd_row(&cwd, is_highlighted, hit, cols))
                 }
             })
             .collect()

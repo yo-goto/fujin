@@ -149,10 +149,18 @@ struct State {
     own_plugin_url: Option<String>,
     permissions_granted: bool,
     show_cwd: bool,
+    // cwd行のホームディレクトリ配下を `~` へ畳むか（設定 show_cwd_tilde、まだ実験段階。
+    // docs/issues/issue-sidebar-cwd-tilde-home.md）
+    show_cwd_tilde: bool,
     // 配置演出を出すか。既定値を型に持たせてある理由は config.rs 参照
     show_deploy_animation: ShowDeployAnimation,
-    // ペインID -> cwd（フックのペイロード由来）
+    // ペインID -> cwd（フックのペイロード由来）。常に絶対パスのまま保持する
+    // （`State::display_cwd` 参照）
     pane_cwds: BTreeMap<u32, String>,
+    // このプラグインから見える `$HOME`（`show_cwd_tilde` の材料）。load() で
+    // 一度だけ読む（`home_from_env`）。読めなければ None で、そのあいだは
+    // 絶対パスのまま出す
+    home_dir: Option<String>,
     // navモード中か。全キーを横取りしているインスタンスだけが true になる
     nav_mode: bool,
     // ヘルプオーバーレイを表示中か。navモードの内側の表示状態なので、
@@ -254,6 +262,24 @@ struct State {
     cursor_shown: Option<(usize, usize)>,
 }
 
+// このプラグインから見える `$HOME`（設定 show_cwd_tilde の材料。
+// .docs/issues/issue-sidebar-cwd-tilde-home.md）。
+//
+// zellij は plugin の WASI 環境を **サーバプロセスの環境から丸ごと引き継ぐ**
+// （zellij-server/src/plugins/plugin_loader.rs の `WasiCtxBuilder::inherit_env`。
+// v0.44.3 で実測確認）ので、ホスト関数も新しい権限も要らずにここから読める。
+// `get_session_environment_variables()` が返すのも出所は同じ
+// （zellij-server/src/lib.rs の `std::env::vars()`）で、あちらは
+// `ReadSessionEnvironmentVariables` の承認プロンプトを増やしたうえ、拒否されると
+// サーバが応答を書かないまま shim 側が unwrap する経路になるため採らない。
+//
+// 引き継ぎは plugin API として保証された契約ではないが、読めなかったときは
+// None に落ちて cwd行が絶対パスのままになるだけなので、壊れ方は穏やか。
+// zellij を上げるときの確認事項は .docs/dev/zellij-upgrade-checklist.md
+fn home_from_env() -> Option<String> {
+    std::env::var("HOME").ok().filter(|home| !home.is_empty())
+}
+
 // `register_plugin!(State)` は使わない。エクスポート関数は entry.rs が持つ
 //（IME経由の非ASCII入力を拾うため。決定202608111836 / .docs/issues/issue-ime-input-support.md）
 fn main() {
@@ -271,6 +297,9 @@ impl ZellijPlugin for State {
         self.summoned = config::summoned(&configuration);
         self.pending_nav_entry = self.summoned;
         self.own_plugin_id = Some(get_plugin_ids().plugin_id);
+        // cwd行の `~` 化に使う（設定 show_cwd_tilde）。セッション中に変わる値では
+        // ないので load() で一度だけ読む
+        self.home_dir = home_from_env();
         // selectable はペイン側の属性でリロードしても前回の false が残り、承認
         // プロンプトにフォーカスできないデッドロックになるため、毎回戻す。
         // 承認済みなら PermissionRequestResult が即返り、すぐ false に戻る

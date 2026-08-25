@@ -243,8 +243,12 @@ impl State {
         let mut hits: BTreeMap<u32, Hit> = BTreeMap::new();
         for entry in &self.selectable {
             let tab_name = self.tab_name(entry.tab_position);
-            let cwd = self.pane_cwds.get(&entry.pane_id).map(String::as_str);
-            if let Some(hit) = match_pane(&search.query, &entry.title, tab_name, cwd) {
+            // 描画に出るのと同じ文字列で照合する（設定 show_cwd_tilde が効いていれば
+            // `~` 化済み）。`Hit::indices` は「その field が指す文字列に対する
+            // char index」なので、絶対パスで照合して畳んだ文字列を描くと
+            // ハイライトが別の文字に付く
+            let cwd = self.display_cwd(entry.pane_id);
+            if let Some(hit) = match_pane(&search.query, &entry.title, tab_name, cwd.as_deref()) {
                 hits.insert(entry.pane_id, hit);
             }
         }

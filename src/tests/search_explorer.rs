@@ -80,6 +80,30 @@ fn cwd_matches_even_when_show_cwd_is_off() {
 }
 
 #[test]
+fn cwd_hits_index_into_the_string_that_gets_drawn() {
+    // 設定 show_cwd_tilde が効いていると cwd行に出るのは `~` 化した文字列。
+    // `Hit::indices` はその field が指す文字列に対する char index なので、
+    // 照合も畳んだ側で行わないとハイライトが別の文字に付く
+    //（.docs/issues/issue-sidebar-cwd-tilde-home.md）
+    let mut state = searchable_state();
+    state.show_cwd_tilde = true;
+    state.home_dir = Some("/Users/example".to_string());
+    state
+        .pane_cwds
+        .insert(2, "/Users/example/work/fujin".to_string());
+
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "fujin");
+
+    let hit = &state.search.as_ref().unwrap().hits[&2];
+    assert_eq!(hit.field, crate::search::Field::Cwd);
+    let shown: Vec<char> = state.display_cwd(2).unwrap().chars().collect();
+    assert_eq!(shown.iter().collect::<String>(), "~/work/fujin");
+    let matched: String = hit.indices.iter().map(|&i| shown[i]).collect();
+    assert_eq!(matched, "fujin", "畳んだ文字列の上で一致位置が合っている");
+}
+
+#[test]
 fn cursor_moves_in_tree_order_and_stops_at_the_edges() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));

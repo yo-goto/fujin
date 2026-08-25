@@ -70,13 +70,21 @@ pub(crate) struct Setting {
 
 // 公開する設定の全部。**並び順がそのまま README の表と、フッターの
 // direct-keys ヒントの表示順になる**（決定202608070119・28）
-pub(crate) const SETTINGS: [Setting; 6] = [
+pub(crate) const SETTINGS: [Setting; 7] = [
     Setting {
         key: "show_cwd",
         kind: Kind::Flag { default: false },
         example: "true",
         summary_ja: "ペイン行の下に cwd を表示します（フック設定済みのペインのみ）",
         summary_en: "Show cwd under each pane row (only for panes with the hook set up)",
+    },
+    Setting {
+        key: "show_cwd_tilde",
+        kind: Kind::Flag { default: false },
+        example: "true",
+        // まだ実験段階（docs/issues/issue-sidebar-cwd-tilde-home.md）
+        summary_ja: "cwd行のホームディレクトリ配下を `~` で短縮表示します（実験的）",
+        summary_en: "Shorten the home directory in the cwd row to `~` (experimental)",
     },
     Setting {
         key: "show_deploy_animation",
@@ -150,6 +158,7 @@ impl Default for ShowDeployAnimation {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Config {
     pub(crate) show_cwd: bool,
+    pub(crate) show_cwd_tilde: bool,
     pub(crate) show_deploy_animation: ShowDeployAnimation,
     // configuration キー -> 画面に出すキー表記。書かれていない項目は持たない
     // ＝フッターのヒントからその項目だけが省かれる
@@ -197,6 +206,7 @@ impl Config {
     fn set_flag(&mut self, key: &str, on: bool) {
         match key {
             "show_cwd" => self.show_cwd = on,
+            "show_cwd_tilde" => self.show_cwd_tilde = on,
             "show_deploy_animation" => self.show_deploy_animation = ShowDeployAnimation(on),
             _ => {}
         }
@@ -329,6 +339,7 @@ impl State {
     pub(crate) fn apply_config(&mut self, configuration: &BTreeMap<String, String>) {
         let config = Config::parse(configuration);
         self.show_cwd = config.show_cwd;
+        self.show_cwd_tilde = config.show_cwd_tilde;
         self.show_deploy_animation = config.show_deploy_animation;
         self.direct_keys = config.direct_keys;
         self.config_warnings = config.warnings;

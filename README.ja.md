@@ -637,6 +637,7 @@ zellij がプラグインに渡せるのは装飾のないプレーンテキス�
 plugins {
     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
         show_cwd              "true"
+        show_cwd_tilde        "true"
         show_deploy_animation "false"
         up_key                "Alt u"
         down_key              "Alt d"
@@ -649,6 +650,7 @@ plugins {
 | キー | 値 | 既定 | 説明 |
 | --- | --- | --- | --- |
 | `show_cwd` | `"true"` / `"false"` | `false` | ペイン行の下に cwd を表示します（フック設定済みのペインのみ） |
+| `show_cwd_tilde` | `"true"` / `"false"` | `false` | cwd行のホームディレクトリ配下を `~` で短縮表示します（実験的） |
 | `show_deploy_animation` | `"true"` / `"false"` | `true` | 新規エージェントを検出したときヘッダーで配置演出を再生します |
 | `up_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_up` に割り当てたキーの表記（フッターのヒント用・表示専用） |
 | `down_key` | キー表記（`"Alt u"` / `"alt+u"`） | 未設定（そのヒントを出さない） | `fujin_down` に割り当てたキーの表記（フッターのヒント用・表示専用） |

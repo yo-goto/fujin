@@ -171,6 +171,69 @@ fn status_records_cwd() {
     );
 }
 
+// --- show_cwd_tilde（設定でのオンオフ。docs/issues/issue-sidebar-cwd-tilde-home.md） ---
+//
+// HOME の取得そのもの（`main::home_from_env`）は plugin の WASI 環境を読むので
+// テストからは触らない。ここでは `State.home_dir` を直接立てて、その先の
+// 畳み込みと設定の効き方を確かめる
+
+#[test]
+fn status_keeps_cwd_absolute_even_with_the_setting_on() {
+    // `pane_cwds` は常に絶対パスのまま保持する（設定オフのインスタンスとも
+    // 状態同期する値なので。`State::display_cwd` が描画時に畳む）
+    let mut state = State {
+        show_cwd_tilde: true,
+        home_dir: Some("/Users/example".to_string()),
+        ..Default::default()
+    };
+    let mut payload = status(1, "SessionStart");
+    payload.cwd = Some("/Users/example/work/fujin".to_string());
+    state.apply_status(payload);
+
+    assert_eq!(
+        state.pane_cwds.get(&1).map(String::as_str),
+        Some("/Users/example/work/fujin")
+    );
+}
+
+#[test]
+fn display_cwd_folds_to_a_tilde_only_when_the_setting_is_on() {
+    let mut state = State {
+        home_dir: Some("/Users/example".to_string()),
+        ..Default::default()
+    };
+    let mut payload = status(1, "SessionStart");
+    payload.cwd = Some("/Users/example/work/fujin".to_string());
+    state.apply_status(payload);
+
+    assert_eq!(
+        state.display_cwd(1).as_deref(),
+        Some("/Users/example/work/fujin"),
+        "既定（設定オフ）では絶対パスのまま"
+    );
+
+    state.show_cwd_tilde = true;
+    assert_eq!(state.display_cwd(1).as_deref(), Some("~/work/fujin"));
+}
+
+#[test]
+fn display_cwd_stays_absolute_when_home_is_unknown() {
+    // WASI 環境から `$HOME` を読めなかったインスタンス（`home_from_env` が None）。
+    // 設定が入っていても畳まず、絶対パスのまま出す
+    let mut state = State {
+        show_cwd_tilde: true,
+        ..Default::default()
+    };
+    let mut payload = status(1, "SessionStart");
+    payload.cwd = Some("/Users/example/work/fujin".to_string());
+    state.apply_status(payload);
+
+    assert_eq!(
+        state.display_cwd(1).as_deref(),
+        Some("/Users/example/work/fujin")
+    );
+}
+
 #[test]
 fn unknown_event_keeps_state() {
     let mut state = State::default();
