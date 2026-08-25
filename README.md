@@ -677,6 +677,7 @@ The settings below are all there is.
 plugins {
     fujin location="file:~/.config/zellij/plugins/fujin.wasm" {
         show_cwd              "true"
+        show_cwd_tilde        "true"
         show_deploy_animation "false"
         up_key                "Alt u"
         down_key              "Alt d"
@@ -689,6 +690,7 @@ plugins {
 | Key | Value | Default | What it does |
 | --- | --- | --- | --- |
 | `show_cwd` | `"true"` / `"false"` | `false` | Show cwd under each pane row (only for panes with the hook set up) |
+| `show_cwd_tilde` | `"true"` / `"false"` | `false` | Shorten the home directory in the cwd row to `~` (experimental) |
 | `show_deploy_animation` | `"true"` / `"false"` | `true` | Play the deployment animation in the header when new agents appear |
 | `up_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_up` (footer hint only) |
 | `down_key` | Key spelling (`"Alt u"` / `"alt+u"`) | unset (the hint is omitted) | Spelling of the key bound to `fujin_down` (footer hint only) |

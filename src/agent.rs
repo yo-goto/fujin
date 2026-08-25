@@ -3,6 +3,7 @@
 // 各ペインで動くエージェントはフックから STATUS_PIPE 経由でイベントを
 // 送ってくる。ここではペイロードの解釈と、状態遷移・既読化・破棄を扱う。
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use zellij_tile::prelude::*;
@@ -288,6 +289,26 @@ impl State {
             self.bump_state_seq(payload.pane_id);
         }
         detected
+    }
+
+    // 表示用のcwd（設定 show_cwd_tilde、まだ実験段階。
+    // docs/issues/issue-sidebar-cwd-tilde-home.md）。
+    //
+    // `pane_cwds` 自体は常に絶対パスのまま保持する — 状態ダンプ
+    // （`sync.rs::state_dump`、兄弟インスタンス間で同期される）がこの値を
+    // そのまま使うため、書き込み時に `~` 化すると設定が違うインスタンス間で
+    // 食い違う。変換は描画のたびにここで行う。
+    //
+    // **絞り込み（`search.rs::refilter`）もこちらを引くこと。** `Hit::indices` は
+    // 「その field が指す文字列に対する char index」なので、照合を絶対パスで
+    // 行いながら畳んだ文字列を描くとハイライト位置がずれる
+    pub(crate) fn display_cwd(&self, pane_id: u32) -> Option<Cow<'_, str>> {
+        let cwd = self.pane_cwds.get(&pane_id)?;
+        Some(if self.show_cwd_tilde {
+            crate::width::tildify(cwd, self.home_dir.as_deref())
+        } else {
+            Cow::Borrowed(cwd.as_str())
+        })
     }
 
     // 状態が変わったペインに新しいシーケンス番号を振る。

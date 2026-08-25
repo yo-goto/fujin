@@ -146,7 +146,7 @@ impl State {
                 // 何に一致したかは示す必要がある
                 let show_for_agent = self.show_cwd && self.agents.contains_key(&entry.pane_id);
                 if (show_for_agent || cwd_hit.is_some()) && self.title_fallback(entry).is_none() {
-                    if let Some(cwd) = self.pane_cwds.get(&entry.pane_id) {
+                    if let Some(cwd) = self.display_cwd(entry.pane_id) {
                         rows.push(Row::Cwd {
                             entry,
                             flat_index: this_index,

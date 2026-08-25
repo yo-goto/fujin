@@ -60,7 +60,7 @@ impl State {
             head_width + brackets + COLUMN_GAP + tab_column
         };
         // ペイン行と同じく、ペイン名が空なら cwd を代わりに出す（決定202608070102）
-        let (title, _) = fold_to_width(self.display_title(entry), inner.saturating_sub(reserved));
+        let (title, _) = fold_to_width(&self.display_title(entry), inner.saturating_sub(reserved));
         let (open, close) = floating_brackets(entry, &title);
 
         let mut label = format!("{}{}{}{}", head.text, open, title, close);

@@ -5,6 +5,8 @@
 //（.docs/issues/issue-sidebar-bottom-highlight-glitch.md）。
 // ここに置くのは zellij のホスト関数に依存しない純粋関数だけ。
 
+use std::borrow::Cow;
+
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // 表示セル幅ベースの切り詰め（末尾 `…`）。全角文字（CJK）は2セル分として数える
@@ -89,6 +91,23 @@ fn truncate_start_at_boundary(s: &str, max: usize) -> Option<(usize, String)> {
 // その場合は末尾を切ると `/Users/example/develo…` のようにどれも同じ見た目になる
 fn looks_like_path(s: &str) -> bool {
     s.starts_with('/') || s.starts_with("~/")
+}
+
+// ホームディレクトリ配下なら `~` へ畳む（設定 show_cwd_tilde、まだ実験段階。
+// docs/issues/issue-sidebar-cwd-tilde-home.md）。`home` と完全一致 or
+// `home + "/"` で前方一致する場合だけに限る — `/Users/roshi2` のような
+// 別ユーザー名を `~2` に誤爆させないための境界判定
+pub(crate) fn tildify<'a>(cwd: &'a str, home: Option<&str>) -> Cow<'a, str> {
+    let Some(home) = home.filter(|h| !h.is_empty()) else {
+        return Cow::Borrowed(cwd);
+    };
+    if cwd == home {
+        Cow::Owned("~".to_string())
+    } else if let Some(rest) = cwd.strip_prefix(home).and_then(|r| r.strip_prefix('/')) {
+        Cow::Owned(format!("~/{rest}"))
+    } else {
+        Cow::Borrowed(cwd)
+    }
 }
 
 // 表示幅 max に畳む（決定202608060053）。パスは先頭省略、それ以外は切り詰め。
@@ -288,6 +307,41 @@ mod tests {
         let (folded, dropped) = truncate_start("/aaaaaaaaaa", 5);
         assert_eq!(folded, "…aaaa");
         assert_eq!(dropped, 7);
+    }
+
+    // --- tildify（設定 show_cwd_tilde） ---
+
+    #[test]
+    fn tildify_folds_a_path_under_home() {
+        assert_eq!(
+            tildify("/Users/example/work/fujin", Some("/Users/example")),
+            "~/work/fujin"
+        );
+    }
+
+    #[test]
+    fn tildify_folds_home_itself_to_a_bare_tilde() {
+        assert_eq!(tildify("/Users/example", Some("/Users/example")), "~");
+    }
+
+    #[test]
+    fn tildify_does_not_misfire_on_a_similar_username() {
+        // "/Users/example2" は "/Users/example" の前方一致だが別ユーザーなので、
+        // 区切り境界で弾いて誤って "~2" にしない
+        assert_eq!(
+            tildify("/Users/example2/work", Some("/Users/example")),
+            "/Users/example2/work"
+        );
+    }
+
+    #[test]
+    fn tildify_leaves_paths_outside_home_alone() {
+        assert_eq!(tildify("/tmp/work", Some("/Users/example")), "/tmp/work");
+    }
+
+    #[test]
+    fn tildify_is_a_no_op_without_a_known_home() {
+        assert_eq!(tildify("/Users/example/work", None), "/Users/example/work");
     }
 
     #[test]

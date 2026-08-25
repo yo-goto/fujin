@@ -23,6 +23,7 @@
 // 複数の子から使うものだけをここへ置くこと — 子どうしは兄弟なので、片方の中に
 // 置いたものはもう片方から見えない。
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use unicode_width::UnicodeWidthStr;
@@ -107,7 +108,9 @@ pub(crate) enum Row<'a> {
     Cwd {
         entry: &'a Selectable,
         flat_index: usize,
-        cwd: &'a str,
+        // 設定 show_cwd_tilde が効いていれば `~` へ畳んだ所有文字列
+        // （`State::display_cwd`）、そうでなければ `pane_cwds` の借用のまま
+        cwd: Cow<'a, str>,
         // cwd に一致したヒットだけを持つ（ペイン名・タブ名のヒットは
         // この行のハイライトには関係しない）
         hit: Option<&'a Hit>,
