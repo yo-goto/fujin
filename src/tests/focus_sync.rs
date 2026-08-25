@@ -1,4 +1,5 @@
 // フォーカス同期（要件: .docs/requirements/req-focus-sync.md）と、そこから派生したフォーカスの預かり（決定202608072359）
+use crate::agent::AgentState;
 
 use crate::host::{take_host_calls, HostCall};
 use crate::test_support::*;
@@ -217,6 +218,95 @@ fn an_esc_exit_still_restores_the_exploring_position_after_an_interrupted_one() 
         state.selectable[state.selected].pane_id, 1,
         "Esc退場のあとフォーカスを動かしていなければ探索位置を復元する"
     );
+}
+
+// --- ジャンプ退場のあとジャンプ元へ戻ってからの入場
+//     （.docs/issues/issue-nav-entry-restores-stale-jump-target.md） ---
+//
+// ジャンプ経路は退場を控えたあとで実フォーカスを動かすので、控えを直さないと
+// `focus_at_nav_exit` がジャンプ前のフォーカスのままになる。ジャンプ元へ戻ると
+// それが現在のフォーカスと偶然一致し、「退場後フォーカスを動かしていない」と
+// 誤判定してジャンプ先を復元してしまう。4つのジャンプ経路すべてを踏む
+
+#[test]
+fn nav_entry_after_a_jump_starts_from_the_pane_the_jump_came_from() {
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.handle_nav_key(key(BareKey::Enter)); // pane2 へジャンプして退場
+    state.focused_pane = Some(2);
+
+    // pane2 で作業したあと、通常のzellij操作でジャンプ元の pane1 へ戻る
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 1,
+        "ジャンプ元へ戻ったら現在のフォーカスから始める"
+    );
+}
+
+#[test]
+fn nav_entry_after_a_number_jump_starts_from_the_pane_the_jump_came_from() {
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('n')));
+    state.handle_nav_key(key(BareKey::Char('2'))); // 番号ジャンプで確定
+    assert!(!state.nav_mode);
+    state.focused_pane = Some(2);
+
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 1);
+}
+
+#[test]
+fn nav_entry_after_a_search_jump_starts_from_the_pane_the_jump_came_from() {
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('/')));
+    type_query(&mut state, "pane2");
+    state.handle_nav_key(key(BareKey::Enter)); // 検索確定でジャンプ
+    assert!(!state.nav_mode);
+    state.focused_pane = Some(2);
+
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 1);
+}
+
+#[test]
+fn nav_entry_after_a_triage_jump_starts_from_the_pane_the_jump_came_from() {
+    let mut state = triage_state();
+    state.nav_mode = false;
+    set_agent_state(&mut state, 4, AgentState::Error);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('t')));
+    state.handle_nav_key(key(BareKey::Enter)); // トリアージ確定でジャンプ
+    assert_eq!(state.selectable[state.selected].pane_id, 4);
+    state.focused_pane = Some(4);
+
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 1);
+}
+
+#[test]
+fn nav_entry_right_after_a_jump_still_starts_from_the_jump_target() {
+    // ジャンプ先に留まったまま入り直した場合は、これまでどおりジャンプ先から。
+    // 控えを直しても「一致する」側の分岐が同じ行を指す
+    let mut state = state_with_panes(3);
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    state.handle_nav_key(key(BareKey::Enter));
+    state.focused_pane = Some(2);
+
+    state.enter_nav_mode();
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
 }
 
 #[test]

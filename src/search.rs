@@ -193,7 +193,7 @@ impl State {
         self.selected = index;
         // フォーカス移動でタブが変わりうるので、先に横取りを解除する
         //（navモードの Enter と同じ順序。search も一緒に破棄される）
-        self.exit_nav_mode();
+        self.exit_nav_mode_for_jump();
         self.broadcast_selection(); // 確定時だけ配る（決定202608012141）
         self.focus_selected();
     }

@@ -90,6 +90,30 @@ fn reentry_after_a_click_jump_starts_from_the_clicked_pane() {
 }
 
 #[test]
+fn nav_entry_after_a_click_jump_starts_from_the_pane_the_jump_came_from() {
+    // クリックでのジャンプも他のジャンプ経路と同じく、退場の控えるフォーカスを
+    // クリック先で上書きしないと、クリック元へ戻ってからの入場でクリック先が
+    // 復元される（.docs/issues/issue-nav-entry-restores-stale-jump-target.md）
+    let mut state = searchable_state();
+    state.nav_mode = false;
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+
+    // フォーカスしていない bravo の行をクリックして抜ける
+    assert!(state.handle_click(HEADER_ROWS as isize + 2));
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+    state.focused_pane = Some(2);
+
+    // bravo で作業したあと、通常のzellij操作でクリック元の alpha へ戻る
+    state.focused_pane = Some(1);
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 1,
+        "クリック元へ戻ったら現在のフォーカスから始める"
+    );
+}
+
+#[test]
 fn clicking_follows_the_filtered_layout_while_searching() {
     let mut state = searchable_state();
     state.handle_nav_key(key(BareKey::Char('/')));

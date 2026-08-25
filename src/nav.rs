@@ -84,8 +84,9 @@ impl State {
     // - 動いていない（Escで抜けたまま実フォーカスに触れていない）→
     //   退場時の探索位置を復元する。「ちょっと確認して抜けたが、すぐ見たい」に応える
     //
-    // Enterでジャンプして退場した場合は、ジャンプでフォーカスが選択行へ移るため
-    // 前者の分岐を通り、結果としてジャンプ先が選ばれる（どちらでも同じ行になる）
+    // ジャンプで退場した場合は `exit_nav_mode_for_jump()` が控えをジャンプ先で
+    // 上書きするので、ジャンプ先に留まっていれば後者（＝ジャンプ先を復元）、
+    // ジャンプ元へ戻っていれば前者（＝現在のフォーカス）を通る
     fn nav_entry_selection(&self) -> Option<u32> {
         let focused = self.focused_pane?;
         if self.focus_at_nav_exit == Some(focused) {
@@ -172,6 +173,34 @@ impl State {
         // フォーカスが動いた＝作業場所を変えた合図なので、探索位置は持ち越さない
         //（`interrupt_nav_mode()` と同じ理由）
         self.selection_at_nav_exit = None;
+    }
+
+    // ジャンプを伴う退場（`Enter`/`Space`/`l`・番号ジャンプ・検索確定・
+    // トリアージ確定・行クリック）。**呼び出し側はこのあと `focus_selected()` で
+    // 実フォーカスを動かす** — ここが担うのは退場と、その控えの補正だけ。
+    //
+    // `exit_nav_mode()` が控える `focus_at_nav_exit` は控えたときのフォーカス、
+    // つまりジャンプ**前**のペインになる。そのままだとジャンプ元へ戻ってから
+    // 入り直したときに現在のフォーカスと偶然一致し、「退場後フォーカスを動かして
+    // いない」と誤判定してジャンプ先を復元してしまう
+    //（.docs/issues/issue-nav-entry-restores-stale-jump-target.md）。ジャンプ先は
+    // 選択行そのものなので、控えをそこで上書きして退場後の移動に合わせる。
+    //
+    // **`exit_nav_mode()` 自体には手を入れない** — 控えるタイミングを一律に動かすと
+    // Esc退場の探索位置復元まで壊れる
+    //（.docs/issues/issue-nav-reentry-restores-stale-selection.md）。
+    //
+    // 控えた値と実際の移動先が食い違うのは `focus_selected()` が空振りしたときだが、
+    // そのときは次の入場が「一致しない」側へ落ちて現在のフォーカスから始まる。
+    // ジャンプできていない以上それが正しい行なので、食い違っても破綻しない
+    pub(crate) fn exit_nav_mode_for_jump(&mut self) {
+        let target = self.selectable.get(self.selected).map(|e| e.pane_id);
+        self.exit_nav_mode();
+        // 一覧が空でジャンプ先が無いなら、`focus_selected()` も空振りする。
+        // 控えは退場時のフォーカスのままでよい
+        if target.is_some() {
+            self.focus_at_nav_exit = target;
+        }
     }
 
     // ペインIDで選択を移す。戻り値は選択が動いたか。
@@ -276,7 +305,7 @@ impl State {
             }
             BareKey::Enter | BareKey::Char(' ') | BareKey::Char('l') => {
                 // フォーカス移動でタブが変わりうるので、先に横取りを解除する
-                self.exit_nav_mode();
+                self.exit_nav_mode_for_jump();
                 self.focus_selected();
             }
             // Esc / q は明示的な退場。それ以外の未定義キーでも抜ける:
@@ -316,7 +345,7 @@ impl State {
         //（.docs/issues/issue-nav-reentry-restores-stale-selection.md と同種）
         self.select_pane_id(pane_id);
         if self.nav_mode {
-            self.exit_nav_mode();
+            self.exit_nav_mode_for_jump();
         }
         self.broadcast_selection();
         self.focus_selected();

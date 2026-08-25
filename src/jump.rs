@@ -109,7 +109,7 @@ impl State {
             //（検索サブモードの confirm_search と同じ順序）
             Some(index) if !ambiguous => {
                 self.selected = index;
-                self.exit_nav_mode();
+                self.exit_nav_mode_for_jump();
                 self.broadcast_selection(); // 確定時だけ配る（決定202608012141）
                 self.focus_selected();
             }
