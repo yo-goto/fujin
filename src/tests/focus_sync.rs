@@ -1,5 +1,6 @@
 // フォーカス同期（要件: .docs/requirements/req-focus-sync.md）と、そこから派生したフォーカスの預かり（決定202608072359）
 
+use crate::host::{take_host_calls, HostCall};
 use crate::test_support::*;
 use crate::*;
 
@@ -461,5 +462,90 @@ fn an_interrupted_nav_mode_does_not_take_the_focus_back() {
     assert_eq!(
         state.selectable[state.selected].pane_id, 3,
         "ハイライトは新しい実フォーカスへ揃う"
+    );
+}
+
+// --- 権威を失ったことによる退場（.docs/issues/issue-nav-mode-survives-cross-tab-click.md） ---
+//
+// フォーカスが**自分の居ないタブへ**移った場合。`refresh_focus()` は権威判定
+//（決定202608012142）で早期に返るので、退場だけを切り出した `abandon_nav_mode()` を
+// 直接呼んで先のロジックを見る（問い合わせ自体はここでは呼べない）。
+
+#[test]
+fn abandoning_nav_mode_clears_the_interception_without_taking_the_focus_back() {
+    // 横取りは登録した自分にタブの可視性と関係なく届き続けるので解除は自分でやるが、
+    // 預かりを「返して」しまうとユーザーが選んだタブからフォーカスを奪い返す
+    let mut state = state_ready_to_park(3);
+    state.enter_nav_mode();
+    assert_eq!(parked_pane(&state), Some(1));
+    take_host_calls();
+
+    state.abandon_nav_mode();
+
+    assert!(!state.nav_mode);
+    assert_eq!(parked_pane(&state), None);
+    assert_eq!(
+        take_host_calls(),
+        vec![
+            // 預かりの後始末（決定202607302258へ戻す）だけで、返却の
+            // FocusPaneWithId は出さない
+            HostCall::SetSelectable { selectable: false },
+            HostCall::ClearKeyPressesIntercepts,
+        ],
+        "元タブの作業ペインへフォーカスを返さない"
+    );
+}
+
+#[test]
+fn abandoning_nav_mode_leaves_the_highlight_where_the_exploring_stopped() {
+    // 選択を実フォーカスへ戻さない。`focused_pane` は元タブのペインを指したままなので、
+    // 戻すと古い行を指すうえ、その古い行を兄弟へ配ってしまう。
+    // ハイライトは移動先のタブの権威が配ってくるのを待つ
+    let mut state = state_ready_to_park(3);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j')));
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+
+    state.abandon_nav_mode();
+
+    assert_eq!(state.selectable[state.selected].pane_id, 2);
+}
+
+#[test]
+fn nav_entry_after_abandoning_does_not_restore_the_exploring_position() {
+    // 別タブへ移った＝作業場所を変えた合図なので、強制退場（interrupt_nav_mode）と
+    // 同じく探索位置は持ち越さない
+    let mut state = state_ready_to_park(3);
+    state.enter_nav_mode();
+    state.handle_nav_key(key(BareKey::Char('j'))); // pane2 まで探索して
+    state.abandon_nav_mode();
+
+    // フォーカスが自分のタブの pane1 へ戻ってきた（＝退場時の控えと同じペイン）
+    state.enter_nav_mode();
+    assert_eq!(
+        state.selectable[state.selected].pane_id, 1,
+        "探索位置ではなくフォーカス中のペインから始める"
+    );
+}
+
+#[test]
+fn a_summoned_instance_closes_itself_when_the_focus_leaves_its_tab() {
+    // 召喚インスタンス（決定202608011644）も同じ経路を通る。預かりは持っていないので
+    // 手放しは空振りし、横取り解除のあとに自死する順序（exit_nav_mode）は崩れない
+    let mut state = state_ready_to_park(3);
+    state.summoned = true;
+    state.enter_nav_mode();
+    assert_eq!(parked_pane(&state), None, "召喚インスタンスは預からない");
+    take_host_calls();
+
+    state.abandon_nav_mode();
+
+    assert!(!state.nav_mode);
+    assert_eq!(
+        take_host_calls(),
+        vec![
+            HostCall::ClearKeyPressesIntercepts,
+            HostCall::ClosePluginPane { plugin_pane_id: 9 },
+        ]
     );
 }

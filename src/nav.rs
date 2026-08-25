@@ -151,6 +151,29 @@ impl State {
         self.selection_at_nav_exit = None;
     }
 
+    // 実フォーカスが**自分の居ないタブへ**移ったことによる強制退場
+    //（.docs/issues/issue-nav-mode-survives-cross-tab-click.md）。`refresh_focus()` が
+    // 権威判定（決定202608012142）で偽に倒れる経路だけがここを通る。
+    //
+    // 同じ強制退場でも `interrupt_nav_mode()` とは後始末が2点違う。どちらも
+    // 「自分はもうフォーカス中のタブに居ない」ことから来る。
+    //
+    // - **預かりは返さずに手放す**（決定202608072359）。`exit_nav_mode()` に任せると
+    //   `release_parked_focus(true)` が元タブの作業ペインへフォーカスを飛ばし、
+    //   ユーザーが自分で選んだタブから奪い返す。先に手放しておけば中の呼び出しは
+    //   空振りする（`park_lost` 経路と同じ形）
+    // - **選択行を実フォーカスへ戻さない**（＝`leave_nav_mode()` を通さない）。
+    //   `self.focused_pane` は元タブのペインを指したままなので、戻しても古い行を
+    //   指すうえ、`broadcast_selection()` でその古い行を兄弟へ配ってしまう。
+    //   新しいタブの権威が観測したフォーカスを配ってくるのを待つ
+    pub(crate) fn abandon_nav_mode(&mut self) {
+        self.release_parked_focus(false);
+        self.exit_nav_mode();
+        // フォーカスが動いた＝作業場所を変えた合図なので、探索位置は持ち越さない
+        //（`interrupt_nav_mode()` と同じ理由）
+        self.selection_at_nav_exit = None;
+    }
+
     // ペインIDで選択を移す。戻り値は選択が動いたか。
     // インデックスではなくペインIDを入口にするのは決定202608012141と同じ理由で、
     // 一覧が古いインスタンスでも同じ行を指せるようにするため
