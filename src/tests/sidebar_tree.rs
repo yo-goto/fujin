@@ -143,14 +143,18 @@ fn an_unreadable_key_setting_is_shown_as_written() {
 
 #[test]
 fn direct_key_hints_are_dropped_whole_rather_than_truncated() {
-    // 幅28に3項目が収まらないとき、末尾を `…` で切ると `キー:動作` の形が壊れる。
-    // 矢印へ落としても足りなければ、項目ごと省いて残りを正しく読ませる。
-    // READMEが例示している Alt Up / Alt Down / Alt g がちょうどこれに当たる
+    // 幅28に4項目が収まらないとき、末尾を `…` で切ると `キー:動作` の形が壊れる。
+    // 矢印へ落としても足りなければ、項目ごと省いて残りを正しく読ませる
     let mut state = state_with_panes(2);
-    with_direct_keys(&mut state);
+    state.apply_config(&plugin_config(&[
+        ("up_key", "PageUp"),
+        ("down_key", "PageDown"),
+        ("go_key", "alt+g"),
+        ("toggle_cwd_key", "alt+c"),
+    ]));
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
-    assert_eq!(footer, "  alt+up:up  alt+down:down");
+    assert_eq!(footer, "  pgup:↑  pgdn:↓  alt+g:jump");
     assert!(!footer.contains('…'), "{}", footer);
 }
 
@@ -164,8 +168,7 @@ fn an_unset_direct_key_drops_only_its_own_hint() {
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
     assert!(!footer.contains("jump"), "設定の無い項目は省く: {}", footer);
-    assert!(footer.contains("alt+up:up"), "{}", footer);
-    assert!(footer.contains("alt+down:down"), "{}", footer);
+    assert_eq!(footer, "  alt + › up:up  down:down");
 }
 
 #[test]
@@ -191,6 +194,88 @@ fn long_direct_keys_fall_back_to_arrows() {
 
     let footer = state.footer_line(SIDEBAR).content().to_string();
     assert_eq!(footer, "  pgup:↑  pgdn:↓  alt+g:jump");
+}
+
+// --- 修飾キーのまとめ表記（.docs/issues/issue-direct-keys-hint-modifier-prefix.md） ---
+
+#[test]
+fn direct_key_hints_group_a_shared_modifier() {
+    // 項目ごとに繰り返される `alt+` を先頭へまとめ、以降は素のキーだけを並べる
+    // （zellij本体の status-bar に寄せた見た目）。ちょうど28セルに収まる
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[
+        ("up_key", "alt+u"),
+        ("down_key", "alt+d"),
+        ("go_key", "alt+g"),
+    ]));
+
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert_eq!(footer, "  alt + › u:up  d:down  g:jump");
+}
+
+#[test]
+fn grouping_keeps_all_three_hints_of_the_readme_example() {
+    // READMEが例示している Alt Up / Alt Down / Alt g は、フル表記では28セルに
+    // 収まらず末尾の jump が落ちていた。まとめれば矢印落としだけで3項目とも残る
+    let mut state = state_with_panes(2);
+    with_direct_keys(&mut state);
+
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert_eq!(footer, "  alt + › up:↑  down:↓  g:jump");
+}
+
+#[test]
+fn a_lone_direct_key_hint_keeps_its_full_spelling() {
+    // 1項目では繰り返しが無く、まとめると却って長い。`alt+u` の綴りは
+    // 決定202608070226・README で定着しているのでそのまま出す
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[("up_key", "alt+u")]));
+
+    assert_eq!(state.footer_line(SIDEBAR).content(), "  alt+u:up");
+}
+
+#[test]
+fn a_bare_direct_key_stops_the_grouping() {
+    // 無修飾のキーが1つでも混ざれば、部分的にまとめず全部フル表記へ落とす
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[("up_key", "alt+u"), ("go_key", "enter")]));
+
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  alt+u:up  enter:jump"
+    );
+}
+
+#[test]
+fn different_modifiers_are_not_grouped() {
+    // 修飾キー列は完全一致でだけまとめる。先頭だけの一致でまとめると
+    // `shift` の要不要が読み取れなくなり、誤操作を招く
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[
+        ("up_key", "ctrl+u"),
+        ("down_key", "ctrl+shift+d"),
+    ]));
+
+    assert_eq!(
+        state.footer_line(SIDEBAR).content(),
+        "  ctrl+u:up  ctrl+shift+d:down"
+    );
+}
+
+#[test]
+fn a_grouped_hint_is_still_narrowed_to_fit() {
+    // まとめは幅対策ではなく常時適用の表示ルールなので、まとめた1行にも既定の
+    // 削り方（矢印落とし → 末尾の項目ごと省略）がそのまま効く
+    let mut state = state_with_panes(2);
+    state.apply_config(&plugin_config(&[
+        ("up_key", "ctrl+shift+up"),
+        ("down_key", "ctrl+shift+down"),
+        ("go_key", "ctrl+shift+g"),
+    ]));
+
+    let footer = state.footer_line(SIDEBAR).content().to_string();
+    assert_eq!(footer, "  ctrl+shift + › up:↑  down:↓");
+    assert!(!footer.contains('…'), "{}", footer);
 }
 
 // --- render（描画パスが panic しないこと） ---

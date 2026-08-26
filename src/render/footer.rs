@@ -128,14 +128,18 @@ impl State {
     //  2. それでも溢れるなら末尾の項目ごと省く
     // の順で削る。**末尾を `…` で切り詰めない** — `キー:動作` の形が壊れた
     // ヒントは読めず、項目ごと省いたほうが残りは正しく読める。
-    // 項目数を優先し、同じ項目数で選べるなら既定の英字表記を採る
+    // 項目数を優先し、同じ項目数で選べるなら既定の英字表記を採る。
+    //
+    // 修飾キーのまとめ（`join_direct_keys`）は幅対策ではなく常時適用の表示ルール
+    // なので、**組んだ後の1行に対して**上の削り方をそのまま当てる。まとめと幅対策の
+    // 優先順位を競わせない
     fn direct_keys_hint(&self, budget: usize) -> String {
         let full = self.direct_key_parts(false).len();
         for count in (1..=full).rev() {
             for arrows in [false, true] {
                 let mut parts = self.direct_key_parts(arrows);
                 parts.truncate(count);
-                let line = parts.join("  ");
+                let line = join_direct_keys(&parts);
                 if UnicodeWidthStr::width(line.as_str()) <= budget {
                     return line;
                 }
@@ -144,9 +148,9 @@ impl State {
         String::new()
     }
 
-    // 割り当てのある項目だけを `キー:動作` の形に組んだもの（表示順）。
+    // 割り当てのある項目だけを「キー表記と動作名」の組にしたもの（表示順）。
     // 並び順も動作名も設定テーブル（config.rs）から引く（決定202608080346）
-    fn direct_key_parts(&self, arrows: bool) -> Vec<String> {
+    fn direct_key_parts(&self, arrows: bool) -> Vec<(&str, &'static str)> {
         let mut parts = Vec::new();
         for setting in &SETTINGS {
             let Kind::DirectKey { label, arrow } = setting.kind else {
@@ -159,7 +163,7 @@ impl State {
                 (true, Some(arrow)) => arrow,
                 _ => label,
             };
-            parts.push(format!("{}:{}", key, label));
+            parts.push((key.as_str(), label));
         }
         parts
     }
@@ -189,6 +193,65 @@ impl State {
         // キー名が1つも置けない幅。せめて「設定を見ろ」だけは残す
         "!bad config".to_string()
     }
+}
+
+// 修飾キーをまとめた表記の区切り（要件: sidebar-footer）。**新しい記号を増やさず、
+// 未起動マーカー（`NO_AGENT_ICON`）と同じ字を流用する** — 出る場所が状態アイコン列と
+// フッターで別なので、同じ行に並んで混同することがない
+// （.docs/issues/issue-direct-keys-hint-modifier-prefix.md）
+const MODIFIER_GROUP_MARK: &str = NO_AGENT_ICON;
+
+// direct-keys の項目を1行に組む（要件: sidebar-footer）。
+//
+// 全項目が同じ修飾キーを持つなら、項目ごとに繰り返される修飾キーを先頭へまとめて
+// `alt + › u:up  d:down` の形にする（zellij本体の status-bar に寄せた見た目）。
+// まとまらないときは既存の詰めた表記（`alt+u:up  ctrl+g:jump`）へ**丸ごと**落とす
+// — 部分的にまとめると、どの項目にどの修飾キーが要るのかが読めなくなる。
+// 単項目の綴り `alt+u` は決定202608070226・README で定着しているので、キー表記の
+// 正本（`format_key`）自体には手を入れない
+fn join_direct_keys(parts: &[(&str, &'static str)]) -> String {
+    let Some(modifiers) = shared_modifiers(parts) else {
+        return parts
+            .iter()
+            .map(|(key, label)| format!("{}:{}", key, label))
+            .collect::<Vec<_>>()
+            .join("  ");
+    };
+    let items = parts
+        .iter()
+        .map(|(key, label)| {
+            let bare = split_modifiers(key).map_or(*key, |(_, bare)| bare);
+            format!("{}:{}", bare, label)
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    format!("{} + {} {}", modifiers, MODIFIER_GROUP_MARK, items)
+}
+
+// 全項目に共通する修飾キー列。まとめられないなら `None`。条件は3つ:
+//  - 項目が2つ以上ある（1つでは繰り返しが無く、`alt+u` のほうが短く済む）
+//  - 全項目が修飾キーを持つ（`pgup` のような無修飾が1つでも混ざれば落とす）
+//  - 修飾キー列が**完全一致**する（`ctrl+g` と `ctrl+shift+p` はまとめない —
+//    先頭だけの一致でまとめると `shift` の要不要が消えて誤操作を招く）
+fn shared_modifiers<'a>(parts: &[(&'a str, &'static str)]) -> Option<&'a str> {
+    if parts.len() < 2 {
+        return None;
+    }
+    let (first, _) = parts.first()?;
+    let (modifiers, _) = split_modifiers(first)?;
+    parts
+        .iter()
+        .all(|(key, _)| split_modifiers(key).map(|(m, _)| m) == Some(modifiers))
+        .then_some(modifiers)
+}
+
+// `alt+u` を修飾キー列 `alt` と素のキー `u` に分ける（`format_key` が組んだ表記が
+// 前提。config.rs）。無修飾なら `None`。**末尾の1文字は必ず素のキー側に残す** —
+// `alt++`（`+` そのものへの割り当て）で区切りを取り違えないため
+fn split_modifiers(key: &str) -> Option<(&str, &str)> {
+    let (last, _) = key.char_indices().next_back()?;
+    let at = key[..last].rfind('+')?;
+    Some((&key[..at], &key[at + 1..]))
 }
 
 // 入力欄を兼ねるフッター（検索サブモードのクエリ・番号ジャンプサブモードの

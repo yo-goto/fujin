@@ -727,6 +727,11 @@ Both spellings work — zellij's own `"Alt u"` and the way fujin prints it,
 `"alt+u"`. The footer normalizes them to `alt+u`. A value fujin can't parse is
 printed as written, so a typo is visible rather than silently dropped.
 
+When every hint shares the same modifier, the footer folds it into a single
+prefix instead of repeating it on each item: `alt + › u:up  d:down  g:jump`.
+It falls back to the plain `alt+u:up  ctrl+g:jump` form whenever the hints
+don't share one modifier exactly, or when only one hint is set.
+
 ### Only the alias route is supported
 
 fujin supports exactly one setup: **settings live on the alias definition (the

@@ -152,7 +152,7 @@ fn the_config_warning_stops_after_its_deadline() {
     assert!(!state.showing_config_warning());
     assert_eq!(
         state.footer_line(SIDEBAR).content(),
-        "  alt+up:up  alt+down:down"
+        "  alt + › up:up  down:down"
     );
 }
 
