@@ -126,3 +126,20 @@ fn the_sidebar_folds_rows_at_a_narrow_width() {
         screen_snapshot(&state.render_ui(16, 20))
     );
 }
+
+// cwd行の `~` 短縮（設定 `show_cwd_tilde`、まだ実験段階）。**ホーム配下の cwd が
+// `~/` へ畳まれる唯一の絵**で、既定がオフなので他の5枚には出ない——設定を足しただけでは
+// 既存の絵が動かず、テストが緑のまま新しい見た目が golden から漏れる
+//（docs/issues/issue-sidebar-cwd-tilde-home.md）。
+// ホームは bravo の cwd の親に置く。基準の絵（nav_two_tabs_w32）では先頭省略で
+// `…/zellij-plugins/fujin` になる行が、ここでは `~/zellij-plugins/fujin` になる
+#[test]
+fn the_sidebar_shortens_the_home_directory_in_the_cwd_row() {
+    let mut state = nav_state();
+    state.show_cwd_tilde = true;
+    state.home_dir = Some("/work/example".to_string());
+    insta::assert_snapshot!(
+        "cwd_tilde_w32",
+        screen_snapshot(&state.render_ui(16, SIDEBAR))
+    );
+}
