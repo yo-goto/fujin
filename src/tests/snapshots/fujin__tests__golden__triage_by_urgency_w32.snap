@@ -2,10 +2,10 @@
 source: src/tests/golden.rs
 expression: "screen_snapshot(&state.render_ui(16, SIDEBAR))"
 ---
-────────────────────────────────
+──────────────────────────────
 ▲ fujin  [tri]
-────────────────────────────────
-▌ × alpha                 tab1  
+──────────────────────────────
+▌ × alpha                 tab1
   ◆ bravo                 tab1
   » delta                 tab2
 
@@ -15,5 +15,5 @@ expression: "screen_snapshot(&state.render_ui(16, SIDEBAR))"
 
 
 
-────────────────────────────────
+──────────────────────────────
   ?:help  esc:back

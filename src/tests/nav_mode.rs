@@ -285,13 +285,13 @@ fn the_frame_keeps_its_rows_across_every_mode_boundary() {
 }
 
 #[test]
-fn the_divider_spans_the_full_width() {
-    // 境界線は右マージンを空けず端まで引く。選択行の背景も右マージンまで塗るので、
-    // 罫線の直下に選択行が来たときに右端が揃う
+fn the_divider_leaves_the_right_margin() {
+    // 境界線も他の行と同じく右端2セルを空ける（決定202607302256の右マージン）。
+    // 選択行の背景もここへ揃えてあるので、罫線の直下に選択行が来ても右端が揃う
     //（.docs/issues/issue-header-divider-selection-margin-mismatch.md）
     let divider = divider_line(32);
     let line = divider.content();
-    assert_eq!(line.chars().count(), 32);
+    assert_eq!(line.chars().count(), 30);
     assert!(line.chars().all(|c| c == '─'), "{}", line);
-    assert_eq!(ink_at(&divider, DIM_LEVEL).len(), 32, "dim で引く");
+    assert_eq!(ink_at(&divider, DIM_LEVEL).len(), 30, "dim で引く");
 }

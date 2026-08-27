@@ -2,11 +2,11 @@
 source: src/tests/golden.rs
 expression: "screen_snapshot(&state.render_ui(16, 20))"
 ---
-────────────────────
+──────────────────
 ▲ fujin  [nav]
-────────────────────
+──────────────────
 ▾ 1 tab1
-▌ » alpha   +2 [3]  
+▌ » alpha   +2 [3]
   ◆ bravo
       …/fujin
 ▸ 2 tab2
@@ -15,5 +15,5 @@ expression: "screen_snapshot(&state.render_ui(16, 20))"
 
 
 
-────────────────────
+──────────────────
   ?:help  esc:exit

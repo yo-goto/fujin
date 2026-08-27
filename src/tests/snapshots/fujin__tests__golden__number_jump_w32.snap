@@ -2,11 +2,11 @@
 source: src/tests/golden.rs
 expression: "screen_snapshot(&state.render_ui(16, SIDEBAR))"
 ---
-────────────────────────────────
+──────────────────────────────
 ▲ fujin  [nav]
-────────────────────────────────
+──────────────────────────────
 ▾ 1 tab1
-▌ 1 » alpha             +2 [3]  
+▌ 1 » alpha             +2 [3]
   2 ◆ bravo
       …/zellij-plugins/fujin
 ▸ 2 tab2
@@ -15,5 +15,5 @@ expression: "screen_snapshot(&state.render_ui(16, SIDEBAR))"
 
 
 
-────────────────────────────────
+──────────────────────────────
   n                     ?:help

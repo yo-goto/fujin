@@ -129,9 +129,11 @@ impl State {
             append_right_column(&mut label, &counters, inner);
         }
         if is_highlighted {
-            // 選択背景がサイドバー幅いっぱいに伸びるよう空白で埋める。
-            // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない
-            label = pad_to_width(label, cols);
+            // 選択背景が内容幅いっぱいに伸びるよう空白で埋める。
+            // 埋めないと文字列の長さぶんしか色が乗らず、帯に見えない。
+            // 右マージンは他の行・境界線と同じく空ける（帯を縁まで塗ると窮屈に見える。
+            // .docs/issues/issue-header-divider-selection-margin-mismatch.md）
+            label = pad_to_width(label, inner);
         }
 
         // ハイライトする場所が、そのままヒットしたフィールドの提示になる。
@@ -206,7 +208,7 @@ pub(crate) fn cwd_row(cwd: &str, is_highlighted: bool, hit: Option<&Hit>, cols: 
     // 折り返り、選択背景が次の行を汚す（.docs/issues/issue-sidebar-bottom-highlight-glitch.md）
     let mut label = truncate(&format!("{}{}", indent, path), inner);
     if is_highlighted {
-        label = pad_to_width(label, cols);
+        label = pad_to_width(label, inner);
     }
     let mut text = Line::new(&label);
     let end = label.chars().count();

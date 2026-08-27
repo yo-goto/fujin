@@ -71,7 +71,7 @@ impl State {
             tab_span = append_right_column(&mut label, &tab, inner);
         }
         if is_highlighted {
-            label = pad_to_width(label, cols);
+            label = pad_to_width(label, inner);
         }
 
         let mut text = Line::new(&label);

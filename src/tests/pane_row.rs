@@ -219,7 +219,9 @@ fn every_tree_row_leaves_a_right_margin() {
         );
     }
 
-    // 選択行の背景だけは右マージンも塗る。塗らないと帯が途中で切れて見える
+    // 選択行の背景も右マージンの手前で止める。境界線と右端を揃えるため
+    //（.docs/issues/issue-header-divider-selection-margin-mismatch.md）。
+    // ただし内容幅いっぱいまでは伸ばす — 短いと帯が途中で切れて見える
     let selected = state.pane_row(
         &state.selectable[0],
         true,
@@ -230,7 +232,7 @@ fn every_tree_row_leaves_a_right_margin() {
     );
     assert_eq!(
         unicode_width::UnicodeWidthStr::width(selected.content()),
-        SIDEBAR
+        CONTENT
     );
 }
 

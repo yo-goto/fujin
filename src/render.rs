@@ -208,8 +208,8 @@ pub(crate) const NO_AGENT_ICON: &str = "›";
 // 凡例に出す説明。状態名（AgentState::label）と同じ書き方に揃える
 pub(crate) const NO_AGENT_LABEL: &str = "no agent";
 
-// 文字を置いてよい幅。選択行の背景は右マージンも含めて塗るので、
-// 背景のパディング（pad_to_width）はこれではなく cols を使うこと
+// 文字を置いてよい幅。選択行の背景・境界線もここまでで止める
+//（.docs/issues/issue-header-divider-selection-margin-mismatch.md）
 fn content_cols(cols: usize) -> usize {
     cols.saturating_sub(RIGHT_MARGIN)
 }
@@ -539,11 +539,10 @@ fn unbold_name(text: Line, head: &str, open: &str, title: &str, close: &str) -> 
 //
 // サイドバーは borderless で運用していて自前の枠は引かないが、この3本だけは
 // 例外。領域を囲う枠ではなく境目を示す線なので許容する。
-// 右マージンは空けず cols いっぱいまで引く。選択行の背景だけは右マージンも塗るため、
-// 罫線の直下に選択行が来ると右端の切れ目が2セルぶん食い違って見えていた。罫線側を
-// 背景の右端へ揃えることで、両者の右端が同じ位置で終わる
-// （.docs/issues/issue-header-divider-selection-margin-mismatch.md）
+// 右マージンは他の行と同じく空ける — 端まで引くと縁に貼り付いて見える。
+// 選択行の背景もここへ揃える（.docs/issues/issue-header-divider-selection-margin-mismatch.md）
 pub(crate) fn divider_line(cols: usize) -> Line {
+    let cols = content_cols(cols);
     let line = "─".repeat(cols);
     compose(&[(line.as_str(), Ink::Muted)], cols)
 }
