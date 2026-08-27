@@ -539,9 +539,11 @@ fn unbold_name(text: Line, head: &str, open: &str, title: &str, close: &str) -> 
 //
 // サイドバーは borderless で運用していて自前の枠は引かないが、この3本だけは
 // 例外。領域を囲う枠ではなく境目を示す線なので許容する。
-// 右マージンは他の行と同じく空ける — 端まで引くと縁に貼り付いて見える
+// 右マージンは空けず cols いっぱいまで引く。選択行の背景だけは右マージンも塗るため、
+// 罫線の直下に選択行が来ると右端の切れ目が2セルぶん食い違って見えていた。罫線側を
+// 背景の右端へ揃えることで、両者の右端が同じ位置で終わる
+// （.docs/issues/issue-header-divider-selection-margin-mismatch.md）
 pub(crate) fn divider_line(cols: usize) -> Line {
-    let cols = content_cols(cols);
     let line = "─".repeat(cols);
     compose(&[(line.as_str(), Ink::Muted)], cols)
 }
