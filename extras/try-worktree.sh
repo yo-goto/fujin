@@ -49,6 +49,7 @@ open_window=0
 keep=0
 terminal=auto
 clean_all=0
+force=0
 dry_run=0
 
 # extras/themes/*.kdl のファイル名（拡張子抜き）を --theme が受け付ける名前として列挙する
@@ -92,7 +93,9 @@ resident fujin session are never touched.
                       (alacritty/wezterm/ghostty; default: alacritty)
       --nested        allow starting from inside a zellij session (nested)
       --clean         kill the session, delete the config dir, and exit
-      --clean-all     do that for every fujin-try-* session, and exit
+      --clean-all     do that for every fujin-try-* session you own, and exit
+      --force         with --clean/--clean-all, act on sessions owned by
+                      another agent too (destroys their verification session)
 
   -n, --dry-run       show what would happen, write nothing
   -h, --help          this message
@@ -119,6 +122,7 @@ while [ $# -gt 0 ]; do
     --nested) nested=1; shift ;;
     --clean) clean=1; shift ;;
     --clean-all) clean_all=1; shift ;;
+    --force) force=1; shift ;;
     -n|--dry-run) dry_run=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) printf 'try-worktree.sh: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -206,6 +210,53 @@ fi
 
 command -v zellij >/dev/null 2>&1 || die "zellij is not on PATH"
 
+# ---------------------------------------------------------------- ownership
+
+# 使い捨てセッションの持ち主を表す文字列。**エージェントごとに分かれる値**が要る。
+#
+# セッション名も config dir も worktree 名だけで決まる（`fujin-try-<worktree>`）ので、
+# **同じ worktree を2つのエージェントが触ると、両方が同じセッション・同じ config dir を
+# 使う**。fujin は複数セッションが並行して作業する前提（.claude/rules/commit.md）なので、
+# これは普通に起きる（2026-08-26 に一歩手前まで行った。docs/issues/
+# issue-window-close-panics-orphan-shell.md の「並行エージェントによる衝突」）。
+#
+# zellij のペインIDはエージェントごとに分かれ、同じペインからの再実行では変わらないので、
+# 追加の設定なしで「自分のものか」を判定できる。zellij の外から使う場合は tty へ落とす
+owner_id() {
+  if [ -n "${FUJIN_TRY_OWNER-}" ]; then
+    printf '%s' "$FUJIN_TRY_OWNER"
+  elif [ -n "${ZELLIJ_SESSION_NAME-}" ] && [ -n "${ZELLIJ_PANE_ID-}" ]; then
+    printf '%s:%s' "$ZELLIJ_SESSION_NAME" "$ZELLIJ_PANE_ID"
+  else
+    printf 'tty:%s' "$(tty 2>/dev/null || printf 'unknown')"
+  fi
+}
+
+owner_file=.fujin-try-owner
+
+record_owner() {
+  printf '%s\n' "$(owner_id)" > "$1/$owner_file" 2>/dev/null || true
+}
+
+recorded_owner() {
+  [ -f "$1/$owner_file" ] && cat "$1/$owner_file" 2>/dev/null || printf ''
+}
+
+# 他人のものか。**記録が無いものは「自分のもの」に倒す** —— この仕組みより前に
+# 作られた config dir を、いきなり片付け不能にしないため
+owned_by_other() {
+  local recorded
+  recorded=$(recorded_owner "$1")
+  [ -n "$recorded" ] && [ "$recorded" != "$(owner_id)" ]
+}
+
+# 他人のものへ触ろうとしたときの説明。--force の逃げ道も必ず示す
+refuse_other_owner() {
+  warn "$1 belongs to another agent ($(recorded_owner "$2"); you are $(owner_id))"
+  info "another session may be verifying with it right now."
+  info "use a different worktree, or pass --force if you are sure"
+}
+
 # ---------------------------------------------------------------- clean
 
 # 一覧から1セッションぶんの行を取り出す。--no-formatting でも
@@ -244,6 +295,9 @@ purge_exited_try_sessions() {
   while read -r name _; do
     case "$name" in fujin-try-*) ;; *) continue ;; esac
     [ "$name" = "$session" ] && continue
+    # 他のエージェントの使い捨て環境は、EXITED でも消さない。相手はまだ
+    # そのセッションを resurrect して続きを見るつもりかもしれない
+    owned_by_other "$HOME/.config/zellij-fujin-${name#fujin-try-}" && continue
     zellij delete-session "$name" >/dev/null 2>&1 || continue
     removed=$((removed + 1))
   done <<EOS
@@ -264,19 +318,57 @@ assert_disposable_config_dir() {
 
 if [ "$clean_all" -eq 1 ]; then
   step "Clean all  fujin-try-*"
+  # **自分のものだけを畳む。** 他のエージェントが検証中のセッションを巻き込むと、
+  # 相手は理由の分からないまま画面ごと失う（--force で明示的に踏み越えられる）
   names=$(zellij list-sessions --no-formatting 2>/dev/null | awk '$1 ~ /^fujin-try-/ {print $1}')
+  mine= ; skipped=
+  for one in $names; do
+    one_cfg="$HOME/.config/zellij-fujin-${one#fujin-try-}"
+    if [ "$force" -eq 1 ]; then
+      mine="$mine $one"
+    elif owned_by_other "$one_cfg"; then
+      skipped="$skipped $one"
+    elif [ -z "$(recorded_owner "$one_cfg")" ] && session_is_running "$one"; then
+      # **記録が無いうえに動いている**ものは、自分のものだと言い切れない。
+      # 一括操作では慎重側へ倒す（1件ずつの --clean は今までどおり通る）
+      skipped="$skipped $one"
+    else
+      mine="$mine $one"
+    fi
+  done
   if [ "$dry_run" -eq 1 ]; then
-    info "would kill and delete: ${names:-（該当なし）}"
-    info "would remove $HOME/.config/zellij-fujin-*"
+    info "would kill and delete:${mine:-（該当なし）}"
+    [ -n "$skipped" ] && info "would leave alone (not provably yours):$skipped"
+    for one in "$HOME"/.config/zellij-fujin-*; do
+      [ -d "$one" ] || continue
+      one_session="fujin-try-${one##*/zellij-fujin-}"
+      if [ "$force" -eq 0 ] && { owned_by_other "$one" ||
+        { [ -z "$(recorded_owner "$one")" ] && session_is_running "$one_session"; }; }; then
+        info "would keep $one"
+      else
+        info "would remove $one"
+      fi
+    done
     exit 0
   fi
-  for one in $names; do
+  for one in $mine; do
     kill_session "$one"
     ok "killed and deleted $one"
   done
-  [ -n "$names" ] || info "no fujin-try-* session was running"
+  [ -n "$mine" ] || info "no fujin-try-* session of yours was running"
+  [ -n "$skipped" ] && warn "left alone (owned by another agent):$skipped"
   for one in "$HOME"/.config/zellij-fujin-*; do
     [ -d "$one" ] || continue
+    one_session="fujin-try-${one##*/zellij-fujin-}"
+    if [ "$force" -eq 0 ] && owned_by_other "$one"; then
+      info "kept $one (owned by $(recorded_owner "$one"))"
+      continue
+    fi
+    if [ "$force" -eq 0 ] && [ -z "$(recorded_owner "$one")" ] &&
+      session_is_running "$one_session"; then
+      info "kept $one (its session is running and has no owner record)"
+      continue
+    fi
     assert_disposable_config_dir "$one"
     rm -rf "$one"
     ok "removed $one"
@@ -287,6 +379,13 @@ fi
 
 if [ "$clean" -eq 1 ]; then
   step "Clean  $session"
+  # **他のエージェントの検証セッションを消さない。** 名前だけで決まる config dir を
+  # 共有してしまう以上、ここが最後の砦になる
+  if [ "$force" -eq 0 ] && owned_by_other "$config_dir"; then
+    refuse_other_owner "$session" "$config_dir"
+    printf '\n'
+    exit 1
+  fi
   if [ "$dry_run" -eq 1 ]; then
     info "would kill and delete the session $session"
     info "would remove $config_dir"
@@ -325,6 +424,24 @@ info "session     $session"
 session_running=0
 if session_is_running "$session"; then
   session_running=1
+fi
+
+# **動いているのが他人のセッションなら、attach せずに止まる。** ここを通すと
+# 2つのエージェントが1つの画面を共有し、互いのキー入力と再描画が混ざる
+# （画面が更新を止めたように見えるのはこの形）
+if [ "$session_running" -eq 1 ] && [ "$force" -eq 0 ] && owned_by_other "$config_dir"; then
+  refuse_other_owner "$session" "$config_dir"
+  info "or pass -s <name> --config-dir <dir> to run beside it"
+  printf '\n'
+  exit 1
+fi
+
+# 移行期の穴を塞ぎきれない箇所。**所有者の記録は config dir を作り直すときにしか
+# 書けない**（動作中はその dir を触らない）ので、この仕組みより前から動いている
+# セッションは記録を持たないまま残る。黙って相乗りするよりは警告を出す
+if [ "$session_running" -eq 1 ] && [ -z "$(recorded_owner "$config_dir")" ]; then
+  warn "$session is running but has no owner record -- it may belong to another agent"
+  info "if you did not start it, stop here and use a different worktree"
 fi
 
 if [ "$session_running" -eq 1 ] && [ "$fresh" -eq 1 ]; then
@@ -407,6 +524,8 @@ install_config() {
   # 毎回作り直す。検証用なので中身を持ち越さないほうが事故が少ない
   rm -rf "$config_dir"
   mkdir -p "$config_dir/layouts"
+  # 誰の使い捨て環境かを残す。--clean と起動時の相乗り判定がこれを見る
+  record_owner "$config_dir"
 
   if [ "$minimal" -eq 0 ] && [ -f "$base_config/config.kdl" ]; then
     # plugins/ は wasm の置き場所（重いうえ、ここでは使わない）なので持ってこない。
@@ -618,8 +737,10 @@ start_session() {
   fi
 
   local -a env_prefix
+  # **所有者は明示的に渡す。** ここで ZELLIJ_* を落とすので、窓の中から呼ばれる
+  # --clean が owner_id() を引き直すと別人になり、自動の後始末が拒否される
   env_prefix=(env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID
-    ZELLIJ_CONFIG_DIR="$config_dir")
+    ZELLIJ_CONFIG_DIR="$config_dir" FUJIN_TRY_OWNER="$(owner_id)")
 
   # 別ウィンドウで開く。zellij の中からでも使えるので、ネストの回避策にもなる
   if [ "$open_window" -eq 1 ]; then
