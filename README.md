@@ -8,6 +8,11 @@ A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualize
 the state of AI agents (Claude Code, etc.) running in each pane, and lets you
 jump to them with global keybindings.
 
+<div align="center">
+  <img src="assets/demo.png" width="100%"
+       alt="fujin's sidebar listing three Claude Code agents across three zellij tabs, each row showing the agent's state icon and working directory, next to the focused agent's pane." />
+</div>
+
 - **Overview** — every tab and pane in the session, always visible in the sidebar
 - **State at a glance** — an icon tells you whether each agent is working,
   waiting on you, or finished
