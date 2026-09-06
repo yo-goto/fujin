@@ -156,9 +156,19 @@ download_assets() {
 
   command -v curl >/dev/null 2>&1 || die "curl is required for --download"
 
+  # フック本体の取得元をここで置き場所へ付け替える。**dry-run の手前で行う** —
+  # install_hooks は $hook_src の実在で「clone の外に居る」を判定するので、
+  # 後ろに置くと dry-run のときだけ判定が残り、--download を付けているのに
+  # 「--download を付けて再実行しろ」と言って落ちる
+  if [ "$do_hooks" -eq 1 ]; then
+    hook_src=$hook_dst
+  fi
+
   if [ "$dry_run" -eq 1 ]; then
     info "would download fujin.wasm -> $wasm_path"
-    info "would download fujin-hook.sh -> $hook_dst"
+    if [ "$do_hooks" -eq 1 ]; then
+      info "would download fujin-hook.sh -> $hook_dst"
+    fi
     return 0
   fi
 
@@ -178,8 +188,6 @@ download_assets() {
     mv "$tmp" "$hook_dst"
     chmod +x "$hook_dst"
     ok "downloaded $hook_dst"
-    # 以降のコピー段はもう要らない
-    hook_src=$hook_dst
   fi
 }
 
@@ -319,7 +327,9 @@ install_hooks() {
   step "Claude Code hooks  $claude_settings"
 
   command -v jq >/dev/null 2>&1 || die "jq is required for hook registration (brew install jq)"
-  if [ ! -f "$hook_src" ]; then
+  # リリースから取ってくる場合（$hook_src が置き場所そのもの）は確かめない。
+  # dry-run ではまだそこに無いのが正しい
+  if [ "$hook_src" != "$hook_dst" ] && [ ! -f "$hook_src" ]; then
     die "hook script not found: $hook_src
     (running setup.sh outside the repository? re-run with --download)"
   fi
