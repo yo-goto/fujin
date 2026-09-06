@@ -8,19 +8,19 @@ A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualize
 the state of AI agents (Claude Code, etc.) running in each pane, and lets you
 jump to them with global keybindings.
 
-> [!NOTE]
-> The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" /
-> "to arrange a formation" — treating your panes as a formation to arrange and
-> oversee at a glance. To English speakers, `fujin` also reads as 風神 (*fūjin*),
-> the Japanese god of wind — pairing the stillness of forming up with the motion
-> of wind sweeping across your panes to watch over them.
-
 - **Overview** — every tab and pane in the session, always visible in the sidebar
 - **State at a glance** — an icon tells you whether each agent is working,
   waiting on you, or finished
 - **Jump** — reach any pane with a couple of keystrokes or a single click, while
   your focus stays in your working pane (with fuzzy search over pane name, tab
   name, and cwd)
+
+> [!NOTE]
+> The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" / "to
+> arrange a formation" — treating your panes as a formation to oversee at a
+> glance. To English speakers, `fujin` also reads as 風神 (*fūjin*), the Japanese
+> god of wind, pairing the stillness of forming up with the motion of wind
+> sweeping across your panes.
 
 ## Design principles
 
@@ -31,80 +31,23 @@ Free forever, with no plan to bolt on cloud features to monetize later. Not a
 general-purpose multiplexer replacement, but a zellij-only plugin that doesn't
 take on features that would add complexity.
 
-## Status icons
+## Install
 
-Every pane row starts with a one-character state icon, and each state has its
-own color. **The legend lives in the plugin**: press `?` in nav mode and it
-sits right under the key list, so you never have to come back here to read it.
-
-Panes without an agent (a plain shell, say) show `›` in that same spot. It is
-not one of the states, so it carries no color.
-
-**Command panes get the same icons.** Anything started as a command pane
-(`zellij run -- docker build .`, a `command` block in a layout, …) shows `»`
-while it runs and `●` / `×` when it exits, so a long build tells you it is done
-the same way an agent does. No hook or setup is needed — zellij already knows
-the command. Command panes never carry `blocked` or `idle`, and if an agent is
-registered on the same pane, the agent's state wins.
-
-Two counters may follow the pane name: `+N` for active subagents, `[N]` for
-incomplete tasks. A floating pane has its name wrapped in parentheses,
-`(name)`. A pane with no name shows its command line instead, or its cwd if it
-isn't a command pane.
-
-`done` / `blocked` / `error` are **cleared automatically once you focus that
-pane** (a read-receipt model). Only the ones you haven't attended to stay lit.
-Merely passing through doesn't count — the focus has to stay put for a moment
-before a state is marked read, so hopping via another pane on your way
-somewhere else won't wipe out what it was showing.
-
-When the list is taller than the screen, it scrolls just far enough to keep the
-selected row visible. Hidden rows are announced by `▴ … N more` /
-`▾ … N more` at the top and bottom edges.
-
-## Requirements
-
-- zellij 0.44 or later
-- `curl` (to fetch a release) or Rust + `rustup target add wasm32-wasip1` (to build it yourself)
-- `jq` (for the Claude Code hook)
-
-## Quick start
-
-Grab the prebuilt wasm from the latest release (**no Rust needed**):
+You need zellij 0.44 or later and `curl` (plus `jq` for the Claude Code hook).
+**No Rust required.**
 
 ```bash
 curl -fsSLO https://github.com/yo-goto/fujin/releases/latest/download/setup.sh
 bash setup.sh --download
 ```
 
-What `setup.sh` does:
+`setup.sh` puts the wasm and the hook script in `~/.config/zellij/plugins/`,
+generates `~/.config/zellij/layouts/fujin.kdl`, and registers the hook for all 10
+events in `~/.claude/settings.json`. **Updating is the same command** — it is
+idempotent and backs up `settings.json`.
 
-- Downloads `fujin.wasm` and the hook script into `~/.config/zellij/plugins/`.
-- Generates `~/.config/zellij/layouts/fujin.kdl`. The two mistakes that are easy
-  to make by hand — `children` vs `pane`, and forgetting `new_tab_template`
-  ([details below](#3-keep-the-sidebar-resident-layout)) — cannot happen in the
-  generated file.
-- Registers the hook's path for all 10 events in `~/.claude/settings.json`. No
-  writing the same path ten times.
-- Prints the snippet to add to `config.kdl` — it **never edits that file**.
-
-<details>
-<summary>Building from source instead</summary>
-
-Needs Rust and `rustup target add wasm32-wasip1`.
-
-```bash
-git clone https://github.com/yo-goto/fujin.git && cd fujin
-make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
-make setup     # generate the layout, register the Claude Code hooks
-```
-
-`make setup` just runs `extras/setup.sh` without `--download`. Extra arguments go
-through `SETUP_ARGS`, e.g. `make setup SETUP_ARGS="--no-hooks"`.
-
-</details>
-
-Then paste what it printed into `~/.config/zellij/config.kdl`:
+It never edits `config.kdl`; it prints what to paste instead, since merging into
+existing blocks is hard to recover from if text processing breaks it:
 
 ```kdl
 plugins {
@@ -126,229 +69,86 @@ keybinds {
 default_layout "fujin"
 ```
 
-Restart zellij and the sidebar appears on the left. On first load, focus that
-pane and press `y` to approve the permission prompt.
+Restart zellij and the sidebar appears on the left. The first load asks for
+permissions: focus that pane and press `y`. Approvals are recorded **per absolute
+wasm path**, so moving the file means approving again.
 
-| Option | Effect |
-|---|---|
-| `--download` | Fetch the wasm and the hook script from a release |
-| `--version TAG` | Which release to fetch (default `latest`) |
-| `--dry-run` | Show what would be written, write nothing |
-| `--no-hooks` | Skip the Claude Code hook registration |
-| `--layout-only` / `--hooks-only` / `--config-only` | Run just that part |
-| `--width N` | Sidebar width (default 32). A percentage such as `20%` is written as-is and implies `--resizable` |
-| `--resizable` | Write the width as a percentage instead of a fixed column count, so zellij's own resize can move the border during a session |
-| `--force` | Overwrite an existing layout file without asking |
+### Sidebar width
 
-**Updating is the same command.** Re-running is safe — hook registration is
-idempotent, `settings.json` is backed up first, and only the layout overwrite
-asks for confirmation. If the registered hook path has gone stale (you moved
-`fujin-hook.sh`), re-running rewrites it to the new one.
-
-> [!NOTE]
-> `config.kdl` is the one file the script won't touch. `plugins` and `keybinds`
-> need to be merged into blocks you may already have (possibly with
-> `keybinds clear-defaults=true` and per-mode nesting), and getting that wrong
-> with text munging is expensive to recover from. It reports which pieces are
-> still missing instead.
-
-## Setup (by hand)
-
-This is what `setup.sh` does, step by step. Follow it if you'd rather not run the
-script, or if you're folding fujin into an existing configuration.
-
-### 1. Place the wasm
-
-The wasm can live anywhere, but `~/.config/zellij` is the config directory on
-every OS, so keeping it there makes the setup steps environment-independent.
-
-```bash
-# from a release
-mkdir -p ~/.config/zellij/plugins
-curl -fsSL https://github.com/yo-goto/fujin/releases/latest/download/fujin.wasm \
-  -o ~/.config/zellij/plugins/fujin.wasm
-
-# or build it yourself (needs Rust)
-make install   # release build, copied to the same place
-```
-
-To put it somewhere else: `make install PLUGIN_DIR=/path/to/plugins`.
-
-### 2. Define an alias
-
-In `~/.config/zellij/config.kdl`:
-
-```kdl
-plugins {
-    fujin location="file:~/.config/zellij/plugins/fujin.wasm"
-}
-```
-
-- **`~` (and env vars like `$HOME`) in `file:~/…` are expanded by zellij**, so
-  you don't need to hardcode your home directory name
-- From here on, layouts and keybindings only need to say `"fujin"`. Besides
-  keeping the path in one place, this **structurally prevents a whole class of
-  configuration-mismatch bugs** (see [Configuration](#configuration))
-- The alias's `location` **cannot be a relative path**. cwd expansion doesn't
-  apply here, so use an absolute path, a `~`-prefixed path, or `https://…`
-
-### 3. Keep the sidebar resident (layout)
-
-Embed the sidebar in the default layout's tab template. Example
-(`~/.config/zellij/layouts/fujin.kdl`):
-
-```kdl
-layout {
-    default_tab_template {
-        pane size=1 borderless=true {
-            plugin location="zellij:tab-bar"
-        }
-        pane split_direction="vertical" {
-            pane size=32 borderless=true {
-                plugin location="fujin"
-            }
-            pane
-        }
-        pane size=1 borderless=true {
-            plugin location="zellij:status-bar"
-        }
-    }
-    // put the same content in new_tab_template too (see below)
-}
-```
-
-> [!CAUTION]
-> Use `pane`, not `children`. `children` is a marker meaning "insert this
-> layout's own tab panes here." A template-only layout with no `tab` node has
-> nothing to insert, so you'd end up with **a tab that has zero terminal panes**.
-> If that happens at session creation, zellij just exits.
-
-<!-- -->
-
-> [!IMPORTANT]
-> Write the same content into `new_tab_template` as well. `default_tab_template`
-> is documented to fall back to the "new tab template," but **that fallback
-> doesn't kick in when a session is created via the session manager
-> (`Ctrl+o` → `w`) with a chosen layout** — you get zellij's built-in default
-> instead. Writing both makes it work regardless of how the tab was created.
-
-If you want it to work reliably no matter the launch path, you can also specify
-the layout on the `NewTab` keybinding itself:
-
-```kdl
-bind "n" {
-    NewTab { layout "fujin"; }
-    SwitchToMode "normal"
-}
-```
-
-And in `~/.config/zellij/config.kdl`:
-
-```kdl
-default_layout "fujin"
-```
-
-To try it out without making it resident, it also works as a floating pane:
-
-```bash
-zellij action new-pane --floating --width 40 --height 20 -p "fujin"
-```
-
-On first load you'll see a permission prompt — focus the pane and press `y` to
-approve (required permissions: `ReadApplicationState` / `ChangeApplicationState` /
-`ReadCliPipes` / `InterceptInput` / `MessageAndLaunchOtherPlugins` /
-`OpenTerminalsOrPlugins` / `ReadPaneContents`). Approval is recorded **per absolute path** of the
-expanded wasm, so overwriting it in place needs no re-approval, but **moving it
-somewhere else does**.
-
-Whether the sidebar's width can be changed during a session depends on how the
-layout spells it. The default `pane size=32` is a fixed column count, which
-zellij's resize does not touch — the border will not move. Pass `--resizable` at
-setup time to write the width as a percentage instead, and zellij's standard
-resize works on it. The reliable route is the resize mode — `Ctrl+n`, then `h`
-(sidebar shrinks) / `H` (grows), `Esc` to leave. `Alt+-` (grows) works too, but
-**`Alt+=` / `Alt++` need `Shift` and some terminals don't deliver them** (`+` is
-`Shift`+`=` on a US layout; on a JIS layout `=` is `Shift`+`-`, so both are
-affected). If you resize often, bind it to characters that need no `Shift`:
-
-```kdl
-// in the keybinds block of ~/.config/zellij/config.kdl
-bind "Alt ," { Resize "Decrease"; }   // sidebar grows
-bind "Alt ." { Resize "Increase"; }   // sidebar shrinks
-```
-
-Setup itself:
-
-```sh
-make setup SETUP_ARGS="--resizable --layout-only"
-```
-
-`--resizable` converts `--width` (columns) using the terminal width at the time
-it runs. **Run inside a zellij pane, it measures that pane rather than the whole
-terminal**, so passing the percentage directly is more predictable (no
-`--resizable` needed then):
+The default `pane size=32` is a column count, which zellij's own resize doesn't
+touch. Rewrite it as a **percentage** to make the sidebar resizable:
 
 ```sh
 make setup SETUP_ARGS="--width 20% --layout-only"
 ```
 
-A rewritten layout only takes effect in **new sessions** — running ones keep the
-layout they started with.
+The reliable way to resize is `Ctrl+n` for resize mode, then `h` (narrower) /
+`H` (wider), `Esc` to leave. `Alt+-` works too, but `Alt+=` / `Alt++` need
+`Shift` on many layouts and may never reach zellij.
 
-The trade-off is that the width then scales with the terminal, so the sidebar
-gets narrower on a narrow terminal (the footer hints and such are laid out for
-32 columns). To keep it fixed but pick a different value, pass `--width N` as a
-plain column count.
+Changing the width **pulls the sidebars in other tabs along** (with a percentage
+only) — though dragging the border to a width off zellij's step grid (5% of the
+terminal) only gets them to the nearest reachable one.
 
-**Resizing one tab's sidebar resizes them all**, and tabs opened afterwards come
-up at the new width too. A zellij layout is only a template applied when a tab is
-created, so widths would otherwise drift apart per tab; fujin notices the change
-and pulls the other tabs' sidebars to match. This only happens with a percentage
-width — a fixed column count cannot be resized in the first place.
+The trade-off is that the width now scales with the terminal, so a narrow terminal
+gets a narrow sidebar (the on-screen text is laid out for 32 columns). A rewritten
+layout only applies to new sessions.
 
-The follow-up uses zellij's stepped resize (5% of the terminal width per step),
-so if you **drag** the border to a width that falls between steps, other tabs
-settle at the **nearest reachable width** (off by at most half a step). Keyboard
-or CLI resizes line every tab up exactly.
+<details>
+<summary><code>setup.sh</code> options</summary>
 
-### 4. Global keybindings (jump feature)
+| Option | What it does |
+|---|---|
+| `--download` | fetch the wasm and hook script from a release |
+| `--version TAG` | which release to fetch (default `latest`) |
+| `--dry-run` | write nothing; print what would be written |
+| `--no-hooks` | skip registering the Claude Code hooks |
+| `--layout-only` / `--hooks-only` / `--config-only` | run just that part |
+| `--width N` | sidebar width (default 32). Written as `20%` it is treated as `--resizable` |
+| `--resizable` | convert `--width` (columns) to a percentage of the terminal. Run inside a zellij pane it measures that pane, not the terminal, so passing a percentage directly is safer |
+| `--force` | overwrite an existing layout file without asking |
 
-Add these to the keybinds block in `~/.config/zellij/config.kdl` (e.g.
-`shared_except "locked"`). There's a nav-mode approach and a direct-key
-approach, and you can use both together.
+</details>
 
-#### Nav mode (recommended)
+<details>
+<summary>Building from source</summary>
 
-Feels like zellij's own `Ctrl+p` → pane mode. `config.kdl` only needs **one
-entry key**; the keys inside the mode are interpreted by the plugin itself:
+Needs Rust and `rustup target add wasm32-wasip1`.
 
-```kdl
-bind "Ctrl y" {
-    MessagePlugin "fujin" {
-        name "fujin_mode"
-        floating true
-    }
-}
+```bash
+git clone https://github.com/yo-goto/fujin.git && cd fujin
+make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
+make setup     # generate the layout, register the Claude Code hooks
 ```
 
+`make setup` just runs `extras/setup.sh` without `--download`; extra arguments go
+through `SETUP_ARGS`, e.g. `make setup SETUP_ARGS="--no-hooks"`. Change the
+destination with `make install PLUGIN_DIR=/path/to/plugins`. `make check` runs
+fmt-check, lint, and tests.
+
+</details>
+
+## Keybindings
+
+There are two routes — nav mode and direct keys — and they combine. Both go in
+the keybinds block of `config.kdl` (`shared_except "locked"`, say).
+
+### Nav mode (recommended)
+
+It feels like zellij's own `Ctrl+p` pane mode. You bind **one key to enter** (the
+snippet in the install section above) and the plugin interprets the keys inside the
+mode itself, so no built-in mode is sacrificed and new keys never need a
+`config.kdl` change. Change `Ctrl+y` if something else has taken it
+(`p`/`t`/`n`/`h`/`s`/`o`/`q`/`g` are taken in zellij's defaults).
+
 > [!IMPORTANT]
-> Keep `floating true`. When a session has no fujin instance at all (a session
-> created without the layout, for example), this pipe has no recipient, so zellij
-> launches fujin itself. By default it opens tiled — splitting your working pane
-> and landing on the right at an arbitrary width — and the plugin cannot fix that
-> from the inside. With `floating true` it opens floating, and fujin moves itself
-> to the same left edge and width as the resident sidebar (closing on `Esc` or on
-> a jump). It has no effect when fujin is already running.
+> Always include `floating true`. When no fujin is running in the session this
+> pipe has no recipient, so zellij launches one — tiled by default, which splits
+> your working pane and appears on the right, and the plugin cannot undo that.
 
-`Ctrl+y` is unused by zellij's defaults; feel free to pick something else if
-it's taken (`p`/`t`/`n`/`h`/`s`/`o`/`q`/`g` are already spoken for by default).
-Because the mode's keymap lives in the plugin, **you don't have to give up a
-built-in mode**, and adding more keys never requires touching `config.kdl`.
-See [Usage](#usage) for what the mode does.
+### Direct keys (no mode)
 
-#### Direct keys (no mode)
-
-If you'd rather move with a single keystroke:
+For single-keystroke actions:
 
 ```kdl
 bind "Alt u" {
@@ -365,149 +165,61 @@ bind "Alt c" {
 }
 ```
 
-`fujin_toggle_cwd` doesn't move anything — it flips the cwd rows (`show_cwd`) on
-and off at runtime. That makes the `show_cwd` setting the **startup default**:
-flipping the rows needs neither a `config.kdl` edit nor a restart. Every tab's
-sidebar flips together, and tabs created later inherit the current state.
+`fujin_toggle_cwd` isn't a move but a display toggle: it flips the cwd row
+(`show_cwd`) at runtime. Every tab switches together, and tabs created afterwards
+inherit the current state, which makes the `show_cwd` setting the initial value.
 
 > [!CAUTION]
-> Don't bind `Alt Enter`. Claude Code's Shift+Enter relies on a terminal-side
-> setting (`Shift+Return -> ESC CR`, installed by `/terminal-setup`), and zellij
-> interprets that `ESC CR` as `Alt Enter`. Claiming it breaks Shift+Enter's
-> newline from reaching the pane.
+> Don't bind `Alt Enter`. Claude Code's Shift+Enter relies on a terminal setting
+> (`Shift+Return -> ESC CR`, installed by `/terminal-setup`), and zellij reads
+> that `ESC CR` as `Alt Enter`. Taking it stops Shift+Enter from reaching the pane.
 
-<!-- -->
-
-> [!NOTE]
-> Don't use `MessagePluginId`. The sidebar launches one instance per tab,
-> so targeting by ID causes key collisions. A `MessagePlugin` addressed by alias
-> (or URL) reaches every instance instead.
-
-### 5. Claude Code hooks (state notifications)
-
-Register `extras/claude-hooks/fujin-hook.sh` as a hook (`make setup` copies it to
-`~/.config/zellij/plugins/` first and registers that path). By hand, add it to
-`hooks` in `~/.claude/settings.json`:
-
-```jsonc
-{
-  "hooks": {
-    // Add the same entry for all of the following events:
-    // SessionStart, UserPromptSubmit, Stop, StopFailure,
-    // SessionEnd, SubagentStart, SubagentStop, TaskCreated, TaskCompleted
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/path/to/extras/claude-hooks/fujin-hook.sh" }
-        ]
-      }
-    ],
-    // Notification is the only one that needs a matcher to narrow the type
-    "Notification": [
-      {
-        "matcher": "permission_prompt|agent_needs_input|idle_prompt|elicitation_dialog",
-        "hooks": [
-          { "type": "command", "command": "/path/to/extras/claude-hooks/fujin-hook.sh" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-- The hook only takes effect for **newly started** Claude Code sessions
-- It's a no-op for Claude Code sessions running outside zellij (a plain
-  terminal)
-- It's also a complete no-op when the sidebar isn't running (no side effects)
-
-## Troubleshooting
-
-### The sidebar doesn't show up
-
-Usually the layout isn't taking effect. Check that `~/.config/zellij/config.kdl`
-has `default_layout "fujin"` and that the layout defines `new_tab_template`
-(`setup.sh` reports which pieces are missing).
-
-To see what actually got loaded, run `zellij action dump-layout` inside the
-session.
-
-If the pane's space is reserved but its contents are **completely blank**, the
-permission approval is likely stuck: with even one requested permission left
-unapproved, neither the prompt nor fujin's own drawing appears. This also
-happens when you approved an earlier version and the set of requested
-permissions has grown since. Remove that wasm's entry from `permissions.kdl` in
-zellij's cache directory, then start a fresh session and approve again.
-
-### Updated the wasm but the old behaviour persists
-
-**Swapping the wasm does not affect running sessions.** Existing instances keep
-running the old wasm — start a fresh session.
-
-### The keybinding (`Ctrl+y`, …) does nothing
-
-If you configured it without the alias, the layout side and the keybinding side
-may disagree on the plugin's configuration. See [Configuration](#configuration).
-Going through the alias makes this impossible by construction.
-
-### The permission prompt keeps coming back
-
-Approval is recorded **per absolute path**. Overwriting the wasm in place needs
-no re-approval, but moving it elsewhere counts as a new plugin.
-
-### It won't start, or behaves strangely
-
-Clear zellij's cache and try again.
-
-```bash
-rm -rf ~/Library/Caches/org.Zellij-Contributors.Zellij   # macOS
-rm -rf ~/.cache/zellij                                   # Linux
-```
-
-That also drops the recorded approvals (`permissions.kdl`), so the next launch
-asks again.
-
-### A floating sidebar got left behind
-
-When the focused tab has no sidebar of its own, pressing `Ctrl+y` makes fujin
-summon itself as a temporary floating pane. It normally closes itself on `Esc`
-or on a jump, but if one ever gets stranded there is no way to close it by hand:
-it is excluded from focus cycling, so neither you nor the CLI can reach it. This
-sweeps them up:
-
-```bash
-zellij pipe --name fujin_dismiss
-```
-
-### Trying it without changing any config
-
-It works as a floating pane:
-
-```bash
-zellij action new-pane --floating --width 40 --height 20 -p "fujin"
-```
-
-zellij's built-in plugin manager (`Ctrl+o` → `p`) can also load it by path.
+Don't use `MessagePluginId` either. The sidebar runs one instance per tab, so an
+ID picks a single one and the keys collide; `MessagePlugin` with the alias reaches
+every instance.
 
 ## Usage
 
 Everything works while your focus stays in your working pane — you never need to
 focus the sidebar itself (in fact it's excluded from focus cycling entirely).
 
+### Reading the sidebar
+
+Every pane row starts with a one-character state icon, and each state has its own
+color. **The legend lives in the plugin**: press `?` in nav mode and it sits right
+under the key list, so you never have to come back here to read it. Panes without
+an agent (a plain shell, say) show `›` in that same spot, uncolored.
+
+- The counters after a pane name are `+N` for active subagents and `[N]` for
+  incomplete tasks
+- A floating pane has its name wrapped in parentheses, `(name)`
+- A pane with no name shows its command line instead, or its cwd if it isn't a
+  command pane
+- When the list is taller than the screen it scrolls to keep the selected row
+  visible, and hidden rows are announced by `▴ … N more` / `▾ … N more`
+
+**Command panes get the same icons** with no hook or setup — anything started as
+one (`zellij run -- docker build .`, a `command` block in a layout, …) is
+`working` while it runs, `done` on exit code 0, and `error` otherwise (non-zero,
+signal, or interrupt). They never carry `blocked` or `idle`, and if an agent is
+registered on the same pane, the agent's state wins.
+
+`done` / `blocked` / `error` are **cleared automatically once you focus that pane**
+(a read-receipt model). Merely passing through doesn't count: the focus has to
+stay put for a moment before a state is marked read.
+
 ### Click to jump
 
-Left-clicking a pane row in the sidebar jumps to that pane, with no mode to
-enter. A pane in another tab brings that tab along; a floating pane brings up
-the floating layer. Clicking a tab heading, or the empty space below the list,
-does nothing.
-
-If nothing happens, check that zellij's `mouse_mode` is still enabled in
-`~/.config/zellij/config.kdl` (it is on by default).
+Left-clicking a pane row jumps to that pane, with no mode to enter. A pane in
+another tab brings that tab along; a floating pane brings up the floating layer.
+Clicking a tab heading, or the empty space below the list, does nothing. If
+nothing happens, check that zellij's `mouse_mode` is still enabled (it is by
+default).
 
 ### Nav mode
 
-Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
-`▲ fujin  [nav]`, the footer shows `?:help  esc:exit`, and the following keys
-become active:
+`Ctrl+y` changes the header to `▲ fujin  [nav]` and the footer to
+`?:help  esc:exit`. Every sub-mode below lives inside this one.
 
 | Key | Action |
 |---|---|
@@ -515,123 +227,85 @@ become active:
 | `k` / `↑` | previous pane |
 | `g` / `G` | first / last |
 | `Enter` / `l` / `Space` | jump to the selected pane and exit the mode |
-| `/` | enter search sub-mode (below) |
-| `n` | enter number jump sub-mode (below) |
-| `t` | enter triage mode (panes that need attention, most urgent first) |
-| `d` | enter the pane termination sub-mode (below) |
-| `m` / `M` | mark / unmark a pane, or clear every mark (below) |
-| `p` | toggle the preview (below) |
+| `/` | search |
+| `n` | number jump |
+| `t` | triage |
+| `d` | terminate a pane |
+| `m` / `M` | mark / unmark a pane, or clear every mark |
+| `p` | toggle the preview |
 | `r` | mark the previewed pane as read (only while the preview is up) |
-| `?` | open the key help (below) |
+| `?` | open the key help |
 | `Esc` / `q` | exit the mode |
 
 Any other key also exits the mode (a safety valve so you never get stuck with
 keystrokes going nowhere).
 
-The highlighted row always follows the pane you have focused, so nav mode starts
-on the pane you are working in. The one exception: if you leave with `Esc` and
-come back without moving the focus, it resumes where you were browsing.
+The highlighted row always follows the pane you have focused, so nav mode starts on
+the pane you are working in — except that leaving with `Esc` and coming back without
+moving the focus resumes where you were browsing. While the mode is active the
+sidebar borrows zellij's focus, so your working pane **keeps its frame but loses the
+focused-pane highlight**. Leaving hands the focus back to the pane you came from, or
+the one you jumped to.
 
-While nav mode is active, the sidebar borrows zellij's focus, so the pane you
-were working in keeps its frame but loses the focused-pane highlight — otherwise
-that highlight and the sidebar's own highlight would both claim to be your
-current target. Leaving the mode hands the focus back to the pane you came from
-(or to the pane you jumped to). Moving the focus yourself while in nav mode —
-clicking another pane, for instance — leaves the mode without taking the focus
-back.
+### Search (`/`)
 
-### Search (`/` inside nav mode)
+The footer becomes a query input line (`/…`) and fuzzy-filters the tree against
+pane name, owning tab name, and cwd. Matched characters are highlighted, which
+doubles as a hint for which field matched (a cwd match shows on that row even if
+`show_cwd` is disabled). With zero matches the list reads `no matches`.
 
-Pressing `/` while in nav mode turns the footer into a query input line
-(`/…`) and fuzzy-filters the tree against pane name, owning tab name, and
-cwd. Matched characters are highlighted, and the highlight location doubles
-as a hint for which field matched (a cwd match is shown on that row even if
-`show_cwd` is disabled).
+Search is split into two vim-like states: **editing** and **navigating**. `/`
+starts you in editing; `Esc` moves you to navigating while keeping the query. You
+can tell them apart by the query colour (normal vs dimmed) and the footer hints
+(`esc:browse  enter:jump` vs `j/k:move  ?:help  i:edit …`).
 
-Search is split into two vim-like states: **editing** and **navigating**.
-`/` starts you in editing; pressing `Esc` moves you to navigating while
-keeping the query. These cues tell you which state you are in:
-
-| | editing | navigating |
+| Key | Editing | Navigating |
 |---|---|---|
-| query text | normal | dimmed |
-| footer hints | `esc:browse  enter:jump` | `j/k:move  ?:help  i:edit …` |
+| `Enter` | jump to the selected row and exit nav mode (no-op with zero matches) | ← same |
+| `Esc` | switch to navigating (the query is kept) | discard the query, back to nav mode |
+| `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the results | ← same |
+| `j` / `k` | append to the query | move the cursor within the results |
+| `i` | append to the query | go back to editing (the query is kept) |
+| `?` | append to the query | open the key help |
+| `Backspace` | delete the last character | nothing |
+| any other printable character | append to the query | nothing |
+| `alt+m` / `alt+p` | mark / toggle the preview | ← same |
 
-The text cursor (the terminal-drawn cursor that the IME candidate window
-follows) sits at the end of the input field in both states. fujin cannot set
-its shape, so it follows your terminal settings and is not used as a cue for
-telling the states apart.
-
-Editing keys:
-
-| Key | Action |
-|---|---|
-| printable characters | append to the query (`?` included; nav mode's single-letter shortcuts are all disabled while searching) |
-| `Backspace` | delete the last character of the query |
-| `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
-| `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
-| `Esc` | switch to navigating (the query is kept) |
-
-Any other key (`←` / `→`, a function key, …) exits nav mode entirely — the same
-safety valve as in nav mode proper.
-
-Navigating keys (**every other unmodified key does nothing**):
-
-| Key | Action |
-|---|---|
-| `j` / `k`, `↓` / `Tab`, `↑` / `Shift+Tab` | move the cursor within the filtered results |
-| `i` | go back to editing (the query is kept) |
-| `?` | open the key help (below) |
-| `Enter` | jump to the selected row and exit nav mode entirely |
-| `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
-
-Two keys work in both states. Printable characters go to the query, so these
-carry an `Alt`:
-
-| Key | Action |
-|---|---|
-| `alt+m` | mark / unmark the pane under the cursor (below) |
-| `alt+p` | toggle the preview (below) |
-
-Apart from those two, any key with `Ctrl` / `Alt` / `Super` exits nav mode
-entirely, from either state.
+Keys that editing has no meaning for (`←` / `→`, a function key, …), and anything
+with a modifier other than `alt+m` / `alt+p`, exit nav mode entirely from either
+state.
 
 The query is discarded every time you leave search, so it always starts empty
 next time. `cwd` is only known for panes that reported it via the hook — an
-ordinary shell pane won't match on cwd. With zero matches the list is replaced
-by `no matches`.
+ordinary shell pane won't match on cwd.
 
-### Number jump (`n` inside nav mode)
+### Number jump (`n`)
 
-Pressing `n` numbers every selectable pane — one running sequence across all
-tabs, not per-tab — and shows the numbers in a column on the left. Typing digits
-narrows the candidates by prefix, and the jump happens the moment only one
-candidate is left; there is no `Enter` to press. Numbers are zero-padded to the
-width of the total count (`01`, `02`, … with 12 panes), so no number is a prefix
-of another and you never end up with an ambiguous `1`.
+Every selectable pane is numbered — one running sequence across all tabs — in a
+column on the left. Typing digits narrows by prefix and the jump happens the
+moment one candidate is left; there is no `Enter` to press. Numbers are
+zero-padded to the width of the total (`01`–`12` with 12 panes), so no number is a
+prefix of another. Typing a number that doesn't exist clears the buffer.
 
 | Key | Action |
 |---|---|
 | `0`-`9` | narrow the candidates, jumping as soon as one is left |
 | `Backspace` | delete the last digit |
-| `?` | open the key help (below) |
+| `?` | open the key help |
 | `Esc` | leave the sub-mode and go back to the tree (nav mode continues) |
 
-Typing a number that does not exist clears the buffer instead of forcing you to
-back out with `Backspace`. The number column is only there while the sub-mode is
-active, so it never eats into the usual row layout. The footer shows `n`
-followed by the digits you have typed; numbers still in the running stay lit in
-the key colour while the ones you ruled out are dimmed.
+The footer shows `n` followed by the digits typed so far, and only the numbers
+still in the running stay lit. The number column is only there while the sub-mode
+is active, so it never eats into the usual row layout.
 
-### Triage (`t` inside nav mode)
+### Triage (`t`)
 
-Pressing `t` changes the header to `▲ fujin  [tri]` and switches the list to a
-flat view that ignores tab boundaries. Only panes that carry a status
-(`error` / `blocked` / `working` / `done`) are shown, ordered by urgency
-(`error` > `blocked` > `working` > `done`; ties break by most recently
-changed). Each row is tagged with its owning tab name on the right. Panes that
-have never reported a status, and read (`idle`) panes, are left out. Command
-pane states join the same urgency ranking, agent or no agent.
+The header changes to `▲ fujin  [tri]` and the list flattens, ignoring tab
+boundaries. Only panes that carry a status are shown, ordered by urgency
+(`error` > `blocked` > `working` > `done`; ties break by most recently changed),
+each tagged with its owning tab name on the right. Panes that have never reported
+a status and read (`idle`) ones are left out; command pane states join the same
+ranking. An empty list reads `nothing to triage`.
 
 | Key | Action |
 |---|---|
@@ -639,119 +313,85 @@ pane states join the same urgency ranking, agent or no agent.
 | `g` / `G` | first / last |
 | `Enter` | jump to the selected pane and exit the mode (no-op if the list is empty) |
 | `m` / `M` | mark / unmark a pane, or clear every mark |
-| `p` | toggle the preview |
-| `r` | mark the previewed pane as read |
-| `?` | open the key help (below) |
-| `Esc` | leave triage and go back to the tree (nav mode continues) |
+| `p` / `r` | toggle the preview / mark the previewed pane as read |
+| `?` | open the key help |
+| `Esc` | go back to the tree (nav mode continues) |
 
-Leaving with `Esc` restores whichever row was selected before you entered triage.
-The footer hint reads `?:help  esc:back` here, since `Esc` returns to the tree
-rather than exiting. With nothing to show, the list reads `nothing to triage`.
+Leaving with `Esc` restores whichever row was selected before you entered (the
+footer hint reads `esc:back` rather than `esc:exit` for that reason).
 
-### Marks (`m` / `M` inside nav mode)
+### Marks (`m` / `M`)
 
-Pressing `m` marks the pane on the highlighted row; pressing it again unmarks
-it, and `M` clears every mark. A marked row shows `✓` to the left of its state
-icon (the column only appears in frames that have at least one mark, so it never
-eats into the usual row layout).
+`m` marks the pane on the highlighted row, pressing it again unmarks it, and `M`
+clears every mark. A marked row shows `✓` to the left of its state icon (the
+column only appears in frames that have at least one mark, so it never eats into
+the usual row layout).
 
-- Use `m` / `M` in the tree and the triage list, `alt+m` in the filtered search
-  results
-- **Marks may span tabs.** A row in another tab piles up just the same
-- **They survive leaving nav mode.** They are still there next time you enter
+- `m` / `M` in the tree and the triage list, `alt+m` in the filtered search results
+- **Marks span tabs, and they survive leaving nav mode**
 - Closing a pane drops just that pane's mark
-- Running a termination (below) clears them all; cancelling with `Esc` keeps them
+- Running a termination clears them all; cancelling with `Esc` keeps them
 
-For now, marks exist to give the termination sub-mode a batch of targets.
+For now, marks exist to give the termination below a batch of targets.
 
-### Terminate a pane (`d` inside nav mode)
+### Terminate a pane (`d`)
 
-Pressing `d` turns the footer into a confirmation prompt
-(`c:close k:kill x:kill+close`) and paints it — along with the `▲` in the
-header — in the theme's error colour. Nothing happens until you pick one of the
-three, and `Esc` backs out. The prompt does not spell out the pane name — the
-highlighted row already says which pane this is about, and the footer is too
-narrow to show a name without cutting it.
+The footer becomes a confirmation prompt (`c:close k:kill x:kill+close`) and the
+`▲` in the header turns the theme's error colour with it. Nothing happens until
+you pick one of the three, and `Esc` backs out.
 
 | Key | Action |
 |---|---|
 | `c` | close the pane, leaving its process alone |
 | `k` | send `SIGKILL` to the pane's process |
 | `x` | kill, then close the pane |
-| `?` | open the key help (below) |
+| `?` | open the key help |
 | `Esc` | cancel and go back to the tree (nav mode continues) |
 
-All three are offered whatever the pane is running — an agent, a command pane,
-or an unrelated shell. Killing a shell takes its children with it and zellij
-closes the pane on its own; a command pane (`zellij run -- …`) stays on screen
-after its command dies, which is what `x` is for. Killing a command pane whose
-command has already exited does nothing.
+The targets are every [marked](#marks-m--m) pane, or just the selected one if
+nothing is marked. With marks in play the prompt is prefixed with the count, as in
+`3 panes  c:close k:kill x:kill+close`, and running it clears every mark. With no
+targets at all, the prompt doesn't open.
 
-The targets are every pane you marked with `m`, or just the selected pane if
-nothing is marked (see [Marks](#marks-m--m-inside-nav-mode)). With marks in
-play the prompt is prefixed with the count, as in
-`3 panes  c:close k:kill x:kill+close` — how many panes are about to go is not
-something the highlight can tell you. Running one clears every mark (cancelling
-with `Esc` keeps them). With no targets at all, the prompt doesn't open.
+All three are offered whatever the pane is running — an agent, a command pane, or
+an unrelated shell. Killing a shell takes its children with it and zellij closes
+the pane on its own; a command pane (`zellij run -- …`) stays on screen after its
+command dies, which is what `x` is for.
 
-### Preview (`p` inside nav mode)
+### Preview (`p`)
 
-Pressing `p` opens a preview to the right of the sidebar showing the contents of
-the selected pane (or, in the filtered results and the triage list, the pane
-under the cursor). The focus does not move, so you can keep walking the list
-with `j` / `k` and see what each pane is up to. Pressing `p` again — or jumping,
-or leaving nav mode — closes it.
+A preview opens to the right of the sidebar showing the contents of the
+highlighted pane. The focus does not move, so you can keep walking the list with
+`j` / `k` and see what each pane is up to. Pressing `p` again — or jumping, or
+leaving nav mode — closes it (inside the search sub-mode the key is `alt+p`).
 
-| Key | Action |
-|---|---|
-| `p` | toggle the preview (`alt+p` inside the search sub-mode) |
-| `r` | mark the previewed pane as read (`done` / `blocked` / `error` only) |
+What you get is a **snapshot taken when the selection moved**: the pane may keep
+running behind it, but the preview will not change until you move again. Zellij only
+hands plugins the plain text of a pane, so colours and bold are gone too — this is
+for getting the gist, not a faithful reproduction.
 
-What you get is a **snapshot taken when the selection moved**. The pane may keep
-running behind it, but the preview will not change until you move the selection
-again — there is no polling. Zellij also only hands plugins the plain text of a
-pane, so colours and bold are not reproduced. This is for getting the gist, not
-a faithful reproduction.
+Looking at a pane does not mark it read, since the focus never moves there. Press
+`r` to say you have seen it (`done` / `blocked` / `error` only).
 
-Looking at a pane does not mark it read (the focus never moves there). Press `r`
-to say you have seen it.
+### Help (`?`)
 
-### Help (`?` inside nav mode)
+The sidebar is 32 columns wide, which is not enough to spell out every key, so the
+always-visible hints are limited to `?:help` and `esc:exit` in the footer. `?`
+keeps the header in place, replaces the tree with the key list plus the status
+icon legend, and turns the footer into `press any key to close`. Any key closes
+it; that key is not acted on, so press it again if you meant it as a command. Nav
+mode stays active the whole time.
 
-The sidebar is 32 columns wide, which is not enough to spell out every key, so
-the always-visible hints are limited to `?:help` and `esc:exit` in the footer.
-Pressing `?` keeps the header in place, replaces the tree with the key list plus
-the status icon legend, and turns the footer into `press any key to close`. Any
-key closes it and brings back whatever was on screen before (nav mode or
-whichever sub-mode you were in). The key you press to close is not acted on, so
-press it again afterwards if you meant it as a command. Nav mode stays active
-the whole time.
-
-The key list is specific to the mode you are in (tree, search, number jump,
-triage, termination); the status icon legend is the same wherever you open it
-from. If the overlay is taller than the screen it gets the same overflow markers
-as the list — it closes on any key, so it can't have scroll keys of its own.
-
-### Event → state mapping
-
-| Hook event | State transition |
-|---|---|
-| `SessionStart` | idle (register, reset counters) |
-| `UserPromptSubmit` | working |
-| `Notification` | blocked (message retained) |
-| `Stop` | done — but stays working while background subagents are still running |
-| `StopFailure` | error — not overwritten by a following `Stop` |
-| `SessionEnd` | unregister |
-| `SubagentStart` / `SubagentStop` | subagent count ±1; done when the last one stops after `Stop` |
-| `TaskCreated` / `TaskCompleted` | incomplete task count ±1 |
+The key list is specific to the mode you are in, while the status icon legend is
+the same wherever you open it from. Anything that doesn't fit the screen gets the
+same overflow markers as the list.
 
 ## Configuration
 
 **Write settings on the alias definition (the `plugins` block in `config.kdl`).**
-That is the only supported place to put them (see
-[Only the alias route is supported](#only-the-alias-route-is-supported)).
-
-The settings below are all there is.
+That is the only place fujin supports (→
+[Only the alias route is supported](#only-the-alias-route-is-supported)). The list
+below is exhaustive.
 
 <!-- settings:begin -->
 <!-- Generated from SETTINGS in repos/main/src/config.rs. Don't edit by hand; run `make readme` -->
@@ -782,71 +422,95 @@ plugins {
 
 <!-- settings:end -->
 
-Since `cwd` comes from the hook payload, it's only shown for agent panes that
-have the hook configured.
-
-### Writing values
-
-- Quote the value (`show_cwd "true"`). The property form (`show_cwd="true"`)
-  is understood as the same thing.
-- The only booleans accepted are `"true"` and `"false"`. `1` and `yes` are not
-  interpreted.
-- When a value can't be interpreted, the sidebar footer shows a warning like
-  `!bad value: show_cwd` **for a few seconds after startup**. That setting
-  keeps its default.
+- Quote the values (`show_cwd "true"`). The property form (`show_cwd="true"`)
+  means the same thing
+- The only booleans accepted are `"true"` and `"false"` — not `1` or `yes`
+- A value that can't be parsed shows in the footer as `!bad value: show_cwd`
+  **for a few seconds after startup**, and that setting falls back to its default
 
 ### Footer key hints
 
-`up_key` / `down_key` / `go_key` / `toggle_cwd_key` are display-only: they tell
-the footer what to print, they don't bind anything. Bind the keys as usual (see
-[Direct keys](#direct-keys-no-mode)) and repeat them here.
+`up_key` / `down_key` / `go_key` / `toggle_cwd_key` are **display-only** and bind
+nothing. Bind the keys the usual way (see [Direct keys](#direct-keys-no-mode)) and
+repeat them here — zellij doesn't pass the destination pipe name to the plugin, so
+fujin cannot read the real bindings. Anything you leave out loses its hint.
 
-Yes, that means writing the same key twice. fujin can't read the binding back:
-zellij hands plugins the *fact* that a key is bound to some plugin pipe, but
-drops which pipe it targets, so there is no way to tell `fujin_up` apart from
-`fujin_go`. Leaving one out just omits that one hint.
-
-Both spellings work — zellij's own `"Alt u"` and the way fujin prints it,
-`"alt+u"`. The footer normalizes them to `alt+u`. A value fujin can't parse is
-printed as written, so a typo is visible rather than silently dropped.
-
-When every hint shares the same modifier, the footer folds it into a single
-prefix instead of repeating it on each item: `alt + › u:up  d:down  g:jump`.
-It falls back to the plain `alt+u:up  ctrl+g:jump` form whenever the hints
-don't share one modifier exactly, or when only one hint is set.
+Both `"Alt u"` and `"alt+u"` are accepted and both render as `alt+u`. A value that
+can't be parsed is shown verbatim, so a typo stays visible instead of vanishing.
+When every hint shares the same modifier it is lifted to the front, as in
+`alt + › u:up  d:down  g:jump`.
 
 ### Only the alias route is supported
 
-fujin supports exactly one setup: **settings live on the alias definition (the
-`plugins` block in `config.kdl`), and both the layout and the keybindings refer
-to that alias by name**. Pointing a layout straight at the wasm path does work,
-but it is not supported — you're on your own for avoiding the mismatch below.
+fujin only guarantees the setup where **settings live on the alias definition and
+both the layout and the keybindings refer to it by that alias name**. Writing the
+wasm path straight into the layout does work, but is not supported.
 
 > [!WARNING]
-> `MessagePlugin` destination matching is done on **the wasm path plus its
-> configuration**, not the path alone. If you write `show_cwd "true"` only on
-> the layout's plugin block and not on the keybindings, the two are treated as
-> different plugins, and **keys stop reaching the resident sidebar**. Worse,
-> zellij doesn't just fail silently — it **opens a brand new instance on the
-> spot that matches the configuration** (observed in practice: one keypress adds
-> one more plugin pane). Since fujin's sidebar calls `set_selectable(false)`,
-> **the resulting pane can't be closed by the user or the CLI**.
+> `MessagePlugin` matches its destination **by configuration as well as wasm path**.
+> Put `show_cwd "true"` on the layout's plugin block but not on the keybinding and
+> the two count as different plugins, so **the key never reaches the resident
+> sidebar**. Worse, zellij **opens a new matching instance right there**. The fujin
+> sidebar is excluded from focus cycling, so **the pane that creates cannot be
+> closed**.
 
-Sticking to the alias means the layout and the keybindings both resolve to the
-same definition, so this mismatch can't happen. If you skip the alias, you
-need to copy the same configuration onto the layout and **every**
-`MessagePlugin` call by hand.
+The alias route makes this impossible. Without it, you must copy the same
+configuration into the layout and into **every** `MessagePlugin`.
 
-## Wire protocol (supporting other agents)
+## Agent state notifications
 
-The plugin listens on the pipe name `fujin_status` for JSON like the following.
-Agents other than Claude Code (codex, etc.) will show up the same way as long
-as they send this shape:
+### Claude Code hooks
 
-| Agent | Status |
+`setup.sh` copies `extras/claude-hooks/fujin-hook.sh` into
+`~/.config/zellij/plugins/` and registers that path in `~/.claude/settings.json`.
+By hand it looks like this:
+
+```jsonc
+{
+  "hooks": {
+    // add the same entry to every one of these events:
+    // SessionStart, UserPromptSubmit, Stop, StopFailure,
+    // SessionEnd, SubagentStart, SubagentStop, TaskCreated, TaskCompleted
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/path/to/fujin-hook.sh" }
+        ]
+      }
+    ],
+    // Notification is the only one that filters by matcher
+    "Notification": [
+      {
+        "matcher": "permission_prompt|agent_needs_input|idle_prompt|elicitation_dialog",
+        "hooks": [
+          { "type": "command", "command": "/path/to/fujin-hook.sh" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Hooks take effect **from the next Claude Code session you start**. A Claude Code
+running outside zellij, or with no sidebar up, is a complete no-op.
+
+| Hook event | State transition |
 |---|---|
-| Claude Code | Verified. See `extras/claude-hooks/fujin-hook.sh` |
-| Others (codex, etc.) | Unverified. Should work if sent in the shape below, but not yet confirmed against a real agent |
+| `SessionStart` | idle (register, reset counters) |
+| `UserPromptSubmit` | working |
+| `Notification` | blocked (message retained) |
+| `Stop` | done — but stays working while background subagents are still running |
+| `StopFailure` | error — not overwritten by a following `Stop` |
+| `SessionEnd` | unregister |
+| `SubagentStart` / `SubagentStop` | subagent count ±1; done when the last one stops after `Stop` |
+| `TaskCreated` / `TaskCompleted` | incomplete task count ±1 |
+
+### Other agents
+
+The plugin listens on the pipe name `fujin_status` for the JSON below. Agents
+other than Claude Code (codex, etc.) show up the same way as long as they send
+this shape — **unverified**, in that it should work but hasn't been confirmed
+against a real agent.
 
 ```bash
 zellij pipe --name fujin_status -- '{
@@ -857,37 +521,164 @@ zellij pipe --name fujin_status -- '{
 }'
 ```
 
-- `pane_id`: the `$ZELLIJ_PANE_ID` zellij assigns to each pane
-- `event`: an event name from the mapping table above
-- `cwd` / `detail`: optional
-
-The only pipe names meant for external use are `fujin_status`, the keybinding
-ones (`fujin_up` / `_down` / `_go` / `_mode` / `_toggle_cwd`), and
-`fujin_dismiss` for cleanup.
-
-- `fujin_toggle_cwd` flips the setting with no payload, or forces it to a given
-  value with `true` / `false` (handy for pushing the same direction everywhere)
-- `fujin_dismiss` closes a stranded floating sidebar (see
-  [Troubleshooting](#a-floating-sidebar-got-left-behind))
-
-`fujin_sync_state` / `_read` / `_selection` / `_command` / `_mark` / `_preview` /
-`_width` are an internal protocol for syncing between instances — don't call
-them from outside.
+`pane_id` is the `$ZELLIJ_PANE_ID` zellij assigns to each pane, `event` is a name
+from the table above, and `cwd` / `detail` are optional.
 
 > [!IMPORTANT]
-> Don't pass the `--plugin` option. Doing so makes zellij launch
-> the plugin if it isn't already running. Without it, the message is only
-> delivered to a running plugin, and the call is a harmless no-op when nothing
-> is running.
+> Don't pass the `--plugin` option. Doing so makes zellij launch the plugin if it
+> isn't already running. Without it, the message only reaches a running plugin and
+> is a harmless no-op otherwise.
 
-## Development
+The pipes meant for external use are `fujin_status`, the keybinding ones
+(`fujin_up` / `_down` / `_go` / `_mode` / `_toggle_cwd`), and `fujin_dismiss` for
+cleanup — `fujin_toggle_cwd` flips with no payload, or forces a value with
+`true` / `false`. `fujin_sync_state` / `_read` / `_selection` / `_command` /
+`_mark` / `_preview` / `_width` are an internal protocol for syncing between
+instances; don't call them from outside.
 
-Development tasks live in the Makefile. Run `make check`
-(`fmt-check` → `lint` → `test`) before committing.
+## Troubleshooting
 
-Detailed build/test/manual-verification steps and the implementation gotchas
-are kept separately under `docs/dev/`.
+### The sidebar doesn't show up
+
+Nearly always a layout that isn't in effect. Check that `config.kdl` has
+`default_layout "fujin"` and that the layout spells out `new_tab_template`
+(`setup.sh` reports whichever is missing). `zellij action dump-layout` shows what
+is actually loaded.
+
+If the space is reserved but **completely blank**, permission approval stalled: a
+single unapproved permission leaves both the prompt and fujin's drawing off screen
+(which also happens when you approved an older version and the required permissions
+have grown since). Delete that wasm's entry from `permissions.kdl` in zellij's cache
+directory and start a fresh session.
+
+### Updated the wasm but the old behaviour persists
+
+**Swapping the wasm does not reach running sessions.** Existing instances keep
+running the old one, so start a fresh session.
+
+### The keybinding (`Ctrl+y`, …) does nothing
+
+Without the alias, the layout and the keybinding may disagree on configuration
+(→ [Only the alias route is supported](#only-the-alias-route-is-supported)).
+
+### The permission prompt keeps coming back
+
+Approvals are recorded **per resolved absolute path**. Moving the file makes it a
+new path.
+
+### A floating sidebar got left behind
+
+When the focused tab has no sidebar of its own, `Ctrl+y` makes fujin summon itself
+as a temporary floating pane. It normally closes itself on `Esc` or on a jump, but
+a stranded one is excluded from focus cycling and so unreachable by hand. This
+sweeps them up:
+
+```bash
+zellij pipe --name fujin_dismiss
+```
+
+### It won't start, or behaves strangely
+
+Clear zellij's cache and try again. That also drops the recorded approvals
+(`permissions.kdl`), so the next launch asks again.
+
+```bash
+rm -rf ~/Library/Caches/org.Zellij-Contributors.Zellij   # macOS
+rm -rf ~/.cache/zellij                                   # Linux
+```
+
+### Trying it without changing any config
+
+It works as a floating pane. zellij's built-in plugin manager (`Ctrl+o` → `p`) can
+also load it by path.
+
+```bash
+zellij action new-pane --floating --width 40 --height 20 -p "fujin"
+```
+
+## Appendix: configuring by hand
+
+For setting things up without `setup.sh`, or folding parts into an existing
+configuration. Keybindings are in [Keybindings](#keybindings) and hooks in
+[Agent state notifications](#agent-state-notifications).
+
+<details>
+<summary>Placing the wasm and defining the alias</summary>
+
+The wasm can live anywhere, but `~/.config/zellij` is the config directory on
+every OS, so keeping it there makes the steps environment-independent.
+
+```bash
+mkdir -p ~/.config/zellij/plugins
+curl -fsSL https://github.com/yo-goto/fujin/releases/latest/download/fujin.wasm \
+  -o ~/.config/zellij/plugins/fujin.wasm
+```
+
+Defining an alias in `config.kdl` means the layout and the keybindings only ever
+say `"fujin"`.
+
+```kdl
+plugins {
+    fujin location="file:~/.config/zellij/plugins/fujin.wasm"
+}
+```
+
+zellij expands the `~` in `file:~/…` (and environment variables like `$HOME`).
+**Relative paths are not allowed** — there is no cwd to resolve them against, so
+use an absolute path, a `~` path, or `https://…`.
+
+</details>
+
+<details>
+<summary>Keeping the sidebar resident (layout)</summary>
+
+Embed the sidebar in the default layout's tab template
+(`~/.config/zellij/layouts/fujin.kdl`):
+
+```kdl
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane size=32 borderless=true {
+                plugin location="fujin"
+            }
+            pane
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+    // write the same thing under new_tab_template
+}
+```
+
+> [!CAUTION]
+> Write `pane`, not `children`. `children` marks where the panes of the tabs this
+> layout defines get slotted in, so a template-only layout with no `tab` node gets
+> **nothing, producing a tab with zero terminals**. When that happens at session
+> creation, zellij exits.
+
+<!-- -->
+
+> [!IMPORTANT]
+> Write the same content under `new_tab_template` too. `default_tab_template` does
+> fall back to the new-tab template, but **not for a session created by picking a
+> layout in the session manager** (`Ctrl+o` → `w`). Writing both makes it
+> independent of how the session started.
+
+Then add `default_layout "fujin"` to `config.kdl`. You can also name the layout on
+the `NewTab` keybinding
+(`bind "n" { NewTab { layout "fujin"; } SwitchToMode "normal" }`).
+
+The permissions requested on first load are `ReadApplicationState` /
+`ChangeApplicationState` / `ReadCliPipes` / `InterceptInput` /
+`MessageAndLaunchOtherPlugins` / `OpenTerminalsOrPlugins` / `ReadPaneContents`.
+
+</details>
 
 ## License
 
-MIT License (see `LICENSE`). The `zellij-tile` dependency is also MIT.
+MIT License (see `LICENSE`). `zellij-tile`, the one dependency, is MIT as well.
