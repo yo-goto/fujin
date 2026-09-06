@@ -71,7 +71,8 @@ zellij を起動し直すと左端にサイドバーが出ます。初回は権�
 書き直すと伸縮できるようになります。
 
 ```sh
-make setup SETUP_ARGS="--width 20% --layout-only"
+bash setup.sh --width 20% --layout-only
+# clone から使っているなら make setup SETUP_ARGS="--width 20% --layout-only"
 ```
 
 `Ctrl+n` で resize モードに入り `h`（縮む）/ `H`（広がる）、`Esc` で抜けるのが確実です

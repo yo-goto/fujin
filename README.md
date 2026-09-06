@@ -79,7 +79,8 @@ The default `pane size=32` is a column count, which zellij's own resize doesn't
 touch. Rewrite it as a **percentage** to make the sidebar resizable:
 
 ```sh
-make setup SETUP_ARGS="--width 20% --layout-only"
+bash setup.sh --width 20% --layout-only
+# from a clone: make setup SETUP_ARGS="--width 20% --layout-only"
 ```
 
 The reliable way to resize is `Ctrl+n` for resize mode, then `h` (narrower) /
