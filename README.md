@@ -6,6 +6,11 @@ A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualize
 the state of AI agents (Claude Code, etc.) running in each pane, and lets you
 jump to them with global keybindings.
 
+<div align="center">
+  <img src="assets/demo.png" width="100%"
+       alt="fujin's sidebar listing three Claude Code agents across three zellij tabs, each row showing the agent's state icon and working directory, next to the focused agent's pane." />
+</div>
+
 > [!NOTE]
 > The name comes from the Japanese word 布陣 (*fujin*), "to deploy troops" /
 > "to arrange a formation" — treating your panes as a formation to arrange and
