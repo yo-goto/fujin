@@ -493,7 +493,8 @@ If nothing happens, check that zellij's `mouse_mode` is still enabled in
 ### Nav mode
 
 Pressing `Ctrl+y` (the key bound above) changes the sidebar header to
-`[NAV]  ?:help  esc:exit`, and the following keys become active:
+`▲ fujin  [nav]`, the footer shows `?:help  esc:exit`, and the following keys
+become active:
 
 | Key | Action |
 |---|---|
@@ -528,7 +529,7 @@ back.
 
 ### Search (`/` inside nav mode)
 
-Pressing `/` while in nav mode turns the header into a query input line
+Pressing `/` while in nav mode turns the footer into a query input line
 (`/…`) and fuzzy-filters the tree against pane name, owning tab name, and
 cwd. Matched characters are highlighted, and the highlight location doubles
 as a hint for which field matched (a cwd match is shown on that row even if
@@ -592,6 +593,28 @@ Typing a number that does not exist clears the buffer instead of forcing you to
 back out with `Backspace`. The number column is only there while the sub-mode is
 active, so it never eats into the usual row layout.
 
+### Triage (`t` inside nav mode)
+
+Pressing `t` changes the header to `▲ fujin  [tri]` and switches the list to a
+flat view that ignores tab boundaries. Only panes that carry a status
+(`error` / `blocked` / `working` / `done`) are shown, ordered by urgency
+(`error` > `blocked` > `working` > `done`; ties break by most recently
+changed). Each row is tagged with its owning tab name on the right. Panes that
+have never reported a status, and read (`idle`) panes, are left out.
+
+| Key | Action |
+|---|---|
+| `j` / `↓` / `Tab`, `k` / `↑` / `Shift+Tab` | move the cursor |
+| `g` / `G` | first / last |
+| `Enter` | jump to the selected pane and exit the mode (no-op if the list is empty) |
+| `m` / `M` | mark / unmark a pane, or clear every mark |
+| `p` | toggle the preview |
+| `r` | mark the previewed pane as read |
+| `?` | open the key help (below) |
+| `Esc` | leave triage and go back to the tree (nav mode continues) |
+
+Leaving with `Esc` restores whichever row was selected before you entered triage.
+
 ### Terminate a pane (`d` inside nav mode)
 
 Pressing `d` turns the footer into a confirmation prompt
@@ -642,7 +665,7 @@ to say you have seen it.
 ### Help (`?` inside nav mode)
 
 The sidebar is 32 columns wide, which is not enough to spell out every key, so
-the always-visible hints are limited to `?:help` and `esc:exit` in the header.
+the always-visible hints are limited to `?:help` and `esc:exit` in the footer.
 Pressing `?` keeps the header and footer in place and replaces the tree with the
 key list plus the status icon legend; any key closes it and brings back whatever
 was on screen before (nav mode or the search sub-mode). The
