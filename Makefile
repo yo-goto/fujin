@@ -108,11 +108,16 @@ check: fmt-check lint test check-snapshots
 clean:
 	cargo clean
 
-# Conventional Commits に沿ったコミットから CHANGELOG.md を再生成する
-# （git-cliff が必要。flake.nix の devShell に入っていれば揃っている。
-# 素の環境なら brew install git-cliff）。生成後は内容を確認してコミットすること
+# Conventional Commits に沿ったコミットから CHANGELOG.md の新バージョン節を確定し、
+# 既存の内容の前に追記する（git-cliff が必要。flake.nix の devShell に入っていれば
+# 揃っている。素の環境なら brew install git-cliff）。VERSION でタグ名を渡す
+# （例: make changelog VERSION=v0.1.0）。--prepend なので確定済みの過去の節は
+# 上書きされない。生成される値はコミットメッセージそのものなので翻訳しない
+# ——新しく追記されたセクションだけ、コミット前に日本語エントリを手作業で英訳する
+# （.claude/rules/development.md 参照）
 changelog:
-	git-cliff -o CHANGELOG.md
+	@test -n "$(VERSION)" || { echo "usage: make changelog VERSION=vX.Y.Z" >&2; exit 1; }
+	git-cliff --tag $(VERSION) --unreleased --prepend CHANGELOG.md
 
 # README の設定節を src/config.rs の SETTINGS から再生成する（決定40）。
 # 生成物とのずれは make test 側で落ちるので、落ちたらこれを実行する

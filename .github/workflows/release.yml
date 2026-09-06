@@ -5,7 +5,8 @@
 #   setup.sh       レイアウト生成 + Claude Code フック登録（--download で自分を賄う）
 #   fujin-hook.sh  setup.sh が --download のときに取りに来る
 #
-# 手順: CHANGELOG.md を更新（make changelog）してコミット → タグを打って push。
+# 手順: CHANGELOG.md を更新（make changelog VERSION=v0.1.0、初回のみ実行前に
+#   CHANGELOG.md を空にする）してコミット → タグを打って push。
 #   git tag v0.1.0 && git push origin v0.1.0
 
 name: release
