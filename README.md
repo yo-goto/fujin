@@ -15,11 +15,11 @@ jump to them with global keybindings.
 
 ```text
 ▸ 1 scheme
-    nu
-    koka
+  › nu
+  › koka
 ▾ 2 zeli-c                ← active tab
-    nvim
-  » claude +2             ← working, 2 subagents running
+  › nvim
+  » claude            +2  ← working, 2 subagents running
 ▸ 3 review
   ◆ claude                ← waiting for input (needs attention)
 ```
@@ -49,17 +49,27 @@ sits right under the key list, so you never have to come back here to read it.
 Panes without an agent (a plain shell, say) show `›` in that same spot. It is
 not one of the states, so it carries no color.
 
-Two counters may follow the pane name: `+N` for active subagents, `[N]` for
-incomplete tasks.
-
-`done` / `blocked` / `error` are **cleared automatically once you focus that
-pane** (a read-receipt model). Only the ones you haven't attended to stay lit.
-
 **Command panes get the same icons.** Anything started as a command pane
 (`zellij run -- docker build .`, a `command` block in a layout, …) shows `»`
 while it runs and `●` / `×` when it exits, so a long build tells you it is done
 the same way an agent does. No hook or setup is needed — zellij already knows
-the command. Panes with no name show the command line instead.
+the command. Command panes never carry `blocked` or `idle`, and if an agent is
+registered on the same pane, the agent's state wins.
+
+Two counters may follow the pane name: `+N` for active subagents, `[N]` for
+incomplete tasks. A floating pane has its name wrapped in parentheses,
+`(name)`. A pane with no name shows its command line instead, or its cwd if it
+isn't a command pane.
+
+`done` / `blocked` / `error` are **cleared automatically once you focus that
+pane** (a read-receipt model). Only the ones you haven't attended to stay lit.
+Merely passing through doesn't count — the focus has to stay put for a moment
+before a state is marked read, so hopping via another pane on your way
+somewhere else won't wipe out what it was showing.
+
+When the list is taller than the screen, it scrolls just far enough to keep the
+selected row visible. Hidden rows are announced by `▴ … N more` /
+`▾ … N more` at the top and bottom edges.
 
 ## Requirements
 
@@ -465,6 +475,18 @@ rm -rf ~/.cache/zellij                                   # Linux
 That also drops the recorded approvals (`permissions.kdl`), so the next launch
 asks again.
 
+### A floating sidebar got left behind
+
+When the focused tab has no sidebar of its own, pressing `Ctrl+y` makes fujin
+summon itself as a temporary floating pane. It normally closes itself on `Esc`
+or on a jump, but if one ever gets stranded there is no way to close it by hand:
+it is excluded from focus cycling, so neither you nor the CLI can reach it. This
+sweeps them up:
+
+```bash
+zellij pipe --name fujin_dismiss
+```
+
 ### Trying it without changing any config
 
 It works as a floating pane:
@@ -506,7 +528,7 @@ become active:
 | `n` | enter number jump sub-mode (below) |
 | `t` | enter triage mode (panes that need attention, most urgent first) |
 | `d` | enter the pane termination sub-mode (below) |
-| `m` / `M` | mark / unmark a pane, or clear every mark (targets for termination) |
+| `m` / `M` | mark / unmark a pane, or clear every mark (below) |
 | `p` | toggle the preview (below) |
 | `r` | mark the previewed pane as read (only while the preview is up) |
 | `?` | open the key help (below) |
@@ -559,7 +581,10 @@ Editing keys:
 | `Enter` | jump to the selected row and exit nav mode entirely (no-op if there are zero matches) |
 | `Esc` | switch to navigating (the query is kept) |
 
-Navigating keys (**every other key does nothing**):
+Any other key (`←` / `→`, a function key, …) exits nav mode entirely — the same
+safety valve as in nav mode proper.
+
+Navigating keys (**every other unmodified key does nothing**):
 
 | Key | Action |
 |---|---|
@@ -569,9 +594,21 @@ Navigating keys (**every other key does nothing**):
 | `Enter` | jump to the selected row and exit nav mode entirely |
 | `Esc` | discard the query and return to nav mode (press `Esc` again to exit the mode) |
 
+Two keys work in both states. Printable characters go to the query, so these
+carry an `Alt`:
+
+| Key | Action |
+|---|---|
+| `alt+m` | mark / unmark the pane under the cursor (below) |
+| `alt+p` | toggle the preview (below) |
+
+Apart from those two, any key with `Ctrl` / `Alt` / `Super` exits nav mode
+entirely, from either state.
+
 The query is discarded every time you leave search, so it always starts empty
 next time. `cwd` is only known for panes that reported it via the hook — an
-ordinary shell pane won't match on cwd.
+ordinary shell pane won't match on cwd. With zero matches the list is replaced
+by `no matches`.
 
 ### Number jump (`n` inside nav mode)
 
@@ -591,7 +628,9 @@ of another and you never end up with an ambiguous `1`.
 
 Typing a number that does not exist clears the buffer instead of forcing you to
 back out with `Backspace`. The number column is only there while the sub-mode is
-active, so it never eats into the usual row layout.
+active, so it never eats into the usual row layout. The footer shows `n`
+followed by the digits you have typed; numbers still in the running stay lit in
+the key colour while the ones you ruled out are dimmed.
 
 ### Triage (`t` inside nav mode)
 
@@ -600,7 +639,8 @@ flat view that ignores tab boundaries. Only panes that carry a status
 (`error` / `blocked` / `working` / `done`) are shown, ordered by urgency
 (`error` > `blocked` > `working` > `done`; ties break by most recently
 changed). Each row is tagged with its owning tab name on the right. Panes that
-have never reported a status, and read (`idle`) panes, are left out.
+have never reported a status, and read (`idle`) panes, are left out. Command
+pane states join the same urgency ranking, agent or no agent.
 
 | Key | Action |
 |---|---|
@@ -614,14 +654,33 @@ have never reported a status, and read (`idle`) panes, are left out.
 | `Esc` | leave triage and go back to the tree (nav mode continues) |
 
 Leaving with `Esc` restores whichever row was selected before you entered triage.
+The footer hint reads `?:help  esc:back` here, since `Esc` returns to the tree
+rather than exiting. With nothing to show, the list reads `nothing to triage`.
+
+### Marks (`m` / `M` inside nav mode)
+
+Pressing `m` marks the pane on the highlighted row; pressing it again unmarks
+it, and `M` clears every mark. A marked row shows `✓` to the left of its state
+icon (the column only appears in frames that have at least one mark, so it never
+eats into the usual row layout).
+
+- Use `m` / `M` in the tree and the triage list, `alt+m` in the filtered search
+  results
+- **Marks may span tabs.** A row in another tab piles up just the same
+- **They survive leaving nav mode.** They are still there next time you enter
+- Closing a pane drops just that pane's mark
+- Running a termination (below) clears them all; cancelling with `Esc` keeps them
+
+For now, marks exist to give the termination sub-mode a batch of targets.
 
 ### Terminate a pane (`d` inside nav mode)
 
 Pressing `d` turns the footer into a confirmation prompt
-(`c:close k:kill x:kill+close`), painted in the theme's error colour. Nothing
-happens until you pick one of the three, and `Esc` backs out. The prompt does
-not spell out the pane name — the highlighted row already says which pane this
-is about, and the footer is too narrow to show a name without cutting it.
+(`c:close k:kill x:kill+close`) and paints it — along with the `▲` in the
+header — in the theme's error colour. Nothing happens until you pick one of the
+three, and `Esc` backs out. The prompt does not spell out the pane name — the
+highlighted row already says which pane this is about, and the footer is too
+narrow to show a name without cutting it.
 
 | Key | Action |
 |---|---|
@@ -638,7 +697,11 @@ after its command dies, which is what `x` is for. Killing a command pane whose
 command has already exited does nothing.
 
 The targets are every pane you marked with `m`, or just the selected pane if
-nothing is marked. Marks may span tabs, and `M` clears them all at once.
+nothing is marked (see [Marks](#marks-m--m-inside-nav-mode)). With marks in
+play the prompt is prefixed with the count, as in
+`3 panes  c:close k:kill x:kill+close` — how many panes are about to go is not
+something the highlight can tell you. Running one clears every mark (cancelling
+with `Esc` keeps them). With no targets at all, the prompt doesn't open.
 
 ### Preview (`p` inside nav mode)
 
@@ -666,11 +729,17 @@ to say you have seen it.
 
 The sidebar is 32 columns wide, which is not enough to spell out every key, so
 the always-visible hints are limited to `?:help` and `esc:exit` in the footer.
-Pressing `?` keeps the header and footer in place and replaces the tree with the
-key list plus the status icon legend; any key closes it and brings back whatever
-was on screen before (nav mode or the search sub-mode). The
-key you press to close is not acted on, so press it again afterwards if you meant
-it as a command. Nav mode stays active the whole time.
+Pressing `?` keeps the header in place, replaces the tree with the key list plus
+the status icon legend, and turns the footer into `press any key to close`. Any
+key closes it and brings back whatever was on screen before (nav mode or
+whichever sub-mode you were in). The key you press to close is not acted on, so
+press it again afterwards if you meant it as a command. Nav mode stays active
+the whole time.
+
+The key list is specific to the mode you are in (tree, search, number jump,
+triage, termination); the status icon legend is the same wherever you open it
+from. If the overlay is taller than the screen it gets the same overflow markers
+as the list — it closes on any key, so it can't have scroll keys of its own.
 
 ### Event → state mapping
 
@@ -801,10 +870,18 @@ zellij pipe --name fujin_status -- '{
 - `event`: an event name from the mapping table above
 - `cwd` / `detail`: optional
 
-The only pipe names meant for external use are `fujin_status` and the
-keybinding ones, `fujin_up` / `_down` / `_go` / `_mode` / `_toggle_cwd`.
-`fujin_sync_state` / `_read` / `_selection` / `_command` are an internal protocol
-for syncing between instances — don't call them from outside.
+The only pipe names meant for external use are `fujin_status`, the keybinding
+ones (`fujin_up` / `_down` / `_go` / `_mode` / `_toggle_cwd`), and
+`fujin_dismiss` for cleanup.
+
+- `fujin_toggle_cwd` flips the setting with no payload, or forces it to a given
+  value with `true` / `false` (handy for pushing the same direction everywhere)
+- `fujin_dismiss` closes a stranded floating sidebar (see
+  [Troubleshooting](#a-floating-sidebar-got-left-behind))
+
+`fujin_sync_state` / `_read` / `_selection` / `_command` / `_mark` / `_preview` /
+`_width` are an internal protocol for syncing between instances — don't call
+them from outside.
 
 > [!IMPORTANT]
 > Don't pass the `--plugin` option. Doing so makes zellij launch
