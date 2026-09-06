@@ -177,8 +177,6 @@ wasm_location="file:$(tildify "$wasm_path")"
 download_assets() {
   step "Download  $release_base"
 
-  command -v curl >/dev/null 2>&1 || die "curl is required for --download"
-
   # フック本体の取得元をここで置き場所へ付け替える。**dry-run の手前で行う** —
   # install_hooks は $hook_src の実在で「clone の外に居る」を判定するので、
   # 後ろに置くと dry-run のときだけ判定が残り、--download を付けているのに
@@ -349,10 +347,6 @@ hook_matcher='permission_prompt|agent_needs_input|idle_prompt|elicitation_dialog
 install_hooks() {
   step "Claude Code hooks  $claude_settings"
 
-  command -v jq >/dev/null 2>&1 || die "jq is required for hook registration
-    $(jq_install_hint)
-    or re-run with --no-hooks -- the sidebar works without it, you only lose
-    the agent state icons that the hook feeds"
   # リリースから取ってくる場合（$hook_src が置き場所そのもの）は確かめない。
   # dry-run ではまだそこに無いのが正しい
   if [ "$hook_src" != "$hook_dst" ] && [ ! -f "$hook_src" ]; then
@@ -485,7 +479,27 @@ print_config() {
   info "Do not bind 'Alt Enter': it collides with Claude Code's Shift+Enter."
 }
 
+# ---------------------------------------------------------------- preflight
+
+# 足りない外部コマンドは**何かを書き出す前に**まとめて弾く。段の途中で落とすと、
+# レイアウトだけ書かれて config.kdl の貼り付け内容が出ないまま終わり、いちばん
+# 大事な手順を読めないまま取り残される。--dry-run でも同じく弾く — 実行したら
+# 落ちるものは、下見でも落ちると見せるのが正しい
+preflight() {
+  if [ "$do_download" -eq 1 ]; then
+    command -v curl >/dev/null 2>&1 || die "curl is required for --download"
+  fi
+  if [ "$do_hooks" -eq 1 ]; then
+    command -v jq >/dev/null 2>&1 || die "jq is required for hook registration
+    $(jq_install_hint)
+    or re-run with --no-hooks -- the sidebar works without it, you only lose
+    the agent state icons that the hook feeds"
+  fi
+}
+
 # ---------------------------------------------------------------- run
+
+preflight
 
 if [ "$dry_run" -eq 1 ]; then
   printf 'fujin setup (dry run -- nothing will be written)\n'
