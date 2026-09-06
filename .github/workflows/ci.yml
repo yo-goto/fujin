@@ -1,0 +1,59 @@
+# push・PR双方で make check（fmt-check → lint → test）相当と、
+# gitleaksによる全履歴のシークレットスキャンを実行する。
+# フォークからのPRでもGITHUB_TOKENに書き込み権限を渡さないよう contents: read のみに絞る。
+
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+
+      - name: Check
+        run: make check
+
+  # このリポジトリだけをcloneする人にも効く継続防御。ワークスペース側の
+  # 監査用ターゲット（fujin-workspaceのmake gitleaks）は非公開なので、
+  # 公開ソースを守る仕組みはソース自身に同梱しておく。
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # gitleaksは全コミット履歴を見るので浅いcloneでは足りない
+          fetch-depth: 0
+
+      - name: Scan for secrets
+        # ghcr.io/gitleaks/gitleaks:v8.30.1 をdigestで固定。更新は手動
+        # （dependabotはworkflow内のdocker runまでは追わない）。
+        # 自前ルールの .gitleaks.toml と、既存履歴を既知にする .gitleaksignore は
+        # スキャン対象（/repo）の直下から自動で拾われる。
+        # -v --redact: 検出箇所（ファイル・行・コミット）は出しつつ、
+        # 秘密の値そのものは公開CIログに残さない。
+        # GIT_CONFIG_*: マウント先の所有者がコンテナのrootと異なり、
+        # gitのdubious ownershipチェックに引っかかるのを避ける。
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --no-banner -v --redact /repo

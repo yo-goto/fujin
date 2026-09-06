@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # cargo依存の脆弱性監視。警告そのもの（Dependabot alerts / security updates）は
+  # リポジトリ設定側の機能だが、privateでは既定で無効な dependency graph を
+  # 確実に作らせるためエコシステムを明示する。
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # 公開直後のバージョンを掴まないための待機期間。メンテナ乗っ取り型の
+    # サプライチェーン攻撃は公開から数時間〜数日で発覚してyankされるので、
+    # その窓を自分が踏む前に消化する。GitHubの既定は3日、ここでは7日に延ばす。
+    # security updates はこの待機の対象外なので、緊急の修正は遅れない。
+    cooldown:
+      default-days: 7
