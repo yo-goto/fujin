@@ -1,4 +1,4 @@
-## [unreleased]
+## [0.1.0] - 2026-09-06
 
 ### 🚀 Features
 
@@ -41,6 +41,7 @@
 - *(sidebar)* Group the shared modifier in the direct-keys hint
 - *(kbd-harness)* Replay out.log into the screen it drew
 - *(try)* Let a worktree keep its own fujin persistence store
+- *(setup)* Name the command that installs jq on this machine
 
 ### 🐛 Bug Fixes
 
@@ -85,6 +86,7 @@
 - *(try)* Stop one agent's cleanup from destroying another's session
 - *(render)* Draw dividers to the full width so they line up
 - *(render)* Stop the selection highlight at the right margin instead
+- *(setup)* Stop --download --dry-run from failing outside a clone
 
 ### 💼 Other
 
@@ -95,6 +97,7 @@
 - *(changelog)* Replace cliff.toml's placeholder with the real `https://github.com/yo-goto/fujin` URL
 - Merge main (fix the no-reflow scope in 4a87657's feature)
 - Add --locked to cargo invocations that resolve dependencies
+- *(changelog)* Switch make changelog to --prepend so past entries survive
 
 ### 🚜 Refactor
 
@@ -129,6 +132,7 @@
 - *(config)* Move settings intake and warning expiry management into config.rs
 - *(render)* Split render.rs into a child module per frame element
 - Align this branch's private-note references on the .docs root
+- *(setup)* Check for curl and jq before writing anything
 
 ### 📚 Documentation
 
@@ -149,6 +153,15 @@
 - Move the module structure reference to module-map.md
 - Align private-note references on the .docs root
 - *(config)* Point the log hint at a public command
+- *(readme)* Fix nav-mode header/footer drift, add triage section
+- *(readme)* Reconcile the usage sections with the implementation
+- *(readme)* Go back to the icon-only logo and drop the tree sample
+- *(readme)* Reorder the sections and cut the explanation down
+- *(readme)* Correct what the compression pass got wrong
+- *(readme)* Give the width tweak a command that works off a release
+- *(changelog)* Regenerate CHANGELOG.md and translate pre-2026-08-24 entries
+- *(readme)* Add a screenshot of the sidebar in use
+- *(readme)* State jq as required rather than an aside
 
 ### 🧪 Testing
 
