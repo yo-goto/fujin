@@ -36,7 +36,7 @@ bash setup.sh --download
 `setup.sh` は wasm とフック本体を `~/.config/zellij/plugins/` へ置き、
 `~/.config/zellij/layouts/fujin.kdl` を生成し、フックを `~/.claude/settings.json` の
 10イベントへ登録します。**更新も同じコマンドで済みます**（冪等で、`settings.json` は
-バックアップを取ります）。
+バックアップを取り、レイアウトの上書きだけ確認を挟みます）。
 
 `config.kdl` だけは書き換えず、貼るべき内容を表示します（既存ブロックへのマージは、
 壊したときの復旧が重いためです）:
@@ -106,14 +106,13 @@ Rust と `rustup target add wasm32-wasip1` が要ります。
 
 ```bash
 git clone https://github.com/yo-goto/fujin.git && cd fujin
-make install   # release ビルドして ~/.config/zellij/plugins/fujin.wasm へ配置
-make setup     # レイアウトを生成し、Claude Code フックを登録する
+make setup   # release ビルド → 配置 → レイアウト生成 → Claude Code フック登録
 ```
 
-`make setup` は `extras/setup.sh` を `--download` 無しで呼ぶだけです。引数は
-`make setup SETUP_ARGS="--no-hooks"` のように渡せます。置き場所は
-`make install PLUGIN_DIR=/path/to/plugins` で変えられます。検証は `make check`
-（fmt-check → lint → test）です。
+`make setup` は `make install`（release ビルドと `~/.config/zellij/plugins/` への配置）まで
+含みます。wasm の入れ替えだけなら `make install`、置き場所はどちらも
+`PLUGIN_DIR=/path/to/plugins` で変えられます。`setup.sh` への引数は
+`make setup SETUP_ARGS="--no-hooks"` のように渡します。検証は `make check` です。
 
 </details>
 
@@ -226,7 +225,7 @@ ID指定ではキーが衝突します。エイリアス指定の `MessagePlugin
 始まります（`Esc` で抜けたあとフォーカスを動かさずに入り直したときだけ、前回見ていた
 位置から再開します）。モード中はサイドバーがフォーカスを借りるため、作業していたペインは
 **枠は残ったまま強調だけが外れます**。抜けるとフォーカスは元のペイン（ジャンプしたなら
-ジャンプ先）へ戻ります。
+ジャンプ先）へ戻ります——モード中に自分でフォーカスを動かした場合は、奪い返さずに抜けます。
 
 ### 検索（`/`）
 
@@ -251,8 +250,9 @@ vim のように**編集状態**と**操作状態**に分かれます。`/` で�
 | その他の印字可能文字 | クエリ末尾に追加 | 何も起きない |
 | `alt+m` / `alt+p` | マークを付け外し / プレビューを切り替え | ← 同じ |
 
-編集状態で未定義のキー（`←` / `→` / ファンクションキーなど）と、`alt+m` / `alt+p` 以外の
-修飾キー付きは、どちらの状態でもnavモードごと抜けます。
+編集状態で上記のどれにも当たらないキー（`←` / `→` / ファンクションキーなど）を押すと
+navモードごと抜けます（操作状態では何も起きません）。`alt+m` / `alt+p` 以外の修飾キー付きは、
+どちらの状態でもnavモードごと抜けます。
 
 クエリは検索を抜けるたびに破棄され、次回は常に空から始まります。cwd はフックから通知を
 受けたペインだけが持つので、一般のシェルペインは cwd では一致しません。

@@ -44,7 +44,7 @@ bash setup.sh --download
 `setup.sh` puts the wasm and the hook script in `~/.config/zellij/plugins/`,
 generates `~/.config/zellij/layouts/fujin.kdl`, and registers the hook for all 10
 events in `~/.claude/settings.json`. **Updating is the same command** — it is
-idempotent and backs up `settings.json`.
+idempotent, backs up `settings.json`, and only asks before overwriting the layout.
 
 It never edits `config.kdl`; it prints what to paste instead, since merging into
 existing blocks is hard to recover from if text processing breaks it:
@@ -117,14 +117,14 @@ Needs Rust and `rustup target add wasm32-wasip1`.
 
 ```bash
 git clone https://github.com/yo-goto/fujin.git && cd fujin
-make install   # release build, copied to ~/.config/zellij/plugins/fujin.wasm
-make setup     # generate the layout, register the Claude Code hooks
+make setup   # build, install, generate the layout, register the Claude Code hooks
 ```
 
-`make setup` just runs `extras/setup.sh` without `--download`; extra arguments go
-through `SETUP_ARGS`, e.g. `make setup SETUP_ARGS="--no-hooks"`. Change the
-destination with `make install PLUGIN_DIR=/path/to/plugins`. `make check` runs
-fmt-check, lint, and tests.
+`make setup` includes `make install` (the release build and the copy into
+`~/.config/zellij/plugins/`). Use `make install` on its own to swap just the wasm;
+either way `PLUGIN_DIR=/path/to/plugins` changes the destination. Arguments for
+`setup.sh` go through `SETUP_ARGS`, e.g. `make setup SETUP_ARGS="--no-hooks"`.
+`make check` is the full verification.
 
 </details>
 
@@ -245,7 +245,8 @@ the pane you are working in — except that leaving with `Esc` and coming back w
 moving the focus resumes where you were browsing. While the mode is active the
 sidebar borrows zellij's focus, so your working pane **keeps its frame but loses the
 focused-pane highlight**. Leaving hands the focus back to the pane you came from, or
-the one you jumped to.
+the one you jumped to — unless you moved the focus yourself mid-mode, in which case
+it is left where you put it.
 
 ### Search (`/`)
 
@@ -271,9 +272,9 @@ can tell them apart by the query colour (normal vs dimmed) and the footer hints
 | any other printable character | append to the query | nothing |
 | `alt+m` / `alt+p` | mark / toggle the preview | ← same |
 
-Keys that editing has no meaning for (`←` / `→`, a function key, …), and anything
-with a modifier other than `alt+m` / `alt+p`, exit nav mode entirely from either
-state.
+A key that editing has no meaning for (`←` / `→`, a function key, …) exits nav mode
+entirely; in navigating it does nothing. Anything with a modifier other than
+`alt+m` / `alt+p` exits nav mode from either state.
 
 The query is discarded every time you leave search, so it always starts empty
 next time. `cwd` is only known for panes that reported it via the hook — an
