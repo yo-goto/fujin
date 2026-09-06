@@ -1,6 +1,8 @@
 <div align="center">
-  <img src="assets/logo-full-animated.svg" alt="fujin — Zellij, your agents in formation." width="100%" />
+  <img src="assets/logo.svg" alt="fujin logo" width="180" />
 </div>
+
+# fujin
 
 A sidebar plugin for zellij. It lists tabs > panes in a vertical tree, visualizes
 the state of AI agents (Claude Code, etc.) running in each pane, and lets you
@@ -12,17 +14,6 @@ jump to them with global keybindings.
 > oversee at a glance. To English speakers, `fujin` also reads as 風神 (*fūjin*),
 > the Japanese god of wind — pairing the stillness of forming up with the motion
 > of wind sweeping across your panes to watch over them.
-
-```text
-▸ 1 scheme
-  › nu
-  › koka
-▾ 2 zeli-c                ← active tab
-  › nvim
-  » claude            +2  ← working, 2 subagents running
-▸ 3 review
-  ◆ claude                ← waiting for input (needs attention)
-```
 
 - **Overview** — every tab and pane in the session, always visible in the sidebar
 - **State at a glance** — an icon tells you whether each agent is working,

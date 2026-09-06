@@ -1,6 +1,8 @@
 <div align="center">
-  <img src="assets/logo-full-animated.svg" alt="fujin — Zellij, your agents in formation." width="100%" />
+  <img src="assets/logo.svg" alt="fujin logo" width="180" />
 </div>
+
+# fujin
 
 zellij用サイドバープラグインです。タブ > ペインを縦並びで一覧し、各ペインで動くAIエージェント（Claude Code等）の状態を可視化して、グローバルキーでジャンプできます。
 
@@ -9,17 +11,6 @@ zellij用サイドバープラグインです。タブ > ペインを縦並び�
 > ちなみに `fujin` は英語話者には「風神」（風の神）とも読めます。陣を敷いて構える
 > 「布陣」（静）と、風のように群れを駆け巡って見守る「風神」（動）——両方の姿をこの
 > 名前に重ねています。
-
-```text
-▸ 1 scheme
-  › nu
-  › koka
-▾ 2 zeli-c                ← アクティブタブ
-  › nvim
-  » claude            +2  ← working、サブエージェント2つ稼働中
-▸ 3 review
-  ◆ claude                ← 入力待ち（要対応）
-```
 
 - **一覧** — セッション内のタブとペインを常時サイドバーに表示します
 - **状態の可視化** — 各エージェントが処理中か、入力待ちか、終わっているかがアイコンで分かります
