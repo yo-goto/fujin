@@ -126,6 +126,29 @@ todo() { printf '    %stodo%s %s\n' "$c_yellow" "$c_off" "$*"; }
 warn() { printf '    %swarning:%s %s\n' "$c_yellow" "$c_off" "$*" >&2; }
 die()  { printf 'setup.sh: %s\n' "$*" >&2; exit 1; }
 
+# jq の入れ方は環境で違うので、その場で使えるコマンドを案内する。
+# macOS 13 以降は /usr/bin/jq が標準で入っているため、ここが要るのは主に Linux
+# 案内できるコマンドが挙がらないこともあるので、行ごと組み立てて返す
+jq_install_hint() {
+  local cmd=
+  case "$(uname -s)" in
+    Darwin) cmd='brew install jq' ;;
+    Linux)
+      if command -v apt-get >/dev/null 2>&1; then cmd='sudo apt install jq'
+      elif command -v dnf >/dev/null 2>&1; then cmd='sudo dnf install jq'
+      elif command -v pacman >/dev/null 2>&1; then cmd='sudo pacman -S jq'
+      elif command -v zypper >/dev/null 2>&1; then cmd='sudo zypper install jq'
+      elif command -v apk >/dev/null 2>&1; then cmd='sudo apk add jq'
+      fi
+      ;;
+  esac
+  if [ -n "$cmd" ]; then
+    printf 'install it with: %s' "$cmd"
+  else
+    printf 'install jq with your system package manager'
+  fi
+}
+
 # `~` 付きで書ける場所なら `~` に畳む。zellij は shellexpand で展開するので、
 # ホームディレクトリ名が設定に残らない（.docs/issues/issue-config-and-distribution.md §1.3）
 tildify() {
@@ -326,7 +349,10 @@ hook_matcher='permission_prompt|agent_needs_input|idle_prompt|elicitation_dialog
 install_hooks() {
   step "Claude Code hooks  $claude_settings"
 
-  command -v jq >/dev/null 2>&1 || die "jq is required for hook registration (brew install jq)"
+  command -v jq >/dev/null 2>&1 || die "jq is required for hook registration
+    $(jq_install_hint)
+    or re-run with --no-hooks -- the sidebar works without it, you only lose
+    the agent state icons that the hook feeds"
   # リリースから取ってくる場合（$hook_src が置き場所そのもの）は確かめない。
   # dry-run ではまだそこに無いのが正しい
   if [ "$hook_src" != "$hook_dst" ] && [ ! -f "$hook_src" ]; then
