@@ -20,8 +20,11 @@ useDefault = true
 # ビルド成果物。gitignore 対象なので `gitleaks git` には出てこないが、
 # 手元で `gitleaks dir` を叩いたときにツールチェインの絶対パスを大量に拾うため外す。
 [allowlist]
-description = "ビルド成果物"
+description = "ビルド成果物・既知の誤検知"
 paths = ['''(^|/)target/''']
+# 既定ルール generic-api-key が拾ったキーバインド表記の誤検知
+# （src/tests/sidebar_tree.rs、実際のAPIキーではない）
+regexes = ['''ctrl\+shift\+down''']
 
 [[rules]]
 id = "local-home-path"
@@ -43,4 +46,6 @@ tags = ["privacy"]
 
 [rules.allowlist]
 description = "実在しないプレースホルダ（テストデータ・ドキュメントの例示用）は許す"
-regexes = ['''/Users/example/''']
+# example2 は「example の前方一致だが別ユーザー」という区別を確かめる
+# width.rs のテストデータ（tildify）
+regexes = ['''/Users/example/''', '''/Users/example2/''']
