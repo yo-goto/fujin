@@ -38,9 +38,10 @@ take on features that would add complexity.
 
 ## Install
 
-You need zellij 0.44 or later and `curl` (plus `jq` for the Claude Code hook).
-**No Rust required.** Without `jq` the sidebar still lists, jumps and searches —
-you only lose the agent states the hook feeds it (macOS 13 and later ship `jq`).
+You need zellij 0.44 or later, `curl`, and **`jq`** — the hook runs on `jq`, so
+showing agent state needs it (macOS 13 and later ship it). **No Rust required.**
+To go without `jq`, pass `--no-hooks`: listing, jumping and searching still work,
+you just lose the state icons.
 
 ```bash
 curl -fsSLO https://github.com/yo-goto/fujin/releases/latest/download/setup.sh
