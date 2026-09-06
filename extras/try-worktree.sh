@@ -44,6 +44,7 @@ do_build=1
 do_grant=1
 fresh=0
 clean=0
+isolate_store=0
 nested=0
 open_window=0
 keep=0
@@ -87,6 +88,12 @@ resident fujin session are never touched.
       --no-build      skip `cargo build --release`
       --no-grant      do not pre-register the permissions (approve by hand instead)
       --fresh         kill an existing session of the same name first
+      --isolate-store give this worktree its own fujin persistence store
+                      instead of sharing ~/.config/fujin with every other
+                      worktree. Combine with --fresh to start from an empty
+                      one. Note that XDG_CONFIG_HOME is exported to the whole
+                      session, so the shells in its panes look for their own
+                      config there too.
       --open          open the session in a new terminal window and return
       --keep          with --open, do NOT clean up when the window's zellij exits
       --terminal CMD  terminal emulator for --open
@@ -116,6 +123,7 @@ while [ $# -gt 0 ]; do
     --no-build) do_build=0; shift ;;
     --no-grant) do_grant=0; shift ;;
     --fresh) fresh=1; shift ;;
+    --isolate-store) isolate_store=1; shift ;;
     --open) open_window=1; shift ;;
     --keep) keep=1; shift ;;
     --terminal) terminal=$2; open_window=1; shift 2 ;;
@@ -198,6 +206,14 @@ fi
 name=$(basename "$worktree")
 : "${session:=fujin-try-$name}"
 : "${config_dir:=$HOME/.config/zellij-fujin-$name}"
+# --isolate-store のときに XDG_CONFIG_HOME を向ける先。fujin の永続化ストアは
+# `$XDG_CONFIG_HOME/fujin` なので（src/persistence.rs の store_dir）、ここを分ければ
+# 常駐版・他 worktree と索引ごと分かれる。**config dir とは別に持つ**——config dir は
+# 起動のたびに作り直されるので、中に置くと「セッションを畳んで立て直しても班が残る」
+# という永続化そのものの検証ができなくなる。空から始めたいときは --fresh を添える。
+# 名前は導出だけで決める（オプションで上書きさせない）ので、--isolate-store を
+# 渡されなかった --clean からも同じ場所を組み立てられる
+store_home="$HOME/.config/fujin-try-$name"
 
 wasm_path="$worktree/target/wasm32-wasip1/release/fujin.wasm"
 layout_file="$config_dir/layouts/$layout_name.kdl"
@@ -316,6 +332,25 @@ assert_disposable_config_dir() {
   fi
 }
 
+# 使い捨てのストアだけを消す。**共有ストアの親を渡されたら止まる**——
+# `$XDG_CONFIG_HOME` や `~/.config` を消すと、fujin 以外の設定まで巻き添えになる
+# 「別の窓でこれを叩け」の案内に前置きする環境変数。**案内を実際の起動と揃える**——
+# ここで XDG_CONFIG_HOME を落とすと、コピペした人だけ共有ストアを掴む
+launch_env_hint() {
+  if [ "$isolate_store" -eq 1 ]; then
+    printf 'ZELLIJ_CONFIG_DIR=%s XDG_CONFIG_HOME=%s' "$config_dir" "$store_home"
+  else
+    printf 'ZELLIJ_CONFIG_DIR=%s' "$config_dir"
+  fi
+}
+
+assert_disposable_store_dir() {
+  case "$1" in
+    "$HOME/.config" | "$HOME/.config/fujin" | "${XDG_CONFIG_HOME:-}" | "$HOME" | /)
+      die "refusing to remove $1 -- that is a real config dir" ;;
+  esac
+}
+
 if [ "$clean_all" -eq 1 ]; then
   step "Clean all  fujin-try-*"
   # **自分のものだけを畳む。** 他のエージェントが検証中のセッションを巻き込むと、
@@ -372,6 +407,13 @@ if [ "$clean_all" -eq 1 ]; then
     assert_disposable_config_dir "$one"
     rm -rf "$one"
     ok "removed $one"
+    # 使い捨てストア（--isolate-store で作られる）も同じ規則で導出して畳む
+    one_store="$HOME/.config/fujin-try-${one#"$HOME/.config/zellij-fujin-"}"
+    assert_disposable_store_dir "$one_store"
+    if [ -d "$one_store" ]; then
+      rm -rf "$one_store"
+      ok "removed $one_store"
+    fi
   done
   printf '\n'
   exit 0
@@ -389,6 +431,7 @@ if [ "$clean" -eq 1 ]; then
   if [ "$dry_run" -eq 1 ]; then
     info "would kill and delete the session $session"
     info "would remove $config_dir"
+    if [ -d "$store_home" ]; then info "would remove $store_home"; fi
     exit 0
   fi
   kill_session
@@ -399,6 +442,14 @@ if [ "$clean" -eq 1 ]; then
     ok "removed $config_dir"
   else
     info "$config_dir does not exist"
+  fi
+  # **--isolate-store で起動したかに関わらず消す。** 窓の中から自動で呼ばれる --clean は
+  # 起動時のフラグを引き継がないので、旗を見て分岐すると必ず消し残る。導出した名前の
+  # ディレクトリは isolate した起動でしか作られないので、あれば消してよい
+  assert_disposable_store_dir "$store_home"
+  if [ -d "$store_home" ]; then
+    rm -rf "$store_home"
+    ok "removed $store_home"
   fi
   # 承認結果（cache dir 側）は残す。同じ worktree をまた試すときに効くため
   info "kept the permission grant for $wasm_path"
@@ -416,6 +467,7 @@ info "worktree    $worktree"
 info "wasm        $wasm_path"
 info "config dir  $config_dir"
 info "session     $session"
+if [ "$isolate_store" -eq 1 ]; then info "store       $store_home/fujin (isolated)"; fi
 
 # **生存確認は config dir を作り直す前に行う。** install_config は無条件に
 # rm -rf $config_dir をするので、動作中のセッションがあるとその足元を消したうえ、
@@ -453,6 +505,20 @@ if [ "$session_running" -eq 1 ] && [ "$fresh" -eq 1 ]; then
     ok "killed the previous session"
   fi
   session_running=0
+fi
+
+# **--fresh は使い捨てストアも空にする。** セッションを畳んで立て直しても
+# フォーメーションが残るのは永続化の狙いどおりだが、--fresh は「作り直す」と
+# 言っている操作なので、前回の班を持ち越さない側に倒す。**--isolate-store を
+# 付けていないときは触らない**——そこは共有ストアで、他の worktree のデータが居る
+if [ "$fresh" -eq 1 ] && [ "$isolate_store" -eq 1 ] && [ -d "$store_home" ]; then
+  if [ "$dry_run" -eq 1 ]; then
+    info "would empty the disposable store at $store_home (--fresh)"
+  else
+    assert_disposable_store_dir "$store_home"
+    rm -rf "$store_home"
+    ok "emptied the disposable store ($store_home)"
+  fi
 fi
 
 # ---------------------------------------------------------------- build
@@ -731,7 +797,7 @@ start_session() {
     if [ "$open_window" -eq 1 ]; then
       info "would open a new $(resolve_terminal || printf '<terminal>') window running: ${cmd[*]}"
     else
-      info "would run: ZELLIJ_CONFIG_DIR=$config_dir ${cmd[*]}"
+      info "would run: $(launch_env_hint) ${cmd[*]}"
     fi
     return 0
   fi
@@ -741,6 +807,13 @@ start_session() {
   # --clean が owner_id() を引き直すと別人になり、自動の後始末が拒否される
   env_prefix=(env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID
     ZELLIJ_CONFIG_DIR="$config_dir" FUJIN_TRY_OWNER="$(owner_id)")
+  if [ "$isolate_store" -eq 1 ]; then
+    # fujin が読むのは `$XDG_CONFIG_HOME/fujin`（src/persistence.rs の store_dir）。
+    # **向け先は先に作っておく**——存在しないディレクトリを指すと、fujin 以外の
+    # 道具がそこを掘りに行ったときの挙動まで巻き込むことになる
+    mkdir -p "$store_home"
+    env_prefix+=(XDG_CONFIG_HOME="$store_home")
+  fi
 
   # 別ウィンドウで開く。zellij の中からでも使えるので、ネストの回避策にもなる
   if [ "$open_window" -eq 1 ]; then
@@ -842,7 +915,7 @@ cleanup' sh "${cmd[@]}")
       info "$term wrote nothing (log: $log_file)"
     fi
     info "try another terminal with --terminal CMD, or open one yourself and run:"
-    printf '\n        ZELLIJ_CONFIG_DIR=%s %s\n\n' "$config_dir" "${cmd[*]}"
+    printf '\n        %s %s\n\n' "$(launch_env_hint)" "${cmd[*]}"
     info "clean up whatever is left with: $clean_cmd"
     exit 1
   fi
@@ -852,7 +925,7 @@ cleanup' sh "${cmd[@]}")
   # ウィンドウで叩いてもらう
   if [ -n "${ZELLIJ:-}" ] && [ "$nested" -eq 0 ]; then
     todo "you are inside a zellij session -- run this in another terminal window:"
-    printf '\n        ZELLIJ_CONFIG_DIR=%s %s\n\n' "$config_dir" "${cmd[*]}"
+    printf '\n        %s %s\n\n' "$(launch_env_hint)" "${cmd[*]}"
     info "or re-run with --open (new window) or --nested (here anyway)"
     return 0
   fi
