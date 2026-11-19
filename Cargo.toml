@@ -10,7 +10,7 @@ categories = ["wasm", "development-tools", "visualization"]
 
 [dependencies]
 unicode-width = "0.2.2"
-zellij-tile = "0.45.1"
+zellij-tile = "0.46.0"
 
 [dev-dependencies]
 # golden file（snapshot testing）。上流の zellij も同じ 1.48 系を5クレートで
